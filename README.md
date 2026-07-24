@@ -10,7 +10,7 @@ There are some caveats:
 - **Host localhost access**: `-H PORT` works with `claude-docked` (Docker) but not `claude-contained` (Apple Containers) for services bound to localhost. See [Accessing Host Services](#accessing-host-services). (Apple Containers seems to be gaining support soon.)
 - **`~/.claude.json` is relocated**: On first run, your `~/.claude.json` is moved to `~/.claude-contained/.claude.json` and replaced with a symlink. This allows containers to share the file. **If you delete `~/.claude-contained/`, you will lose your Claude credentials and some settings.** You'll have to log in again. This is a limitation on how files can be shared with the container. 
 - **Don't mix contained and uncontained at the same time**: Running `claude-contained` and regular `claude` simultaneously may cause issues, as both access the same config file but through different paths. Run one or the other, not both at once. This will be fixed in the future.
-- **Codex and PATH**: Codex runs commands via `bash -lc`, which sources `/etc/profile` and resets PATH to the Debian default. This means tools installed outside standard locations (e.g., via SDKMAN) won't be found unless symlinked into `/usr/local/bin/`. The image includes symlinks for `java`, `javac`, `jar`, `mvn`, and `jbang`. If you install additional tools in non-standard paths, add similar symlinks in the Dockerfile.
+- **Codex and PATH**: Codex runs commands via `bash -lc`, which sources `/etc/profile` and resets PATH to the Debian default. This means tools installed outside standard locations (e.g., via SDKMAN) won't be found unless symlinked into `/usr/local/bin/`. When the Java layer is included, the image has symlinks for `java`, `javac`, `jar`, `mvn`, and `jbang`. If you install additional tools in non-standard paths, add similar symlinks in the Dockerfile.
 
 ## Quick Start
 
@@ -19,6 +19,10 @@ There are some caveats:
 1. Build the container:
    ```bash
    container build --platform linux/arm64 -t claude-contained .
+   ```
+   Java/IntelliJ (JBR, HotswapAgent, jdtls, Maven, JBang) is included by default. If you don't need Java, skip it for a smaller, faster build:
+   ```bash
+   container build --platform linux/arm64 --build-arg INCLUDE_JAVA_LAYER=false -t claude-contained .
    ```
 
 2. Put `claude-contained` somewhere on your PATH, optionally aliasing to `claude`.
@@ -41,6 +45,7 @@ There are some caveats:
    ```bash
    docker build --platform linux/arm64 -t claude-contained .
    ```
+   Skip the Java/IntelliJ layer for a smaller, faster build with `--build-arg INCLUDE_JAVA_LAYER=false`.
 
 2. Put `claude-docked` somewhere on your PATH.
 
@@ -134,6 +139,17 @@ claude-docked --rebuild=full .
 `tools` rebuilds the AI CLI portion of the image and everything after it, which updates Claude Code, Codex, Gemini, Vibe, and Copilot without invalidating the entire build. If that targeted rebuild fails, the launcher automatically retries with a full rebuild.
 
 `full` forces a clean rebuild of the entire image and pulls the latest base image. Rebuild requires the launcher script to run from this repo checkout, or via a symlink into it, so it can find the local `Dockerfile`.
+
+### Optional Java Layer
+
+JBR, HotswapAgent, jdtls, Maven, and JBang are included by default (`INCLUDE_JAVA_LAYER=true`). To build a smaller image without them:
+
+```bash
+container build --build-arg INCLUDE_JAVA_LAYER=false -t claude-contained .   # Apple Containers
+docker build --build-arg INCLUDE_JAVA_LAYER=false -t claude-contained .      # Docker
+```
+
+Build args aren't remembered across rebuilds — pass `--build-arg INCLUDE_JAVA_LAYER=false` again on subsequent `--rebuild=full` runs (or any manual rebuild) if you want to keep Java excluded. Without the Java layer, the `~/.m2` Maven cache mount and the [devcontainer](#vs-code-devcontainer) (which targets Java/Spring/Vaadin development) are not useful.
 
 ## Node.js Projects (node_modules Overlay)
 

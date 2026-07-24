@@ -1,5 +1,10 @@
-# Claude Code + JetBrains Runtime (JBR) + HotswapAgent (always on) + Python
+# Claude Code + JetBrains Runtime (JBR) + HotswapAgent (optional) + Python
 FROM node:24-bookworm-slim
+
+# ---- Java layer toggle -------------------------------------------------------
+# Set to "false" (--build-arg INCLUDE_JAVA_LAYER=false) to skip JBR, HotswapAgent,
+# jdtls, Maven, and JBang for a smaller image when Java isn't needed.
+ARG INCLUDE_JAVA_LAYER=true
 
 # ---- JBR pins ---------------------------------------------------------------
 # Use the jbrsdk flavor (full JDK) so developer tools like javac/javap/jar are
@@ -45,8 +50,12 @@ RUN set -eux; \
       $CUSTOM_PACKAGES \
     && rm -rf /var/lib/apt/lists/*
 
-# ---- Install JetBrains Runtime ----------------------------------------------
+# ---- Install JetBrains Runtime -----------------------------------------------
 RUN set -eux; \
+    if [ "$INCLUDE_JAVA_LAYER" != "true" ]; then \
+      echo "Skipping JBR install (INCLUDE_JAVA_LAYER=$INCLUDE_JAVA_LAYER)"; \
+      exit 0; \
+    fi; \
     ARCH="$(dpkg --print-architecture)"; \
     case "$ARCH" in \
       arm64)  JBR_ARCH="aarch64" ;; \
@@ -65,15 +74,19 @@ RUN set -eux; \
 ENV JAVA_HOME=/opt/jbr
 ENV PATH="$JAVA_HOME/bin:$PATH"
 
-# ---- Install HotswapAgent ---------------------------------------------------
+# ---- Install HotswapAgent (Java layer only) ---------------------------------
 RUN set -eux; \
+    if [ "$INCLUDE_JAVA_LAYER" != "true" ]; then \
+      echo "Skipping HotswapAgent install (INCLUDE_JAVA_LAYER=$INCLUDE_JAVA_LAYER)"; \
+      exit 0; \
+    fi; \
     mkdir -p /opt/jbr/lib/hotswap; \
     curl -fL \
       "https://repo1.maven.org/maven2/org/hotswapagent/hotswap-agent/${HOTSWAP_AGENT_VERSION}/hotswap-agent-${HOTSWAP_AGENT_VERSION}.jar" \
       -o /opt/jbr/lib/hotswap/hotswap-agent.jar
 
-# ---- HotswapAgent global configuration --------------------------------------
-RUN cat <<'EOF' > /opt/jbr/lib/hotswap/hotswap-agent.properties
+# ---- HotswapAgent global configuration (Java layer only) --------------------
+RUN if [ "$INCLUDE_JAVA_LAYER" = "true" ]; then cat <<'EOF' > /opt/jbr/lib/hotswap/hotswap-agent.properties
 # Auto-swap classes without requiring debug mode
 autoHotswap=true
 
@@ -86,6 +99,7 @@ disabledPlugins=Hibernate,Logback,Log4j2,Weld,Deltaspike,WebObjects,WildFlyELRes
 # Vaadin specific: reduce browser refresh delay
 vaadin.liveReloadQuietTime=500
 EOF
+fi
 
 # HotSwap always on (JBR 17/21/25) - requires G1 or Serial GC
 # --add-opens flags enable deep reflection for HotswapAgent class redefinition
@@ -107,8 +121,12 @@ ENV JAVA_TOOL_OPTIONS="\
   -Dvaadin.productionMode=false \
   -Dspring.devtools.restart.enabled=false"
 
-# ---- Eclipse JDT Language Server (jdtls) ------------------------------------
+# ---- Eclipse JDT Language Server (jdtls, Java layer only) -------------------
 RUN set -eux; \
+    if [ "$INCLUDE_JAVA_LAYER" != "true" ]; then \
+      echo "Skipping jdtls install (INCLUDE_JAVA_LAYER=$INCLUDE_JAVA_LAYER)"; \
+      exit 0; \
+    fi; \
     mkdir -p /opt/jdtls; \
     curl -fL \
       "https://download.eclipse.org/jdtls/milestones/${JDTLS_VERSION}/jdt-language-server-${JDTLS_VERSION}-${JDTLS_TIMESTAMP}.tar.gz" \
@@ -197,9 +215,13 @@ RUN useradd -m -s /bin/bash dev \
   && mkdir -p /work \
   && chown -R dev:dev /work /home/dev /ms-playwright
 
-# ---- Install SDKMAN! with Maven + JBang (as dev user) ----------------------
+# ---- Install SDKMAN! with Maven + JBang (Java layer only, as dev user) -----
 USER dev
 RUN set -eux; \
+    if [ "$INCLUDE_JAVA_LAYER" != "true" ]; then \
+      echo "Skipping SDKMAN/Maven/JBang install (INCLUDE_JAVA_LAYER=$INCLUDE_JAVA_LAYER)"; \
+      exit 0; \
+    fi; \
     curl -s "https://get.sdkman.io?rcupdate=false" | bash; \
     echo 'source "/home/dev/.sdkman/bin/sdkman-init.sh"' >> /home/dev/.bashrc; \
     bash -c 'source "/home/dev/.sdkman/bin/sdkman-init.sh" && sdk install maven'; \
@@ -209,10 +231,14 @@ RUN set -eux; \
     echo "SDKMAN! setup complete - Maven and JBang installed"
 USER root
 
-# ---- Symlink key binaries to /usr/local/bin ---------------------------------
+# ---- Symlink key binaries to /usr/local/bin (Java layer only) ---------------
 # Codex runs `bash -lc` which sources /etc/profile, clobbering inherited PATH.
 # Symlinks ensure JBR/Maven/JBang binaries are found via the default Debian PATH.
 RUN set -eux; \
+    if [ "$INCLUDE_JAVA_LAYER" != "true" ]; then \
+      echo "Skipping JBR/Maven/JBang symlinks (INCLUDE_JAVA_LAYER=$INCLUDE_JAVA_LAYER)"; \
+      exit 0; \
+    fi; \
     for bin in /opt/jbr/bin/*; do \
       ln -sf "$bin" "/usr/local/bin/$(basename "$bin")"; \
     done; \
