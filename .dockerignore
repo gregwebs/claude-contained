@@ -6,3 +6,12 @@
 *.tmp
 *.swp
 *~
+
+# Launcher scripts and tests run on the host, never inside the image.
+# Keeping them out of the context also keeps every file Apple Containers
+# has to transfer under its 16k-per-file limit.
+claude-contained
+claude-docked
+tests
+devcontainer
+.claude
