@@ -126,13 +126,14 @@ jq -e '
 ' "$out" >/dev/null
 _check "unknown user keys are carried through" $?
 
-# 11. A broken settings file must not brick every run -- the container would be
-#    unusable and the escape hatch hard to discover.
+# 11. A broken settings file must fail closed instead of silently dropping a
+#    user's tighter persistent policy.
 echo 'this is not json {{{' > "${home}/.claude-contained/srt-settings.json"
+rm -f "$out"
 gen_settings GIT_PROTECT_DIRS="/p" >/dev/null 2>&1
 rc=$?
-[[ $rc -eq 0 ]] && jq -e '.network.allowedDomains | length > 0' "$out" >/dev/null
-_check "malformed user file falls back to defaults instead of failing" $?
+[[ $rc -ne 0 && ! -e "$out" ]]
+_check "malformed user file fails closed" $?
 rm -f "${home}/.claude-contained/srt-settings.json"
 
 echo "== ssh agent =="

@@ -86,7 +86,8 @@ if [ -f "$USER_SETTINGS" ] && jq -e . "$USER_SETTINGS" >/dev/null 2>&1; then
   user_json="$(cat "$USER_SETTINGS")"
 else
   if [ -f "$USER_SETTINGS" ]; then
-    echo "srt: ignoring malformed ${USER_SETTINGS}" >&2
+    echo "srt: malformed ${USER_SETTINGS}; refusing to generate sandbox policy" >&2
+    exit 1
   fi
   user_json='{}'
 fi
