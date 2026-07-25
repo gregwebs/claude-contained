@@ -71,6 +71,13 @@ _check "allowLocalBinding is on" $?
 jq -e '.network.allowedDomains | index("api.anthropic.com")' "$out" >/dev/null
 _check "default domain set includes the Anthropic API" $?
 
+# 5b. Regression pin: /login broke under the sandbox because the OAuth code
+#     exchange goes to platform.claude.com, not api.anthropic.com -- srt's proxy
+#     closed the connection, surfacing as "OAuth error: Socket is closed" rather
+#     than a clear network error. See image/srt-settings.sh for the citation.
+jq -e '.network.allowedDomains | index("platform.claude.com") and index("claude.ai")' "$out" >/dev/null
+_check "default domain set includes Claude Code's OAuth hosts" $?
+
 # 6. srt requires these arrays even when they are empty.
 jq -e '
   (.network.deniedDomains | type == "array")

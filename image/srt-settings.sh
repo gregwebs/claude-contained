@@ -16,10 +16,33 @@ USER_SETTINGS="${HOST_HOME:-$HOME}/.claude-contained/srt-settings.json"
 # Domains the AI CLIs need to function at all. A starting point, not an
 # authoritative list -- tune with `srt --debug` and extend via the user settings
 # file or --allow-host.
+#
+# Claude Code's OAuth login exchanges the pasted code with platform.claude.com,
+# not api.anthropic.com -- omitting it doesn't error cleanly, srt's proxy just
+# closes the connection, which Claude Code reports as "OAuth error: Socket is
+# closed." The other CLIs' auth/token endpoints are included for the same reason.
+# See https://code.claude.com/docs/en/network-config ("Network access requirements").
+#
+# Deliberately EXCLUDED, do not add back:
+#   - storage.googleapis.com: the docs list it (plugin metadata, artifact upload
+#     fallback), but it's the shared namespace for every GCS bucket on the
+#     internet. Allowing it lets anything in the sandbox exfiltrate to an
+#     attacker-owned bucket, which defeats the allowlist.
+#   - the two Datadog telemetry intake hosts: optional traffic, fails silently
+#     without them.
 DEFAULT_DOMAINS='[
+  "claude.ai",
+  "claude.com",
+  "platform.claude.com",
+  "downloads.claude.ai",
+  "mcp-proxy.anthropic.com",
+  "code.claude.com",
   "api.anthropic.com",
   "api.openai.com",
+  "auth.openai.com",
   "chatgpt.com",
+  "accounts.google.com",
+  "oauth2.googleapis.com",
   "generativelanguage.googleapis.com",
   "cloudcode-pa.googleapis.com",
   "api.githubcopilot.com",

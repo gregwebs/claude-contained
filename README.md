@@ -260,8 +260,8 @@ boundary before relying on it:
 
 ### Allowing hosts
 
-A default allowlist covers what the AI CLIs need to function (the provider APIs, npm, PyPI,
-GitHub). To extend it for a single run:
+A default allowlist covers what the AI CLIs need to function: the provider APIs, **`/login`
+OAuth for each bundled tool**, npm, PyPI, and GitHub. To extend it for a single run:
 
 ```bash
 claude-contained --allow-host example.com --allow-host '*.internal.dev' .
@@ -298,6 +298,10 @@ claude-contained --no-sandbox -s .     # unsandboxed debug shell
 `--no-sandbox` is independent of `-s/--shell`, so you can also get a *sandboxed* shell (`-s`
 alone) to test an allowlist interactively. Inside the container, `srt --debug` reports what is
 being blocked, and `cat /run/srt-settings.json` shows the effective policy.
+
+A refused connection doesn't fail cleanly — srt's proxy closes it, so a blocked host tends to
+surface as something like **"Socket is closed"** rather than a readable network error. If you
+see that, the fix is `--allow-host` or `--no-sandbox`, not a networking problem elsewhere.
 
 To run something under the sandbox in an already-running container, use the `srt-run` wrapper:
 
