@@ -15,6 +15,8 @@ Options:
   -H PORT[:HOSTPORT] Forward host port to container localhost (can be repeated)
   -p HOST:CONTAINER  Publish container port to host (can be repeated)
   --dns IP           Use IP as a DNS resolver (can be repeated)
+  --allow-host HOST  Allow sandbox egress to HOST (can be repeated)
+  --no-sandbox       Disable the srt sandbox (debugging escape hatch)
   -s, --shell        Start a bash shell instead of the AI tool (for debugging)
   -S, --ssh          Enable SSH agent forwarding (for git push)
   -w, --worktree     Auto-include git worktree's main repository (skip prompt)
@@ -39,6 +41,9 @@ Behavior:
   - SSH agent forwarding is disabled by default; use --ssh to enable (for git push).
   - --dns overrides the container's resolvers; set CLAUDE_DNS=1.1.1.1 (comma-
     separated for several) to apply it to every run without typing the flag.
+  - Egress is sandboxed with srt: only allowlisted hosts are reachable. Edit
+    ~/.claude-contained/srt-settings.json for a persistent policy, --allow-host for
+    one run, or --no-sandbox to turn it off while debugging.
   - Git worktrees are detected; main repository's .git directory is mounted for full git access.
   - Linked worktrees hidden from the container can be auto-locked while the container runs.
 
@@ -60,6 +65,8 @@ Examples:
   claude-docked -p 8080:8080 .       # Expose port 8080
   claude-docked -H 3845 .            # Forward host:3845 to container localhost:3845
   claude-docked --dns 1.1.1.1 .      # Override the container's DNS resolvers
+  claude-docked --allow-host example.com .   # Permit one extra egress host
+  claude-docked --no-sandbox -s .    # Debug shell with the sandbox off
   claude-docked --share-skills=/Users/me/Projects/skills .
   claude-docked -a                   # List and attach to running container
   claude-docked -a myproject         # Attach or create named container
@@ -99,7 +106,10 @@ get_tool_path() {
 # Build command array for attach mode (tool path + flags)
 # Sets global attach_cmd array
 build_attach_cmd() {
-  attach_cmd=("$(get_tool_path "$tool")")
+  # `container exec` bypasses the entrypoint, so re-apply the sandbox explicitly.
+  attach_cmd=()
+  [[ $srt_disable -eq 0 ]] && attach_cmd+=(srt-run)
+  attach_cmd+=("$(get_tool_path "$tool")")
   if [[ $yolo_mode -eq 1 ]]; then
     case "$tool" in
       claude) attach_cmd+=(--dangerously-skip-permissions) ;;
@@ -107,6 +117,14 @@ build_attach_cmd() {
       vibe) echo "Warning: vibe does not support yolo mode" >&2 ;;
     esac
   fi
+}
+
+# Build command array for attaching a debug shell (sandbox wrapper + bash)
+# Sets global attach_cmd array
+build_attach_shell_cmd() {
+  attach_cmd=()
+  [[ $srt_disable -eq 0 ]] && attach_cmd+=(srt-run)
+  attach_cmd+=(bash)
 }
 
 # Environment args for exec (PATH not set by entrypoint when using exec)
@@ -227,6 +245,8 @@ share_skills_dir=""
 port_maps=()
 host_forwards=()
 dns_servers=()
+srt_allow_hosts=()
+srt_disable=0
 while [[ "${1:-}" == -* ]]; do
   case "${1:-}" in
     -h|--help)
@@ -314,6 +334,19 @@ while [[ "${1:-}" == -* ]]; do
       dns_servers+=("${1#*=}")
       shift
       ;;
+    --allow-host)
+      shift
+      srt_allow_hosts+=("$1")
+      shift
+      ;;
+    --allow-host=*)
+      srt_allow_hosts+=("${1#*=}")
+      shift
+      ;;
+    --no-sandbox)
+      srt_disable=1
+      shift
+      ;;
     -a|--attach)
       attach_mode=1
       shift
@@ -394,7 +427,8 @@ if [[ $attach_mode -eq 1 ]]; then
 
     attach_name="${containers[$((choice-1))]}"
     if [[ $shell_mode -eq 1 ]]; then
-      exec docker exec -it -u dev $(exec_env_args) "$attach_name" bash
+      build_attach_shell_cmd
+      exec docker exec -it -u dev $(exec_env_args) "$attach_name" "${attach_cmd[@]}"
     else
       build_attach_cmd
       exec docker exec -it -u dev $(exec_env_args) "$attach_name" "${attach_cmd[@]}"
@@ -412,7 +446,8 @@ if [[ $attach_mode -eq 1 ]]; then
       # Fall through to create new container
     else
       if [[ $shell_mode -eq 1 ]]; then
-        exec docker exec -it -u dev $(exec_env_args) "$attach_name" bash
+        build_attach_shell_cmd
+        exec docker exec -it -u dev $(exec_env_args) "$attach_name" "${attach_cmd[@]}"
       else
         build_attach_cmd
         exec docker exec -it -u dev $(exec_env_args) "$attach_name" "${attach_cmd[@]}"
@@ -987,6 +1022,16 @@ fi
 for dns_ip in "${dns_servers[@]+"${dns_servers[@]}"}"; do
   container_argv+=( --dns "$dns_ip" )
 done
+
+# Sandbox (srt): the entrypoint wraps the tool unless disabled here. Extra egress
+# hosts are merged with ~/.claude-contained/srt-settings.json inside the container.
+if [[ $srt_disable -eq 1 ]]; then
+  container_argv+=( -e "SRT_DISABLE=1" )
+fi
+if [[ ${#srt_allow_hosts[@]} -gt 0 ]]; then
+  IFS=','; allow_hosts_str="${srt_allow_hosts[*]}"; unset IFS
+  container_argv+=( -e "SRT_ALLOW_HOSTS=${allow_hosts_str}" )
+fi
 
 # SSH agent forwarding (opt-in for security)
 if [[ $ssh_mode -eq 1 ]]; then

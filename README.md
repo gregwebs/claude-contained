@@ -70,6 +70,8 @@ claude-contained [options] [main_dir] [extra_dir ...] [-- <tool args...>]
 | `-H PORT[:HOSTPORT]` | Forward host port to container localhost (can be repeated) |
 | `-p HOST:CONTAINER` | Publish container port to host (can be repeated) |
 | `--dns IP` | Use `IP` as a DNS resolver (can be repeated). See [DNS](#dns) |
+| `--allow-host HOST` | Allow sandbox egress to `HOST` (can be repeated). See [Sandboxing](#sandboxing) |
+| `--no-sandbox` | Disable the srt sandbox for this run (debugging escape hatch) |
 | `-s`, `--shell` | Start a bash shell instead of the AI tool (for debugging) |
 | `-S`, `--ssh` | Enable SSH agent forwarding (for git push) |
 | `-w`, `--worktree` | Auto-include git worktree's main repository (skip prompt) |
@@ -230,6 +232,81 @@ too, though Docker usually resolves fine without them.
 If DNS still fails, check whether something local is holding port 53
 (`sudo lsof -nP -iUDP:53`) — a local resolver, VPN client, or iCloud Private Relay
 can break the vmnet resolver. See [apple/container#402](https://github.com/apple/container/issues/402).
+
+## Sandboxing
+
+The container runs the AI tool under
+[`@anthropic-ai/sandbox-runtime`](https://github.com/anthropic-experimental/sandbox-runtime)
+(srt), which enforces a **deny-by-default egress allowlist**. Only allowlisted hosts are
+reachable; everything else is refused. Enforcement is proxy-based — an HTTP proxy plus a SOCKS5
+proxy for other TCP — so it is not limited to programs that honour `HTTPS_PROXY`.
+
+srt's Linux dependencies (`bubblewrap`, `socat`, `ripgrep`) are already in the image, so there
+is nothing extra to install.
+
+### What this does and does not protect against
+
+The sandbox is applied by `image/entrypoint.sh`, which wraps the tool process. Understand the
+boundary before relying on it:
+
+- **`container exec` / `docker exec` bypass the entrypoint entirely.** Anything started that way
+  is unsandboxed unless routed through the `srt-run` wrapper (below). `-a/--attach` does this
+  for you.
+- **Inside a container, srt runs with `enableWeakerNestedSandbox`**, because bubblewrap cannot
+  create privileged namespaces there. Treat srt as a guardrail against a careless or wandering
+  agent — **not** as containment for actively hostile code. The Apple Container VM remains the
+  real boundary; srt is defense in depth inside it.
+- A host user invoking `container`/`docker` directly is outside this boundary by design.
+
+### Allowing hosts
+
+A default allowlist covers what the AI CLIs need to function (the provider APIs, npm, PyPI,
+GitHub). To extend it for a single run:
+
+```bash
+claude-contained --allow-host example.com --allow-host '*.internal.dev' .
+```
+
+For a persistent policy, create `~/.claude-contained/srt-settings.json`:
+
+```json
+{
+  "network": {
+    "allowedDomains": ["corp.example.com", "*.internal.dev"],
+    "deniedDomains": ["telemetry.example.com"]
+  }
+}
+```
+
+Domains from the defaults, this file, and `--allow-host` are unioned. Any other srt setting you
+put in this file (`tlsTerminate`, `allowUnixSockets`, …) is passed through untouched.
+
+The `filesystem` section is generated per run and will be overwritten — the mounted directories
+change every invocation, and srt matches paths literally on Linux (no globs), so they cannot be
+hardcoded. The merged result is written to `/run/srt-settings.json` inside the container,
+root-owned and read-only, so the sandboxed process cannot rewrite its own allowlist.
+
+### Debugging
+
+When something cannot reach the network, the first question is whether the sandbox is the cause:
+
+```bash
+claude-contained --no-sandbox .        # run with the sandbox off
+claude-contained --no-sandbox -s .     # unsandboxed debug shell
+```
+
+`--no-sandbox` is independent of `-s/--shell`, so you can also get a *sandboxed* shell (`-s`
+alone) to test an allowlist interactively. Inside the container, `srt --debug` reports what is
+being blocked, and `cat /run/srt-settings.json` shows the effective policy.
+
+To run something under the sandbox in an already-running container, use the `srt-run` wrapper:
+
+```bash
+container exec -it -u dev <container-name> srt-run claude
+```
+
+If policy generation fails, the entrypoint refuses to start rather than silently running
+unsandboxed; pass `--no-sandbox` to bypass deliberately.
 
 ## Accessing Host Services
 
