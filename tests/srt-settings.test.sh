@@ -37,7 +37,7 @@ out="${work}/settings.json"
 mkdir -p "${home}/.claude-contained"
 
 gen_settings() { # gen_settings [env assignments...]
-  env HOST_HOME="$home" SRT_SETTINGS_PATH="$out" "$@" bash "$gen"
+  env -u SSH_AUTH_SOCK HOST_HOME="$home" SRT_SETTINGS_PATH="$out" "$@" bash "$gen"
 }
 
 echo "== policy generation =="
