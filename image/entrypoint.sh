@@ -110,6 +110,25 @@ if [ -z "${DISPLAY:-}" ]; then
   Xvfb :99 -screen 0 1280x1024x24 -nolisten tcp &
 fi
 
+# Wrap the command in the sandbox (srt), unless disabled with --no-sandbox.
+# Generating the policy here, as root, keeps /run/srt-settings.json out of the
+# sandboxed process's reach -- an allowlist the agent can rewrite is not a control.
+#
+# `set --` prepends to "$@" so srt ends up *inside* the gosu below and runs as the
+# dev user. It must not run as root.
+#
+# Note this is the only place the sandbox is applied: `container exec` bypasses the
+# entrypoint entirely, so attach paths route through srt-run instead.
+if [ "${SRT_DISABLE:-}" != "1" ]; then
+  if /usr/local/bin/srt-settings.sh; then
+    set -- srt --settings "${SRT_SETTINGS_PATH:-/run/srt-settings.json}" "$@"
+  else
+    echo "entrypoint: failed to generate sandbox policy; refusing to run unsandboxed." >&2
+    echo "            re-run with --no-sandbox to bypass deliberately." >&2
+    exit 1
+  fi
+fi
+
 # Drop to dev user (or stay root if STAY_ROOT=1)
 if [ "$(id -u)" = "0" ] && [ "${STAY_ROOT:-}" != "1" ]; then
   USER_HOME="${HOME:-/home/dev}"

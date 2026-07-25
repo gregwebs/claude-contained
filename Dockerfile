@@ -64,6 +64,7 @@ ARG AI_TOOLS_CACHE_BUST=stable
 RUN set -eux; \
     echo "Refreshing AI tool layers: ${AI_TOOLS_CACHE_BUST}" >/dev/null; \
     npm install -g \
+    @anthropic-ai/sandbox-runtime \
     @github/copilot \
     @google/gemini-cli \
     @openai/codex \
@@ -231,6 +232,14 @@ FROM java-${INCLUDE_JAVA_LAYER} AS final
 # Remove this once the upstream renderer regression is fixed.
 RUN mkdir -p /etc/claude-code \
     && printf '%s\n' '{ "tui": "default" }' > /etc/claude-code/managed-settings.json
+
+# ---- Sandbox (srt) helpers --------------------------------------------------
+# srt's Linux dependencies -- bubblewrap, socat, ripgrep -- are already installed
+# with the base packages above. srt-settings.sh generates the per-run policy;
+# srt-run wraps a command for `container exec`, which bypasses the entrypoint.
+COPY image/srt-settings.sh /usr/local/bin/srt-settings.sh
+COPY image/srt-run.sh /usr/local/bin/srt-run
+RUN chmod +x /usr/local/bin/srt-settings.sh /usr/local/bin/srt-run
 
 # ---- Entrypoint (host.local setup + path parity) ---------------------------
 COPY image/entrypoint.sh /usr/local/bin/entrypoint.sh
