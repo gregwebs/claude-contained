@@ -69,6 +69,7 @@ claude-contained [options] [main_dir] [extra_dir ...] [-- <tool args...>]
 | `-R`, `--rebuild[=MODE]` | Rebuild image before run: `tools` (default) or `full` |
 | `-H PORT[:HOSTPORT]` | Forward host port to container localhost (can be repeated) |
 | `-p HOST:CONTAINER` | Publish container port to host (can be repeated) |
+| `--dns IP` | Use `IP` as a DNS resolver (can be repeated). See [DNS](#dns) |
 | `-s`, `--shell` | Start a bash shell instead of the AI tool (for debugging) |
 | `-S`, `--ssh` | Enable SSH agent forwarding (for git push) |
 | `-w`, `--worktree` | Auto-include git worktree's main repository (skip prompt) |
@@ -191,6 +192,44 @@ You should manually add `.claude-contained/` to your project's `.gitignore` to e
 
 - **Linux hosts**: No overlay needed — host and container share the same OS, so native binaries are already compatible.
 - **No `package.json`**: No prompt, no overlay.
+
+## DNS
+
+Apple Containers points both the build and the container at the vmnet gateway
+(`192.168.64.1`) for DNS. That resolver is frequently unreachable — the symptom is
+anything network-dependent failing to resolve, e.g. `apt-get update` reporting
+`Temporary failure resolving 'deb.debian.org'`, while the host's own DNS is fine.
+
+Note this is *not* network isolation. `container network inspect default` shows
+`"mode": "nat"`, so outbound routing works; only name resolution is broken.
+
+**At build time**, recreate the builder with a working resolver:
+
+```bash
+container builder stop && container builder delete
+container builder start --dns 1.1.1.1
+```
+
+The builder keeps that setting, so subsequent builds work without further flags.
+
+**At run time**, use `--dns`:
+
+```bash
+claude-contained --dns 1.1.1.1 .
+```
+
+To avoid typing it every run, set `CLAUDE_DNS` (comma-separated for several):
+
+```bash
+export CLAUDE_DNS=1.1.1.1,8.8.8.8
+```
+
+An explicit `--dns` flag overrides `CLAUDE_DNS`. Both work with `claude-docked`
+too, though Docker usually resolves fine without them.
+
+If DNS still fails, check whether something local is holding port 53
+(`sudo lsof -nP -iUDP:53`) — a local resolver, VPN client, or iCloud Private Relay
+can break the vmnet resolver. See [apple/container#402](https://github.com/apple/container/issues/402).
 
 ## Accessing Host Services
 

@@ -14,6 +14,7 @@ Options:
   -R, --rebuild[=MODE]  Rebuild image and exit: tools (default) or full
   -H PORT[:HOSTPORT] Forward host port to container localhost (can be repeated)
   -p HOST:CONTAINER  Publish container port to host (can be repeated)
+  --dns IP           Use IP as a DNS resolver (can be repeated)
   -s, --shell        Start a bash shell instead of the AI tool (for debugging)
   -S, --ssh          Enable SSH agent forwarding (for git push)
   -w, --worktree     Auto-include git worktree's main repository (skip prompt)
@@ -36,6 +37,8 @@ Behavior:
     For Codex, ~/.codex/skills/.system is mounted back over DIR/.system
     so built-in skills remain visible while new installs write to DIR.
   - SSH agent forwarding is disabled by default; use --ssh to enable (for git push).
+  - --dns overrides the container's resolvers; set CLAUDE_DNS=1.1.1.1 (comma-
+    separated for several) to apply it to every run without typing the flag.
   - Git worktrees are detected; main repository's .git directory is mounted for full git access.
   - Linked worktrees hidden from the container can be auto-locked while the container runs.
 
@@ -56,6 +59,7 @@ Examples:
   claude-docked --rebuild=full      # Full fresh rebuild, then exit
   claude-docked -p 8080:8080 .       # Expose port 8080
   claude-docked -H 3845 .            # Forward host:3845 to container localhost:3845
+  claude-docked --dns 1.1.1.1 .      # Override the container's DNS resolvers
   claude-docked --share-skills=/Users/me/Projects/skills .
   claude-docked -a                   # List and attach to running container
   claude-docked -a myproject         # Attach or create named container
@@ -222,6 +226,7 @@ ro_default=0
 share_skills_dir=""
 port_maps=()
 host_forwards=()
+dns_servers=()
 while [[ "${1:-}" == -* ]]; do
   case "${1:-}" in
     -h|--help)
@@ -298,6 +303,15 @@ while [[ "${1:-}" == -* ]]; do
     -H)
       shift
       host_forwards+=("$1")
+      shift
+      ;;
+    --dns)
+      shift
+      dns_servers+=("$1")
+      shift
+      ;;
+    --dns=*)
+      dns_servers+=("${1#*=}")
       shift
       ;;
     -a|--attach)
@@ -865,6 +879,12 @@ mkdir -p "${HOST_CLAUDE_DIR}" "${HOST_CODEX_DIR}" "${HOST_COPILOT_DIR}" "${HOST_
 
 # Build container args
 CLAUDE_MEMORY="${CLAUDE_MEMORY:-8g}"
+# CLAUDE_DNS supplies a default (comma-separated) so --dns does not have to be
+# typed on every run. Kept in parity with claude-contained, where the vmnet
+# gateway resolver is frequently unreachable.
+if [[ ${#dns_servers[@]} -eq 0 && -n "${CLAUDE_DNS:-}" ]]; then
+  IFS=',' read -ra dns_servers <<< "${CLAUDE_DNS}"
+fi
 if [[ -n "$custom_container_name" ]]; then
   container_name="$custom_container_name"
   echo "Creating named container: ${container_name#aic-}"
@@ -962,6 +982,11 @@ if [[ ${#host_forwards[@]} -gt 0 ]]; then
   IFS=','; forwards_str="${host_forwards[*]}"; unset IFS
   container_argv+=( -e "HOST_FORWARD_PORTS=${forwards_str}" )
 fi
+
+# Override the container's DNS resolvers (see CLAUDE_DNS above)
+for dns_ip in "${dns_servers[@]+"${dns_servers[@]}"}"; do
+  container_argv+=( --dns "$dns_ip" )
+done
 
 # SSH agent forwarding (opt-in for security)
 if [[ $ssh_mode -eq 1 ]]; then
