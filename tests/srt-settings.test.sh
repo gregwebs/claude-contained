@@ -71,20 +71,33 @@ _check "allowLocalBinding is on" $?
 jq -e '.network.allowedDomains | index("api.anthropic.com")' "$out" >/dev/null
 _check "default domain set includes the Anthropic API" $?
 
+# 6. srt requires these arrays even when they are empty.
+jq -e '
+  (.network.deniedDomains | type == "array")
+  and (.filesystem.denyRead | type == "array")
+  and (.filesystem.denyWrite | type == "array")
+' "$out" >/dev/null
+_check "required deny lists are present" $?
+
 echo "== merge precedence =="
 
-# 6. --allow-host additions are unioned in.
+# 7. --allow-host additions are unioned in.
 gen_settings GIT_PROTECT_DIRS="/p" SRT_ALLOW_HOSTS="one.example,two.example" >/dev/null 2>&1
 jq -e '.network.allowedDomains | index("one.example") and index("two.example")' "$out" >/dev/null
 _check "SRT_ALLOW_HOSTS entries are added" $?
 
-# 7. The user file supplies persistent policy and must survive alongside both the
+# 8. The user file supplies persistent policy and must survive alongside both the
 #    defaults and the per-run flag additions.
 cat > "${home}/.claude-contained/srt-settings.json" <<'EOF'
 {
   "network": {
     "allowedDomains": ["corp.example"],
+    "deniedDomains": ["blocked.example"],
     "tlsTerminate": { "excludeDomains": ["pinned.example"] }
+  },
+  "filesystem": {
+    "denyRead": ["/secret/read"],
+    "denyWrite": ["/secret/write"]
   },
   "ignoreViolations": { "some-rule": ["path"] }
 }
@@ -97,7 +110,15 @@ jq -e '
 ' "$out" >/dev/null
 _check "user file, flag, and defaults all merge" $?
 
-# 8. Keys this script knows nothing about must survive, so the user can set srt
+# 9. User deny lists must survive alongside generated allow lists.
+jq -e '
+  (.network.deniedDomains | index("blocked.example"))
+  and (.filesystem.denyRead | index("/secret/read"))
+  and (.filesystem.denyWrite | index("/secret/write"))
+' "$out" >/dev/null
+_check "user deny lists are carried through" $?
+
+# 10. Keys this script knows nothing about must survive, so the user can set srt
 #    options without the generator needing to learn each one.
 jq -e '
   (.network.tlsTerminate.excludeDomains | index("pinned.example"))
@@ -105,7 +126,7 @@ jq -e '
 ' "$out" >/dev/null
 _check "unknown user keys are carried through" $?
 
-# 9. A broken settings file must not brick every run -- the container would be
+# 11. A broken settings file must not brick every run -- the container would be
 #    unusable and the escape hatch hard to discover.
 echo 'this is not json {{{' > "${home}/.claude-contained/srt-settings.json"
 gen_settings GIT_PROTECT_DIRS="/p" >/dev/null 2>&1
@@ -116,7 +137,7 @@ rm -f "${home}/.claude-contained/srt-settings.json"
 
 echo "== ssh agent =="
 
-# 10. Only opened when the launcher actually forwarded an agent socket.
+# 12. Only opened when the launcher actually forwarded an agent socket.
 gen_settings GIT_PROTECT_DIRS="/p" SSH_AUTH_SOCK=/ssh-agent >/dev/null 2>&1
 jq -e '.network.allowUnixSockets | index("/ssh-agent")' "$out" >/dev/null
 _check "ssh agent socket allowed when SSH_AUTH_SOCK is set" $?
@@ -127,7 +148,7 @@ _check "no unix sockets allowed without SSH_AUTH_SOCK" $?
 
 echo "== tamper resistance =="
 
-# 11. The sandboxed process must be able to read its policy and unable to edit it.
+# 13. The sandboxed process must be able to read its policy and unable to edit it.
 [[ "$(stat -c '%a' "$out" 2>/dev/null || stat -f '%Lp' "$out")" == "444" ]]
 _check "generated policy is mode 444" $?
 

@@ -110,17 +110,26 @@ jq -n \
   --argjson user "$user_json" \
   --argjson socks "$sock_json" '
   ($user.network // {}) as $un
+  | ($user.filesystem // {}) as $uf
   | $user
   + {
       network: (
         $un
         + {
             allowedDomains: (($un.allowedDomains // []) + $defaults + $extra | unique),
+            deniedDomains: ($un.deniedDomains // []),
             allowLocalBinding: ($un.allowLocalBinding // true),
             allowUnixSockets: (($un.allowUnixSockets // []) + $socks | unique)
           }
       ),
-      filesystem: (($user.filesystem // {}) + { allowWrite: $writes }),
+      filesystem: (
+        $uf
+        + {
+            denyRead: ($uf.denyRead // []),
+            allowWrite: $writes,
+            denyWrite: ($uf.denyWrite // [])
+          }
+      ),
       enableWeakerNestedSandbox: true
     }
   ' > "${OUT}.tmp"
