@@ -70,6 +70,8 @@ claude-contained [options] [main_dir] [extra_dir ...] [-- <tool args...>]
 | `-H PORT[:HOSTPORT]` | Forward host port to container localhost (can be repeated) |
 | `-p HOST:CONTAINER` | Publish container port to host (can be repeated) |
 | `--dns IP` | Use `IP` as a DNS resolver (can be repeated). See [DNS](#dns) |
+| `--allow-host HOST` | Allow egress to `HOST` (can be repeated). See [Egress Allowlist](#egress-allowlist) |
+| `--no-default-hosts` | Skip the selected tool's minimal built-in allowlist entries |
 | `-s`, `--shell` | Start a bash shell instead of the AI tool (for debugging) |
 | `-S`, `--ssh` | Enable SSH agent forwarding (for git push) |
 | `-w`, `--worktree` | Auto-include git worktree's main repository (skip prompt) |
@@ -230,6 +232,92 @@ too, though Docker usually resolves fine without them.
 If DNS still fails, check whether something local is holding port 53
 (`sudo lsof -nP -iUDP:53`) — a local resolver, VPN client, or iCloud Private Relay
 can break the vmnet resolver. See [apple/container#402](https://github.com/apple/container/issues/402).
+
+## Egress Allowlist
+
+Restrict the contained tool process to a strict allowlist of hosts it may connect
+to. This is opt-in and, when active, is a **hard security boundary** enforced by
+an in-container firewall — not just a setting the tool itself could ignore or a
+prompt-injected process could talk its way around.
+
+```bash
+claude-contained --allow-host github.com .
+claude-contained --allow-host github.com --allow-host host.local:3845 .
+CLAUDE_ALLOW_HOSTS=github.com,api.example.com claude-contained .
+```
+
+### Entry syntax
+
+| Entry | Matches |
+|-------|---------|
+| `example.com` | `example.com` and all its subdomains, on every port |
+| `host.local[:PORT]` | The host machine (see [Accessing Host Services](#accessing-host-services)); every port, or only `PORT` if given |
+| `IP-or-CIDR[:PORT]` | That literal address/range; every port, or only `PORT` if given |
+
+`--allow-host` can be repeated. `CLAUDE_ALLOW_HOSTS` (comma-separated) supplies a
+default when no `--allow-host` flag is given at all — an explicit flag replaces
+it rather than merging with it, the same precedence `--dns`/`CLAUDE_DNS` uses.
+
+**host.local is blocked by default even with the allowlist active.** Add it
+explicitly (`--allow-host host.local:3845`) if a tool needs a host service, e.g.
+Figma's MCP — see [Configuring Figma Desktop MCP](#configuring-figma-desktop-mcp).
+
+**Subdomains are included automatically** — `github.com` also allows
+`api.github.com`. Avoid allowlisting multi-tenant apex domains you don't fully
+trust the whole namespace of (e.g. `github.io`, `amazonaws.com`); anyone's
+subdomain of one of those would also become reachable.
+
+### The tool's own base list
+
+The selected tool's minimal own endpoints (its API and auth hosts — never
+telemetry or crash-reporting) are allowed automatically so it keeps working:
+
+| Tool | Base allowlist |
+|------|-----------------|
+| `claude` | `api.anthropic.com`, `console.anthropic.com` |
+| `codex` | `api.openai.com`, `auth.openai.com`, `chatgpt.com` |
+| `copilot` | `api.githubcopilot.com`, `github.com`, `api.github.com` |
+| `gemini` | `generativelanguage.googleapis.com`, `oauth2.googleapis.com`, `accounts.google.com` |
+| `vibe` | `api.mistral.ai` |
+
+This list is best-effort — vendors can add or change endpoints without notice.
+Pass `--no-default-hosts` to disable it and specify everything yourself.
+
+### Requiring an allowlist
+
+Set `CLAUDE_REQUIRE_ALLOWLIST=1` to make the launcher refuse to start at all
+when no allowlist ends up configured (base list included), so a session never
+runs with open egress by accident:
+
+```bash
+export CLAUDE_REQUIRE_ALLOWLIST=1
+claude-contained --no-default-hosts .   # refused: nothing to allow
+claude-contained .                      # fine: the tool's base list applies
+```
+
+### How it's enforced
+
+A DNS-snooping dnsmasq resolves only allowlisted names (anything else gets
+NXDOMAIN) and feeds their IPs live into an nftables set, so the allowlist tracks
+CDN IP rotation automatically. Outbound HTTPS/HTTP (443/80) additionally passes
+through a root-owned passthrough proxy that reads the TLS SNI or HTTP Host header
+and dials out *by that name* — never by the connection's original destination —
+so a non-allowlisted name can't sneak through by sharing a CDN IP with an
+allowlisted one. No TLS interception happens; certificate validation still occurs
+end-to-end between the real client and server. `host.local` and literal IP/CIDR
+entries bypass the proxy and connect directly. QUIC (UDP 443) is blocked for the
+tool process so it can't route around the SNI check; IPv6 egress for the tool
+process is blocked outright (entries must be IPv4). If the firewall fails to set
+up for any reason, the container refuses to start rather than run with the
+allowlist silently unenforced.
+
+Root inside the container (the entrypoint's own setup, dnsmasq, the proxy, and
+the existing `-H` host-forwarding) is never subject to the allowlist — it's the
+trusted plane that enforces the boundary, not something the boundary applies to.
+
+**On `claude-docked` (Docker):** the container shares the host's kernel, unlike
+Apple Containers' per-container VM, so this boundary is weaker there — a
+kernel-level container escape could still bypass it.
 
 ## Accessing Host Services
 

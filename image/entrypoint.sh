@@ -32,6 +32,23 @@ if [ -n "${HOST_FORWARD_PORTS:-}" ]; then
   done
 fi
 
+# Egress allowlist firewall (opt-in, set by --allow-host / CLAUDE_ALLOW_HOSTS).
+# Must run while still root: it is the enforcement plane and has to be in
+# place before the `dev` user (the filtered plane) ever gets to run anything.
+if [ -n "${CONTAINED_EGRESS_ALLOW:-}" ]; then
+  if [ "${STAY_ROOT:-}" = "1" ]; then
+    echo "error: CONTAINED_EGRESS_ALLOW cannot be combined with STAY_ROOT=1" >&2
+    echo "       (root is the unfiltered enforcement plane; running the tool" >&2
+    echo "       as root here would defeat the allowlist entirely)." >&2
+    exit 1
+  fi
+  if ! /usr/local/bin/egress-firewall.sh "${HOST_IP:-}"; then
+    echo "error: failed to set up the egress allowlist firewall; refusing to start" >&2
+    echo "       (fails closed: never running with a requested allowlist unenforced)." >&2
+    exit 1
+  fi
+fi
+
 # Path parity setup: match host HOME and UID/GID
 if [ -n "${HOST_HOME:-}" ]; then
   mkdir -p "${HOST_HOME}"

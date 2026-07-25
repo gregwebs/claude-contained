@@ -18,7 +18,7 @@ RUN set -eux; \
       git openssh-client ca-certificates ripgrep jq \
       curl bash xz-utils unzip tzdata \
       python3 python3-pip python3-venv \
-      iproute2 gosu socat \
+      iproute2 gosu socat nftables dnsmasq \
       libasound2 libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 \
       libcups2 libdbus-1-3 libdrm2 libgbm1 libgtk-3-0 \
       libnspr4 libnss3 libpango-1.0-0 libxcomposite1 libxdamage1 \
@@ -231,6 +231,11 @@ FROM java-${INCLUDE_JAVA_LAYER} AS final
 # Remove this once the upstream renderer regression is fixed.
 RUN mkdir -p /etc/claude-code \
     && printf '%s\n' '{ "tui": "default" }' > /etc/claude-code/managed-settings.json
+
+# ---- Egress allowlist firewall (opt-in; see --allow-host) -------------------
+COPY image/egress-firewall.sh /usr/local/bin/egress-firewall.sh
+COPY image/sni-proxy.py /usr/local/bin/sni-proxy.py
+RUN chmod +x /usr/local/bin/egress-firewall.sh
 
 # ---- Entrypoint (host.local setup + path parity) ---------------------------
 COPY image/entrypoint.sh /usr/local/bin/entrypoint.sh

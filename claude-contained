@@ -15,6 +15,8 @@ Options:
   -H PORT[:HOSTPORT] Forward host port to container localhost (can be repeated)
   -p HOST:CONTAINER  Publish container port to host (can be repeated)
   --dns IP           Use IP as a DNS resolver (can be repeated)
+  --allow-host HOST  Allow egress to HOST (can be repeated); see Egress Allowlist
+  --no-default-hosts Skip the selected tool's minimal built-in allowlist entries
   -s, --shell        Start a bash shell instead of the AI tool (for debugging)
   -S, --ssh          Enable SSH agent forwarding (for git push)
   -w, --worktree     Auto-include git worktree's main repository (skip prompt)
@@ -42,6 +44,18 @@ Behavior:
     separated for several) to apply it to every run without typing the flag.
   - Git worktrees are detected; main repository's .git directory is mounted for full git access.
   - Linked worktrees hidden from the container can be auto-locked while the container runs.
+  - Egress allowlist (opt-in): --allow-host HOST (repeatable), or CLAUDE_ALLOW_HOSTS
+    (comma-separated) as a default when no --allow-host flag is given, restricts the
+    container to a strict hostname allowlist -- a hard boundary enforced by an
+    in-container firewall, not just the tool's own settings. A DNS name matches
+    itself and all subdomains and is reachable on every port; host.local and literal
+    IP/CIDR entries take an optional :PORT and are otherwise all-ports too. host.local
+    is NOT reachable by default even with the allowlist active -- add it explicitly
+    (e.g. --allow-host host.local:3845) if a tool needs it (e.g. Figma's MCP). The
+    selected tool's minimal own endpoints (API + auth, not telemetry) are allowed
+    automatically; pass --no-default-hosts to disable that. Set
+    CLAUDE_REQUIRE_ALLOWLIST=1 to make the launcher refuse to start with no
+    allowlist configured at all, so egress is never accidentally left open.
 
 Examples:
   claude-contained                     # Run claude in current directory
@@ -61,6 +75,8 @@ Examples:
   claude-contained -p 8080:8080 .      # Expose port 8080
   claude-contained -H 3845 .           # Forward host:3845 to container localhost:3845
   claude-contained --dns 1.1.1.1 .     # Fix DNS when the vmnet resolver fails
+  claude-contained --allow-host github.com . # Strict egress allowlist (+ tool's own base list)
+  claude-contained --allow-host host.local:3845 . # Also allow a specific host.local port
   claude-contained --share-skills=/Users/me/Projects/skills .
   claude-contained -a                  # List and attach to running container
   claude-contained -a myproject        # Attach or create named container
@@ -105,6 +121,51 @@ build_attach_cmd() {
       vibe) echo "Warning: vibe does not support yolo mode" >&2 ;;
     esac
   fi
+}
+
+# Minimal set of hostnames a tool needs to function at all (API + auth only,
+# never telemetry/crash-reporting) -- auto-allowed unless --no-default-hosts
+# is given. Best-effort: vendors can add endpoints without notice; extend with
+# --allow-host / CLAUDE_ALLOW_HOSTS as needed.
+default_allow_hosts_for_tool() {
+  case "$1" in
+    claude)  echo "api.anthropic.com,console.anthropic.com" ;;
+    codex)   echo "api.openai.com,auth.openai.com,chatgpt.com" ;;
+    copilot) echo "api.githubcopilot.com,github.com,api.github.com" ;;
+    gemini)  echo "generativelanguage.googleapis.com,oauth2.googleapis.com,accounts.google.com" ;;
+    vibe)    echo "api.mistral.ai" ;;
+    *)       echo "" ;;
+  esac
+}
+
+# Merge (in order, de-duplicated): the tool's default base list (unless
+# --no-default-hosts) + explicit --allow-host entries, or CLAUDE_ALLOW_HOSTS
+# as a default only when no --allow-host flag was given at all (same
+# flag-wins-over-env precedence as --dns/CLAUDE_DNS). Sets merged_allow_hosts.
+merge_allow_hosts() {
+  local -a explicit=()
+  local -a base=()
+  local h seen=","
+
+  if [[ ${#allow_hosts[@]} -gt 0 ]]; then
+    explicit=("${allow_hosts[@]}")
+  elif [[ -n "${CLAUDE_ALLOW_HOSTS:-}" ]]; then
+    IFS=',' read -ra explicit <<< "${CLAUDE_ALLOW_HOSTS}"
+  fi
+
+  if [[ ${no_default_hosts:-0} -eq 0 ]]; then
+    IFS=',' read -ra base <<< "$(default_allow_hosts_for_tool "$tool")"
+  fi
+
+  merged_allow_hosts=()
+  for h in "${base[@]+"${base[@]}"}" "${explicit[@]+"${explicit[@]}"}"; do
+    [[ -z "$h" ]] && continue
+    case "$seen" in
+      *",$h,"*) continue ;;
+    esac
+    merged_allow_hosts+=("$h")
+    seen="${seen}${h},"
+  done
 }
 
 # Environment args for exec (PATH not set by entrypoint when using exec)
@@ -221,10 +282,12 @@ custom_container_name=""
 rebuild_mode="none"
 tool="claude"
 ro_default=0
+no_default_hosts=0
 share_skills_dir=""
 port_maps=()
 host_forwards=()
 dns_servers=()
+allow_hosts=()
 while [[ "${1:-}" == -* ]]; do
   case "${1:-}" in
     -h|--help)
@@ -312,6 +375,19 @@ while [[ "${1:-}" == -* ]]; do
       dns_servers+=("${1#*=}")
       shift
       ;;
+    --allow-host)
+      shift
+      allow_hosts+=("$1")
+      shift
+      ;;
+    --allow-host=*)
+      allow_hosts+=("${1#*=}")
+      shift
+      ;;
+    --no-default-hosts)
+      no_default_hosts=1
+      shift
+      ;;
     -a|--attach)
       attach_mode=1
       shift
@@ -333,6 +409,13 @@ if [[ -n "$share_skills_dir" ]]; then
     exit 2
   fi
   share_skills_dir="$(resolve_path "$share_skills_dir")"
+fi
+
+merge_allow_hosts
+if [[ ${#merged_allow_hosts[@]} -eq 0 && "${CLAUDE_REQUIRE_ALLOWLIST:-}" == "1" ]]; then
+  echo "error: CLAUDE_REQUIRE_ALLOWLIST=1 requires an egress allowlist, but none was" >&2
+  echo "       configured (--allow-host / CLAUDE_ALLOW_HOSTS produced nothing to allow)." >&2
+  exit 2
 fi
 
 # Ensure container system is running (skipped when sourced for tests)
@@ -981,6 +1064,19 @@ fi
 for dns_ip in "${dns_servers[@]+"${dns_servers[@]}"}"; do
   container_argv+=( --dns "$dns_ip" )
 done
+
+# Egress allowlist firewall (see merge_allow_hosts above). NET_ADMIN/NET_RAW
+# are needed by entrypoint.sh's root-phase setup (nftables + dnsmasq); dev
+# never receives them (only root, pre-privilege-drop, uses them).
+if [[ ${#merged_allow_hosts[@]} -gt 0 ]]; then
+  allow_hosts_str="$(IFS=,; echo "${merged_allow_hosts[*]}")"
+  container_argv+=(
+    -e "CONTAINED_EGRESS_ALLOW=${allow_hosts_str}"
+    --cap-add NET_ADMIN
+    --cap-add NET_RAW
+  )
+  echo "Egress allowlist active: ${merged_allow_hosts[*]}" >&2
+fi
 
 # SSH agent forwarding (opt-in for security)
 if [[ $ssh_mode -eq 1 ]]; then
