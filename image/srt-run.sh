@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 # Run a command under the sandbox policy generated for this container.
 #
 # `container exec` / `docker exec` bypass the entrypoint, so anything started that
