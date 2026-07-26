@@ -177,7 +177,7 @@ Attach behavior is intentionally strict:
 - Bare `--zellij --attach` attaches directly if exactly one Zellij session is live, otherwise it prompts.
 - `--zellij --attach --shell` is invalid; attach reconnects to the existing Zellij workspace as-is.
 
-The Zellij session store is `~/.claude-contained/zellij/`. Zellij cache and data persist there, but runtime sockets are pinned to `/tmp/claude-contained-zellij-runtime/` inside the container so stale host sockets are not reused across container lifetimes.
+The Zellij session store is `~/.claude-contained/zellij/`. Zellij cache and data persist there, but runtime sockets are pinned to `/tmp/claude-contained-zellij-runtime/` inside the container so stale host sockets are not reused across container lifetimes. Under the Linux srt backend, marked Zellij runs set `allowAllUnixSockets` because path-specific Unix socket allowlisting is not available there.
 
 If `--zellij` reports `zellij-run: command not found`, your launcher is newer than the local image. Rebuild once with `claude-contained --rebuild=full` or `claude-docked --rebuild=full`, then retry.
 

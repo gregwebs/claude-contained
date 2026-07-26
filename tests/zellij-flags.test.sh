@@ -242,6 +242,7 @@ xdg_suite() {
       CLAUDE_CONTAINED_PRE_ZELLIJ_TMPDIR=/tmp/claude \
       CLAUDE_CONTAINED_ZELLIJ_CONFIG=/etc/claude-contained/zellij/config.kdl \
       CLAUDE_CONTAINED_ZELLIJ_SOCKET=/tmp/claude-contained-zellij-runtime/zellij/contract_version_1/test \
+      CLAUDE_CONTAINED_ZELLIJ_LAYOUT_DIR=/tmp/claude-contained-zellij-runtime/layouts \
       CLAUDE_CONTAINED_ZELLIJ_TMP_DIR=/tmp/zellij-501 \
       "${repo_root}/image/zellij-pane-command.sh" env
   )"
@@ -256,6 +257,8 @@ xdg_suite() {
   _check "pane command removes Zellij temp helper env" $?
   ! grep -Fq "CLAUDE_CONTAINED_ZELLIJ_SOCKET=" <<<"$out"
   _check "pane command removes Zellij socket helper env" $?
+  ! grep -Fq "CLAUDE_CONTAINED_ZELLIJ_LAYOUT_DIR=" <<<"$out"
+  _check "pane command removes Zellij layout helper env" $?
 
   return "$fails"
 }
@@ -285,7 +288,9 @@ set -uo pipefail
 printf '%s\n' "$*" >> "${ZELLIJ_STUB_LOG}"
 for arg in "$@"; do
   if [[ "$arg" == "list-sessions" ]]; then
-    printf '%s (EXITED)\n' "${ZELLIJ_STUB_SESSION}"
+    if [[ "${ZELLIJ_STUB_LIST_MODE:-exited}" == "exited" ]]; then
+      printf '%s (EXITED)\n' "${ZELLIJ_STUB_SESSION}"
+    fi
     exit 0
   fi
 done
@@ -293,17 +298,17 @@ exit 0
 EOF
   chmod +x "${zbin}/zellij"
 
-  ZELLIJ_STUB_LOG="$zlog" ZELLIJ_STUB_SESSION="$session" HOME="$zhome" PATH="${zbin}:$PATH" \
+  ZELLIJ_STUB_LOG="$zlog" ZELLIJ_STUB_LIST_MODE=empty ZELLIJ_STUB_SESSION="$session" HOME="$zhome" PATH="${zbin}:$PATH" \
     CLAUDE_CONTAINED_ZELLIJ_WAIT_SECONDS=0 \
     "${repo_root}/image/zellij-run.sh" "$session" -- echo "hello world" >/dev/null 2>&1
-  _check "zellij-run treats (EXITED) list-sessions output as not live" $?
+  _check "zellij-run starts a fresh session when none is listed" $?
 
-  grep -Fq -- "--config /etc/claude-contained/zellij/config.kdl --data-dir ${zhome}/.claude-contained/zellij/data attach --create ${session} options --default-layout" "$zlog"
-  _check "zellij-run uses pinned config, data dir, and default layout" $?
+  grep -Fq -- "--config /etc/claude-contained/zellij/config.kdl --data-dir ${zhome}/.claude-contained/zellij/data --new-session-with-layout ${session} --session ${session}" "$zlog"
+  _check "zellij-run uses named layout startup for fresh sessions" $?
   ! grep -Fq -- "--server" "$zlog"
   _check "zellij-run lets XDG_RUNTIME_DIR control the Zellij socket" $?
 
-  layout="/tmp/claude-contained-zellij-runtime/${session}.layout.kdl"
+  layout="/tmp/claude-contained-zellij-runtime/layouts/${session}.kdl"
   grep -Fq 'args "echo" "hello world"' "$layout"
   _check "zellij-run writes the initial pane command into the layout" $?
 
@@ -311,8 +316,18 @@ EOF
   _check "zellij-run pre-creates Zellij's temp log directory" $?
   [[ -d "/tmp/claude-contained-zellij-runtime/zellij/contract_version_1" ]]
   _check "zellij-run pre-creates Zellij's runtime socket directory" $?
+  [[ -d "/tmp/claude-contained-zellij-runtime/layouts" ]]
+  _check "zellij-run pre-creates Zellij's runtime layout directory" $?
   [[ -d "${zhome}/.claude-contained/zellij/cache/org/Zellij-Contributors/Zellij" ]]
   _check "zellij-run pre-creates Zellij's project cache directory" $?
+
+  : > "$zlog"
+  ZELLIJ_STUB_LOG="$zlog" ZELLIJ_STUB_LIST_MODE=exited ZELLIJ_STUB_SESSION="$session" HOME="$zhome" PATH="${zbin}:$PATH" \
+    CLAUDE_CONTAINED_ZELLIJ_WAIT_SECONDS=0 \
+    "${repo_root}/image/zellij-run.sh" "$session" -- echo "hello world" >/dev/null 2>&1
+  _check "zellij-run treats (EXITED) list-sessions output as resurrectable" $?
+  grep -Fq -- "--config /etc/claude-contained/zellij/config.kdl --data-dir ${zhome}/.claude-contained/zellij/data attach --create --force-run-commands ${session}" "$zlog"
+  _check "zellij-run resurrects exited sessions without replacing them" $?
 
   ZELLIJ_STUB_LOG="$zlog" ZELLIJ_STUB_SESSION="$session" HOME="$zhome" PATH="${zbin}:$PATH" \
     "${repo_root}/image/zellij-attach.sh" "$session" >/dev/null 2>&1

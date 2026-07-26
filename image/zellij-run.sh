@@ -52,13 +52,16 @@ tmp_dir="/tmp/zellij-$(id -u)"
 log_dir="${tmp_dir}/zellij-log"
 socket_dir="${runtime_dir}/zellij/contract_version_1"
 session_socket="${socket_dir}/${session}"
-layout_file="${runtime_dir}/${session}.layout.kdl"
+layout_dir="${runtime_dir}/layouts"
+layout_name="$session"
+layout_file="${layout_dir}/${layout_name}.kdl"
 
 export CLAUDE_CONTAINED_ZELLIJ_CONFIG="$config_file"
 export CLAUDE_CONTAINED_ZELLIJ_DATA_DIR="$data_dir"
 export CLAUDE_CONTAINED_ZELLIJ_CACHE_DIR="$cache_dir"
 export CLAUDE_CONTAINED_ZELLIJ_RUNTIME_DIR="$runtime_dir"
 export CLAUDE_CONTAINED_ZELLIJ_SOCKET="$session_socket"
+export CLAUDE_CONTAINED_ZELLIJ_LAYOUT_DIR="$layout_dir"
 export CLAUDE_CONTAINED_ZELLIJ_TMP_DIR="$tmp_dir"
 export XDG_DATA_HOME="$data_dir"
 export XDG_CACHE_HOME="$cache_dir"
@@ -71,8 +74,9 @@ mkdir -p \
   "${cache_dir}/org/Zellij-Contributors/Zellij" \
   "$runtime_dir" \
   "$socket_dir" \
+  "$layout_dir" \
   "$log_dir"
-chmod 700 "$runtime_dir" "${runtime_dir}/zellij" "$socket_dir" "$tmp_dir" "$log_dir" 2>/dev/null || true
+chmod 700 "$runtime_dir" "${runtime_dir}/zellij" "$socket_dir" "$layout_dir" "$tmp_dir" "$log_dir" 2>/dev/null || true
 
 tmp_layout="${layout_file}.$$"
 {
@@ -104,8 +108,25 @@ zellij_session_is_live() {
   return 1
 }
 
+zellij_session_is_exited() {
+  local line first
+
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    first="${line%% *}"
+    if [[ "$first" == "$session" && "$line" == *"(EXITED"* ]]; then
+      return 0
+    fi
+  done < <("${zellij_cmd[@]}" list-sessions --no-formatting 2>/dev/null || true)
+  return 1
+}
+
 set +e
-"${zellij_cmd[@]}" attach --create "$session" options --default-layout "$layout_file"
+if zellij_session_is_exited; then
+  "${zellij_cmd[@]}" attach --create --force-run-commands "$session"
+else
+  "${zellij_cmd[@]}" --new-session-with-layout "$layout_name" --session "$session"
+fi
 zellij_status=$?
 set -e
 

@@ -3,6 +3,7 @@ on_force_close "detach"
 
 session_serialization true
 pane_viewport_serialization false
+layout_dir "/tmp/claude-contained-zellij-runtime/layouts"
 
 show_startup_tips false
 show_release_notes false

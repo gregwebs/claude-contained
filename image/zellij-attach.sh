@@ -22,6 +22,7 @@ export CLAUDE_CONTAINED_ZELLIJ_DATA_DIR="$data_dir"
 export CLAUDE_CONTAINED_ZELLIJ_CACHE_DIR="$cache_dir"
 export CLAUDE_CONTAINED_ZELLIJ_RUNTIME_DIR="$runtime_dir"
 export CLAUDE_CONTAINED_ZELLIJ_SOCKET="$session_socket"
+unset CLAUDE_CONTAINED_ZELLIJ_LAYOUT_DIR
 export CLAUDE_CONTAINED_ZELLIJ_TMP_DIR="$tmp_dir"
 export XDG_DATA_HOME="$data_dir"
 export XDG_CACHE_HOME="$cache_dir"

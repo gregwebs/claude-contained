@@ -106,7 +106,8 @@ if [ "${CLAUDE_CONTAINED_ZELLIJ:-}" = "1" ] && [ -n "${CLAUDE_CONTAINED_ZELLIJ_S
     "/tmp/claude-contained-zellij-runtime/zellij"
     "/tmp/claude-contained-zellij-runtime/zellij/contract_version_1"
     "/tmp/claude-contained-zellij-runtime/zellij/contract_version_1/${CLAUDE_CONTAINED_ZELLIJ_SESSION}"
-    "/tmp/claude-contained-zellij-runtime/${CLAUDE_CONTAINED_ZELLIJ_SESSION}.layout.kdl"
+    "/tmp/claude-contained-zellij-runtime/layouts"
+    "/tmp/claude-contained-zellij-runtime/layouts/${CLAUDE_CONTAINED_ZELLIJ_SESSION}.kdl"
     "/tmp/zellij-${_zellij_uid}"
     "/tmp/zellij-${_zellij_uid}/zellij-log"
     "/tmp/zellij-${_zellij_uid}/zellij-log/zellij.log"
@@ -141,6 +142,7 @@ else
 fi
 
 socket_paths=()
+allow_all_unix_sockets=false
 
 # SSH agent forwarding hands the socket in at /ssh-agent; allow it only when the
 # launcher actually set up forwarding.
@@ -152,6 +154,10 @@ fi
 # XDG_RUNTIME_DIR under /tmp makes the socket tree container-local.
 if [ "${CLAUDE_CONTAINED_ZELLIJ:-}" = "1" ] && [ -n "${CLAUDE_CONTAINED_ZELLIJ_SESSION:-}" ]; then
   socket_paths+=("/tmp/claude-contained-zellij-runtime/zellij/contract_version_1/${CLAUDE_CONTAINED_ZELLIJ_SESSION}")
+  # srt's path-specific allowUnixSockets is macOS-only; Linux seccomp cannot
+  # filter Unix sockets by path, so a Zellij run needs the coarse Unix-socket
+  # switch while the VM/container remains the outer boundary.
+  allow_all_unix_sockets=true
 fi
 
 if [ ${#socket_paths[@]} -gt 0 ]; then
@@ -169,7 +175,8 @@ jq -n \
   --argjson extra "$extra_json" \
   --argjson writes "$writes_json" \
   --argjson user "$user_json" \
-  --argjson socks "$sock_json" '
+  --argjson socks "$sock_json" \
+  --argjson allow_all_unix_sockets "$allow_all_unix_sockets" '
   ($user.network // {}) as $un
   | ($user.filesystem // {}) as $uf
   | $user
@@ -180,7 +187,8 @@ jq -n \
             allowedDomains: (($un.allowedDomains // []) + $defaults + $extra | unique),
             deniedDomains: ($un.deniedDomains // []),
             allowLocalBinding: ($un.allowLocalBinding // true),
-            allowUnixSockets: (($un.allowUnixSockets // []) + $socks | unique)
+            allowUnixSockets: (($un.allowUnixSockets // []) + $socks | unique),
+            allowAllUnixSockets: (($un.allowAllUnixSockets // false) or $allow_all_unix_sockets)
           }
       ),
       filesystem: (
