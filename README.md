@@ -181,6 +181,8 @@ The Zellij session store is `~/.claude-contained/zellij/`. Zellij cache and data
 
 If `--zellij` reports `zellij-run: command not found`, your launcher is newer than the local image. Rebuild once with `claude-contained --rebuild=full` or `claude-docked --rebuild=full`, then retry.
 
+If Claude reports invalid project entries such as `.mcp.json`, check that the file is non-empty valid JSON. On Linux, srt can leave zero-byte protected placeholder files behind when a sandbox is interrupted; the launchers remove those untracked zero-byte placeholders before startup and after exit. When the host lacks `~/.local/bin/claude`, the image creates a native-shaped `~/.local/share/claude/versions/<version>` link so Claude Code does not warn about an unmanaged launcher.
+
 ### Optional Java Layer
 
 JBR, HotswapAgent, jdtls, Maven, and JBang are included by default (`INCLUDE_JAVA_LAYER=true`). To build a smaller image without them:

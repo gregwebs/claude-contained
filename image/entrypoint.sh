@@ -73,11 +73,8 @@ if [ -n "${HOST_HOME:-}" ]; then
     chown dev:dev "${HOST_HOME}/.gitconfig" 2>/dev/null || true
   fi
 
-  # Create native Claude symlink structure (satisfies installMethod: native in shared config)
-  mkdir -p "${HOST_HOME}/.local/bin" 2>/dev/null || true
-  if [ ! -e "${HOST_HOME}/.local/bin/claude" ]; then
-    ln -sf /opt/claude/claude "${HOST_HOME}/.local/bin/claude"
-  fi
+  # Create native-shaped Claude symlink structure when the host has no link yet.
+  /usr/local/bin/claude-native-link "${HOST_HOME}" 2>/dev/null || true
   chown -R dev:dev "${HOST_HOME}/.local" 2>/dev/null || true
 fi
 

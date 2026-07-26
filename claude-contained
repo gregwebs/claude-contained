@@ -372,6 +372,41 @@ validate_zellij_session_name() {
   return 0
 }
 
+srt_placeholder_file_is_tracked() {
+  local file="$1" dir root rel
+
+  dir="$(dirname "$file")"
+  root="$(git -C "$dir" rev-parse --show-toplevel 2>/dev/null)" || return 1
+  rel="${file#${root}/}"
+  [[ "$rel" == "$file" ]] && return 1
+  git -C "$root" ls-files --error-unmatch -- "$rel" >/dev/null 2>&1
+}
+
+cleanup_srt_placeholder_files() {
+  local root file name
+  local names=(
+    .gitconfig
+    .gitmodules
+    .bashrc
+    .bash_profile
+    .zshrc
+    .zprofile
+    .profile
+    .ripgreprc
+    .mcp.json
+  )
+
+  for root in "$@"; do
+    [[ -d "$root" ]] || continue
+    for name in "${names[@]}"; do
+      file="${root}/${name}"
+      if [[ -f "$file" && ! -s "$file" && ! -L "$file" ]] && ! srt_placeholder_file_is_tracked "$file"; then
+        rm -f -- "$file" 2>/dev/null || true
+      fi
+    done
+  done
+}
+
 list_running_aic_containers() {
   container list --quiet 2>/dev/null | grep "^aic-" || true
 }
@@ -1276,6 +1311,7 @@ if [[ -n "${CLAUDE_CONTAINED_LIB_ONLY:-}" ]]; then
 fi
 
 main_host="$(resolve_path "${paths[0]}")"
+cleanup_srt_placeholder_files "$main_host"
 
 # Env for the tool process. Done here, before the worktree-lock prompt and the
 # cleanup trap below, so a rejected project env file fails without first asking
@@ -1326,6 +1362,7 @@ mounted_roots=("$main_host")
 for p in "${paths[@]:1}"; do
   mounted_roots+=("$(resolve_path "$p")")
 done
+cleanup_srt_placeholder_files "${mounted_roots[@]}"
 
 # Check if main directory is a git worktree
 worktree_main_repo=""
@@ -1407,7 +1444,11 @@ worktree_lock_repo="$worktree_main_repo"
 if [[ -z "$worktree_lock_repo" ]]; then
   worktree_lock_repo="$(get_main_worktree_repo_root "$main_host")" || true
 fi
-trap cleanup_auto_worktree_locks EXIT
+cleanup_on_exit() {
+  cleanup_auto_worktree_locks
+  cleanup_srt_placeholder_files "${mounted_roots[@]}"
+}
+trap cleanup_on_exit EXIT
 # Route common termination signals through `exit` so the EXIT handler (which
 # releases the mutex and removes this container's lock owners) always runs.
 # Bash defers a trapped signal until the foreground `container run` returns, so
