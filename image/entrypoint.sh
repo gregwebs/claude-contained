@@ -28,7 +28,7 @@ if [ -n "${HOST_FORWARD_PORTS:-}" ]; then
       local_port="$mapping"
       host_port="$mapping"
     fi
-    socat TCP-LISTEN:${local_port},fork,reuseaddr TCP:host.local:${host_port} &
+    socat "TCP-LISTEN:${local_port},fork,reuseaddr TCP:host.local:${host_port}" &
   done
 fi
 

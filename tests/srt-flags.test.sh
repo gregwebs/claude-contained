@@ -23,11 +23,12 @@ repo_root="$(dirname "$here")"
 # on PATH that just echoes its argv.
 launcher_argv() { # launcher_argv <target> <flags...>
   local target="$1"; shift
-  PATH="${stub_dir}:$PATH" "${repo_root}/${target}" "$@" -N -s "$proj" 2>/dev/null
+  HOME="$home" PATH="${stub_dir}:$PATH" "${repo_root}/${target}" "$@" -N -s "$proj" 2>/dev/null
 }
 
 stub_dir="$(mktemp -d)"
 proj="$(mktemp -d)"
+home="$(mktemp -d)"
 for rt in container docker; do
   printf '#!/bin/bash\nprintf "%%s\\n" "$@"\n' > "${stub_dir}/${rt}"
   chmod +x "${stub_dir}/${rt}"
@@ -142,7 +143,7 @@ for target in claude-contained claude-docked; do
   total=$((total + $?))
 done
 
-rm -rf "$stub_dir" "$proj"
+rm -rf "$stub_dir" "$proj" "$home"
 
 if [[ "$total" -gt 0 ]]; then
   echo

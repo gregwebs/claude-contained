@@ -42,10 +42,12 @@ suite() {
 
   main="$(mktemp -d)/repo"
   mkdir -p "$main"
+  main="$(resolve_path "$main")"
   git init -q "$main"
   git -C "$main" -c user.email=t@example.com -c user.name=test commit -q --allow-empty -m init
   wt="$(mktemp -d)/hidden-wt"
   git -C "$main" worktree add -q --detach "$wt" >/dev/null 2>&1
+  wt="$(resolve_path "$wt")"
 
   # The launcher would mount the main repo (so .git/worktrees is visible) but
   # NOT the linked worktree -> it is hidden and prune-able from inside.

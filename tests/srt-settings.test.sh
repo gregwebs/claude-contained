@@ -52,11 +52,12 @@ _check "project dirs from GIT_PROTECT_DIRS are writable" $?
 jq -e --arg h "$home" '
   .filesystem.allowWrite as $w
   | ($w | index($h + "/.claude"))
+    and ($w | index($h + "/.claude-contained/claude"))
     and ($w | index($h + "/.codex"))
     and ($w | index($h + "/.claude-contained"))
     and ($w | index("/tmp"))
 ' "$out" >/dev/null
-_check "tool config dirs and /tmp are writable" $?
+_check "tool config dirs, contained Claude profile, and /tmp are writable" $?
 
 # 3. Required inside a container: bwrap cannot create privileged namespaces there.
 jq -e '.enableWeakerNestedSandbox == true' "$out" >/dev/null
