@@ -1,10 +1,10 @@
 # Claude Code + JetBrains Runtime (JBR) + HotswapAgent (optional layer) + Python
 
 # ---- Java layer toggle -------------------------------------------------------
-# Set to "false" (--build-arg INCLUDE_JAVA_LAYER=false) to build the "java-false"
-# stage instead of "java-true" below, skipping JBR, HotswapAgent, jdtls, Maven,
+# Set to "true" (--build-arg INCLUDE_JAVA_LAYER=true) to build the "java-true"
+# stage instead of "java-false" below, skipping JBR, HotswapAgent, jdtls, Maven,
 # and JBang for a smaller image when Java isn't needed.
-ARG INCLUDE_JAVA_LAYER=true
+ARG INCLUDE_JAVA_LAYER=false
 
 # ---- Base stage: everything except the optional Java/IntelliJ layer ---------
 FROM node:24-bookworm-slim AS base

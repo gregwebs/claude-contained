@@ -13,7 +13,7 @@ This template enables VS Code devcontainer workflow with the claude-contained im
 
 ## Prerequisites
 
-1. **Build the claude-contained image first, with the Java layer included** (this is the default, so a plain build works; just don't pass `--build-arg INCLUDE_JAVA_LAYER=false`):
+1. **Build the claude-contained image first, with the Java layer included** (`--build-arg INCLUDE_JAVA_LAYER=true`):
    ```bash
    docker build -t claude-contained .
    ```
