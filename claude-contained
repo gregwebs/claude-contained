@@ -14,6 +14,8 @@ Options:
   -R, --rebuild[=MODE]  Rebuild image and exit: tools (default) or full
   -H PORT[:HOSTPORT] Forward host port to container localhost (can be repeated)
   -p HOST:CONTAINER  Publish container port to host (can be repeated)
+  -e, --env KEY=VALUE  Set an env var for the tool process (can be repeated)
+  --no-project-env   Ignore the project's .claude-contained/env file
   --dns IP           Use IP as a DNS resolver (can be repeated)
   --allow-host HOST  Allow sandbox egress to HOST (can be repeated)
   --no-sandbox       Disable the srt sandbox (debugging escape hatch)
@@ -51,6 +53,12 @@ Behavior:
   - Apple Containers defaults the container's resolver to the vmnet gateway, which
     often cannot resolve. Use --dns 1.1.1.1, or set CLAUDE_DNS=1.1.1.1 (comma-
     separated for several) to apply it to every run without typing the flag.
+  - -e/--env passes env vars to the tool. KEY=VALUE lines in the main directory's
+    .claude-contained/env are also applied (--env wins; --no-project-env skips the
+    file). That file is writable from inside the container, so keys that would
+    subvert the sandbox are refused from it. Neither applies when attaching to an
+    existing container, and --env is refused with --zellij --attach, where the
+    pane keeps the environment it was created with.
   - Egress is sandboxed with srt: only allowlisted hosts are reachable. Edit
     ~/.claude-contained/srt-settings.json for a persistent policy, --allow-host for
     one run, or --no-sandbox to turn it off while debugging.
@@ -76,6 +84,7 @@ Examples:
   claude-contained --rebuild=full      # Full fresh rebuild, then exit
   claude-contained -p 8080:8080 .      # Expose port 8080
   claude-contained -H 3845 .           # Forward host:3845 to container localhost:3845
+  claude-contained -e API_URL=http://host.local:8080 .  # Set an env var
   claude-contained --dns 1.1.1.1 .     # Fix DNS when the vmnet resolver fails
   claude-contained --allow-host example.com .  # Permit one extra egress host
   claude-contained --no-sandbox -s .   # Debug shell with the sandbox off
@@ -150,6 +159,163 @@ build_zellij_attach_cmd() {
 # Environment args for exec (PATH not set by entrypoint when using exec)
 exec_env_args() {
   printf '%s ' -e "HOME=$HOME" -e "JAVA_HOME=/opt/jbr" -e "PATH=/opt/claude:/home/dev/.sdkman/candidates/maven/current/bin:/home/dev/.sdkman/candidates/jbang/current/bin:/opt/jbr/bin:$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+}
+
+# Per-project state directory: node_modules overlays and the project env file.
+project_state_dir() {
+  printf '%s/.claude-contained\n' "$1"
+}
+
+# Env keys reserved from every source. These are owned by the launcher or the
+# entrypoint, and several are outright levers on the container's own guarantees:
+# STAY_ROOT makes the entrypoint skip the `gosu dev` drop, which would leave srt
+# running as root; SSH_AUTH_SOCK is copied straight into the sandbox policy's
+# allowUnixSockets list. HOME/JAVA_HOME are overwritten by the entrypoint and
+# PATH is prepended to, so accepting any of the three would be a lie.
+env_key_reserved_always() {
+  case "$1" in
+    HOST_*|SRT_*|CLAUDE_CONTAINED_*) return 0 ;;
+    STAY_ROOT|SSH_AUTH_SOCK|GIT_PROTECT_DIRS|HOME|PATH|JAVA_HOME) return 0 ;;
+  esac
+  return 1
+}
+
+# Env keys reserved only from the project env file. Fine to pass by hand, but
+# code injection into the srt process itself when they come from a file the
+# contained agent can write.
+env_key_reserved_in_file() {
+  case "$1" in
+    LD_PRELOAD|LD_LIBRARY_PATH|NODE_OPTIONS) return 0 ;;
+  esac
+  return 1
+}
+
+validate_env_assignment() { # validate_env_assignment <KEY=VALUE> <source> <origin>
+  local assignment="$1" source="$2" origin="$3" key
+
+  if [[ "$assignment" != *=* ]]; then
+    echo "error: ${source}: expected KEY=VALUE, got '${assignment}'" >&2
+    return 1
+  fi
+  key="${assignment%%=*}"
+  if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+    echo "error: ${source}: not a valid environment variable name: '${key}'" >&2
+    return 1
+  fi
+  if env_key_reserved_always "$key"; then
+    echo "error: ${source}: ${key} is reserved by claude-contained and cannot be set" >&2
+    return 1
+  fi
+  if [[ "$origin" == "file" ]] && env_key_reserved_in_file "$key"; then
+    echo "error: ${source}: ${key} cannot be set from a project env file" >&2
+    echo "       It is read by the sandbox wrapper itself; pass -e ${key}=... if you mean it." >&2
+    return 1
+  fi
+  return 0
+}
+
+env_index_of_key() { # env_index_of_key <KEY>; prints index, returns 1 if absent
+  local key="$1" i n=${#user_env_keys[@]}
+
+  for (( i = 0; i < n; i++ )); do
+    if [[ "${user_env_keys[$i]}" == "$key" ]]; then
+      printf '%s\n' "$i"
+      return 0
+    fi
+  done
+  return 1
+}
+
+# Record KEY=VALUE, replacing any earlier entry for the same key so each key is
+# passed to the runtime exactly once: duplicate -e args are not documented to
+# resolve last-wins in either runtime, so precedence is settled here instead.
+env_set() { # env_set <KEY=VALUE> <source> <origin>
+  local assignment="$1" source="$2" origin="$3" key idx
+
+  validate_env_assignment "$assignment" "$source" "$origin" || return 1
+  key="${assignment%%=*}"
+  if idx="$(env_index_of_key "$key")"; then
+    user_env[$idx]="$assignment"
+    user_env_origins[$idx]="$origin"
+    return 0
+  fi
+  user_env_keys+=("$key")
+  user_env+=("$assignment")
+  user_env_origins+=("$origin")
+}
+
+# Like env_set, but a key already set by a higher-priority source wins.
+# Priority is flags > project env file > launcher built-ins (TZ, GH_TOKEN).
+env_default() { # env_default <KEY=VALUE> <source> <origin>
+  local key="${1%%=*}"
+
+  env_index_of_key "$key" >/dev/null && return 0
+  env_set "$1" "$2" "$3"
+}
+
+# Read KEY=VALUE lines from <dir>/.claude-contained/env. Parsed literally and
+# never sourced: the contained agent can write this file, so it must not be able
+# to get arbitrary code run on the next launch.
+load_project_env_file() { # load_project_env_file <dir>
+  local dir="$1"
+  local file lineno=0 line trimmed key value idx
+  file="$(project_state_dir "$dir")/env"
+
+  [[ -f "$file" ]] || return 0
+
+  while IFS= read -r line || [[ -n "$line" ]]; do
+    lineno=$((lineno + 1))
+    line="${line%$'\r'}"  # tolerate CRLF
+    trimmed="${line#"${line%%[![:space:]]*}"}"
+    [[ -z "$trimmed" || "$trimmed" == \#* ]] && continue
+    if [[ "$trimmed" != *=* ]]; then
+      validate_env_assignment "$trimmed" ".claude-contained/env:${lineno}" file || return 1
+    fi
+    key="${trimmed%%=*}"
+    value="${trimmed#*=}"
+    # --env wins over the file; within the file, the last line for a key wins.
+    if idx="$(env_index_of_key "$key")" && [[ "${user_env_origins[$idx]}" == "flag" ]]; then
+      continue
+    fi
+    # Strip one matching pair of surrounding quotes; no other expansion happens.
+    if [[ ${#value} -ge 2 && "$value" == \"*\" ]]; then
+      value="${value:1:${#value}-2}"
+    elif [[ ${#value} -ge 2 && "$value" == \'*\' ]]; then
+      value="${value:1:${#value}-2}"
+    fi
+    env_set "${key}=${value}" ".claude-contained/env:${lineno}" file || return 1
+  done < "$file"
+}
+
+# Report which variables are being passed in, by name only -- values routinely
+# hold tokens, and this lands in scrollback. Silent when there are none.
+print_user_env_summary() {
+  local i n=${#user_env_keys[@]} from_flags="" from_file="" msg="env:"
+
+  for (( i = 0; i < n; i++ )); do
+    case "${user_env_origins[$i]}" in
+      flag) from_flags="${from_flags:+${from_flags}, }${user_env_keys[$i]}" ;;
+      file) from_file="${from_file:+${from_file}, }${user_env_keys[$i]}" ;;
+    esac
+  done
+
+  [[ -z "$from_flags" && -z "$from_file" ]] && return 0
+  [[ -n "$from_flags" ]] && msg="${msg} ${from_flags} (--env)"
+  [[ -n "$from_flags" && -n "$from_file" ]] && msg="${msg};"
+  [[ -n "$from_file" ]] && msg="${msg} ${from_file} (.claude-contained/env)"
+  echo "$msg" >&2
+}
+
+# -e args for `container exec`, which cannot reuse exec_env_args: that returns a
+# space-joined string the call sites deliberately word-split, so a value with a
+# space in it would come apart.
+build_user_env_args() {
+  local i n=${#user_env[@]}
+
+  user_env_args=()
+  for (( i = 0; i < n; i++ )); do
+    user_env_args+=( -e "${user_env[$i]}" )
+  done
 }
 
 resolve_path() {
@@ -360,6 +526,12 @@ host_forwards=()
 dns_servers=()
 srt_allow_hosts=()
 srt_disable=0
+env_flag_args=()
+no_project_env=0
+user_env=()
+user_env_keys=()
+user_env_origins=()
+user_env_args=()
 share_host_claude=0
 [[ "${CLAUDE_CONTAINED_SHARE_HOST_CLAUDE:-}" == "1" ]] && share_host_claude=1
 while [[ "${1:-}" == -* ]]; do
@@ -432,6 +604,25 @@ while [[ "${1:-}" == -* ]]; do
     -t|--tool)
       shift
       tool="$1"
+      shift
+      ;;
+    -e|--env)
+      shift
+      # A leading dash can never be a valid assignment, so treat it as a missing
+      # value rather than swallowing the next flag.
+      if [[ -z "${1:-}" || "${1}" == -* ]]; then
+        echo "error: -e/--env requires KEY=VALUE" >&2
+        exit 2
+      fi
+      env_flag_args+=("$1")
+      shift
+      ;;
+    --env=*)
+      env_flag_args+=("${1#*=}")
+      shift
+      ;;
+    --no-project-env)
+      no_project_env=1
       shift
       ;;
     -p)
@@ -513,6 +704,20 @@ fi
 if [[ $zellij_mode -eq 1 && -n "$attach_name" ]]; then
   validate_zellij_session_name "$attach_name" || exit 2
 fi
+if [[ $zellij_mode -eq 1 && $attach_mode -eq 1 && ${#env_flag_args[@]} -gt 0 ]]; then
+  echo "error: --env cannot be combined with --zellij --attach" >&2
+  echo "       Attaching starts a Zellij client; the pane keeps the environment it was" >&2
+  echo "       created with, so the variable would silently never reach the tool." >&2
+  echo "       Set it when the session is created instead." >&2
+  exit 2
+fi
+
+# Flags are applied before the attach paths, which exec straight to the runtime.
+# Highest priority: the project file and the built-ins below only fill in gaps.
+for env_flag_arg in "${env_flag_args[@]+"${env_flag_args[@]}"}"; do
+  env_set "$env_flag_arg" "--env" flag || exit 2
+done
+build_user_env_args
 
 if [[ -n "$share_skills_dir" ]]; then
   if [[ ! -d "$share_skills_dir" ]]; then
@@ -627,10 +832,10 @@ if [[ $attach_mode -eq 1 && $zellij_mode -eq 0 ]]; then
     attach_name="${containers[$((choice-1))]}"
     if [[ $shell_mode -eq 1 ]]; then
       build_attach_shell_cmd
-      exec container exec -it -u dev $(exec_env_args) "$attach_name" "${attach_cmd[@]}"
+      exec container exec -it -u dev $(exec_env_args) "${user_env_args[@]+"${user_env_args[@]}"}" "$attach_name" "${attach_cmd[@]}"
     else
       build_attach_cmd
-      exec container exec -it -u dev $(exec_env_args) "$attach_name" "${attach_cmd[@]}"
+      exec container exec -it -u dev $(exec_env_args) "${user_env_args[@]+"${user_env_args[@]}"}" "$attach_name" "${attach_cmd[@]}"
     fi
   else
     # Direct mode - prepend prefix if not present
@@ -646,10 +851,10 @@ if [[ $attach_mode -eq 1 && $zellij_mode -eq 0 ]]; then
     else
       if [[ $shell_mode -eq 1 ]]; then
         build_attach_shell_cmd
-        exec container exec -it -u dev $(exec_env_args) "$attach_name" "${attach_cmd[@]}"
+        exec container exec -it -u dev $(exec_env_args) "${user_env_args[@]+"${user_env_args[@]}"}" "$attach_name" "${attach_cmd[@]}"
       else
         build_attach_cmd
-        exec container exec -it -u dev $(exec_env_args) "$attach_name" "${attach_cmd[@]}"
+        exec container exec -it -u dev $(exec_env_args) "${user_env_args[@]+"${user_env_args[@]}"}" "$attach_name" "${attach_cmd[@]}"
       fi
     fi
   fi
@@ -1070,6 +1275,17 @@ fi
 
 main_host="$(resolve_path "${paths[0]}")"
 
+# Env for the tool process. Done here, before the worktree-lock prompt and the
+# cleanup trap below, so a rejected project env file fails without first asking
+# the user about locks and taking them.
+if [[ $no_project_env -eq 0 ]]; then
+  load_project_env_file "$main_host" || exit 2
+fi
+HOST_TZ="$(host_timezone)"
+[[ -n "$HOST_TZ" ]] && { env_default "TZ=${HOST_TZ}" "host timezone" builtin || exit 2; }
+[[ -n "${AI_GH_TOKEN:-}" ]] && { env_default "GH_TOKEN=${AI_GH_TOKEN}" "AI_GH_TOKEN" builtin || exit 2; }
+print_user_env_summary
+
 zellij_session=""
 if [[ $zellij_mode -eq 1 ]]; then
   if [[ $zellij_new_session_name_set -eq 1 ]]; then
@@ -1198,7 +1414,6 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 trap 'exit 129' HUP
 maybe_offer_worktree_locks "$worktree_lock_repo" "$container_name"
-HOST_TZ="$(host_timezone)"
 container_argv=(
   container run --rm -it
   --memory "${CLAUDE_MEMORY}"
@@ -1207,8 +1422,6 @@ container_argv=(
   -e "HOST_UID=$(id -u)"
   -e "HOST_GID=$(id -g)"
   -w "${main_host}"
-  ${HOST_TZ:+-e "TZ=${HOST_TZ}"}
-  ${AI_GH_TOKEN:+-e "GH_TOKEN=${AI_GH_TOKEN}"}
   --mount "type=bind,src=${HOST_CLAUDE_PROFILE_DIR},dst=${CONTAINER_CLAUDE_DIR}"
   --mount "type=bind,src=${HOST_CODEX_DIR},dst=${HOST_HOME}/.codex"
   --mount "type=bind,src=${HOST_COPILOT_DIR},dst=${HOST_HOME}/.copilot"
@@ -1218,6 +1431,11 @@ container_argv=(
   --mount "type=bind,src=${HOST_VAADIN_DIR},dst=${HOST_HOME}/.vaadin"
   --mount "type=bind,src=${main_host},dst=${main_host}"
 )
+
+# User env (--env, .claude-contained/env) plus the TZ/GH_TOKEN built-ins folded
+# into the same list, so every key is emitted exactly once.
+build_user_env_args
+container_argv+=( "${user_env_args[@]+"${user_env_args[@]}"}" )
 
 add_claude_extension_resource_mounts() {
   local resource
@@ -1403,7 +1621,7 @@ if [[ "$(uname)" != "Linux" ]]; then
 
     if [[ $do_overlay -eq 1 ]]; then
       for nm_dir in "${nm_overlay_dirs[@]}"; do
-        nm_target="${nm_dir}/.claude-contained/node_modules-${nm_platform}"
+        nm_target="$(project_state_dir "$nm_dir")/node_modules-${nm_platform}"
         mkdir -p "${nm_target}"
         container_argv+=( --mount "type=bind,src=${nm_target},dst=${nm_dir}/node_modules" )
         if dir_is_empty "${nm_target}"; then

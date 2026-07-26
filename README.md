@@ -70,6 +70,8 @@ claude-contained [options] [main_dir] [extra_dir ...] [-- <tool args...>]
 | `-R`, `--rebuild[=MODE]` | Rebuild image before run: `tools` (default) or `full` |
 | `-H PORT[:HOSTPORT]` | Forward host port to container localhost (can be repeated) |
 | `-p HOST:CONTAINER` | Publish container port to host (can be repeated) |
+| `-e`, `--env KEY=VALUE` | Set an env var for the tool process (can be repeated). See [Environment Variables](#environment-variables) |
+| `--no-project-env` | Ignore the project's `.claude-contained/env` file |
 | `--dns IP` | Use `IP` as a DNS resolver (can be repeated). See [DNS](#dns) |
 | `--allow-host HOST` | Allow sandbox egress to `HOST` (can be repeated). See [Sandboxing](#sandboxing) |
 | `--no-sandbox` | Disable the srt sandbox for this run (debugging escape hatch) |
@@ -133,6 +135,8 @@ claude-contained --rebuild=full .                   # Full fresh rebuild first
 claude-contained -s                                 # Debug shell
 claude-contained --share-skills=/Users/me/Projects/skills . # Share skills into tool skill dirs
 claude-contained --share-host-claude .              # Legacy direct host ~/.claude sharing
+claude-contained -e API_URL=http://host.local:8080 .        # Set an env var for the tool
+claude-contained -e 'GREETING=hello world' -e DEBUG=1 .     # Repeatable; values may contain spaces
 
 # Zellij workspaces
 claude-contained --zellij .                         # Start this project in Zellij
@@ -266,6 +270,58 @@ too, though Docker usually resolves fine without them.
 If DNS still fails, check whether something local is holding port 53
 (`sudo lsof -nP -iUDP:53`) — a local resolver, VPN client, or iCloud Private Relay
 can break the vmnet resolver. See [apple/container#402](https://github.com/apple/container/issues/402).
+
+## Environment Variables
+
+Pass variables to the tool process with `-e`/`--env`, repeatable:
+
+```bash
+claude-contained -e API_URL=http://host.local:8080 -e 'GREETING=hello world' .
+```
+
+To avoid retyping them, put `KEY=VALUE` lines in the main directory's
+`.claude-contained/env`:
+
+```bash
+# .claude-contained/env
+API_URL=http://host.local:8080
+GREETING="hello world"      # one pair of surrounding quotes is stripped
+```
+
+Blank lines and `#` comments are skipped. `--env` beats the file, and the file beats the
+`TZ`/`GH_TOKEN` defaults the launcher supplies. `--no-project-env` ignores the file.
+Loaded variable names (never values) are printed at startup so you can see what is being
+applied. Both flag and file work identically in `claude-docked`.
+
+Not applied when attaching to an existing container — `-a` reuses the environment the
+container already has — and `--env` is refused outright with `--zellij --attach`, where
+the pane keeps the environment it was created with.
+
+### What is refused
+
+Variables the container itself depends on are rejected with an error rather than silently
+ignored: `HOME`, `PATH`, `JAVA_HOME`, `GIT_PROTECT_DIRS`, `STAY_ROOT`, `SSH_AUTH_SOCK`
+(use `--ssh`), and anything starting with `HOST_`, `SRT_`, or `CLAUDE_CONTAINED_`.
+`LD_PRELOAD`, `LD_LIBRARY_PATH`, and `NODE_OPTIONS` are accepted as flags but refused
+from the project file.
+
+### The project file is not a security boundary
+
+`.claude-contained/` is writable from inside the container, so the agent can edit
+`.claude-contained/env` and affect your *next* launch. The file is parsed literally and
+never sourced, the refusals above block the variables that would subvert the sandbox or
+the privilege drop, and the printed key names make additions visible — but an agent that
+can write that file can already edit the code you are about to run. Prefer `--env` for
+anything security-relevant, and use `--no-project-env` with an untrusted checkout.
+
+Two more things worth knowing: a project's `.claude-contained/` is **not** gitignored for
+you (see [Node.js Projects](#nodejs-projects-node_modules-overlay)), so an `env` file
+holding a token can be committed by accident. And `--env` values are visible in
+`container inspect`/`docker inspect` and in host `ps` output — this is plumbing between
+you and your container, not a way to hide secrets.
+
+The VS Code devcontainer does not use these launchers; set `containerEnv` in
+`devcontainer.json` instead.
 
 ## Sandboxing
 
