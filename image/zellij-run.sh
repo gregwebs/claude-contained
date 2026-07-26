@@ -50,14 +50,15 @@ cache_dir="${zellij_root}/cache"
 runtime_dir="/tmp/claude-contained-zellij-runtime"
 tmp_dir="/tmp/zellij-$(id -u)"
 log_dir="${tmp_dir}/zellij-log"
-server_socket="${runtime_dir}/${session}.sock"
+socket_dir="${runtime_dir}/zellij/contract_version_1"
+session_socket="${socket_dir}/${session}"
 layout_file="${runtime_dir}/${session}.layout.kdl"
 
 export CLAUDE_CONTAINED_ZELLIJ_CONFIG="$config_file"
 export CLAUDE_CONTAINED_ZELLIJ_DATA_DIR="$data_dir"
 export CLAUDE_CONTAINED_ZELLIJ_CACHE_DIR="$cache_dir"
 export CLAUDE_CONTAINED_ZELLIJ_RUNTIME_DIR="$runtime_dir"
-export CLAUDE_CONTAINED_ZELLIJ_SERVER="$server_socket"
+export CLAUDE_CONTAINED_ZELLIJ_SOCKET="$session_socket"
 export CLAUDE_CONTAINED_ZELLIJ_TMP_DIR="$tmp_dir"
 export XDG_DATA_HOME="$data_dir"
 export XDG_CACHE_HOME="$cache_dir"
@@ -69,8 +70,9 @@ mkdir -p \
   "$cache_dir" \
   "${cache_dir}/org/Zellij-Contributors/Zellij" \
   "$runtime_dir" \
+  "$socket_dir" \
   "$log_dir"
-chmod 700 "$runtime_dir" "$tmp_dir" "$log_dir" 2>/dev/null || true
+chmod 700 "$runtime_dir" "${runtime_dir}/zellij" "$socket_dir" "$tmp_dir" "$log_dir" 2>/dev/null || true
 
 tmp_layout="${layout_file}.$$"
 {
@@ -87,7 +89,7 @@ tmp_layout="${layout_file}.$$"
 } > "$tmp_layout"
 mv -f "$tmp_layout" "$layout_file"
 
-zellij_cmd=(zellij --config "$config_file" --data-dir "$data_dir" --server "$server_socket")
+zellij_cmd=(zellij --config "$config_file" --data-dir "$data_dir")
 
 zellij_session_is_live() {
   local line first

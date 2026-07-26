@@ -241,6 +241,7 @@ xdg_suite() {
       CLAUDE_CONTAINED_PRE_ZELLIJ_TMPDIR_SET=1 \
       CLAUDE_CONTAINED_PRE_ZELLIJ_TMPDIR=/tmp/claude \
       CLAUDE_CONTAINED_ZELLIJ_CONFIG=/etc/claude-contained/zellij/config.kdl \
+      CLAUDE_CONTAINED_ZELLIJ_SOCKET=/tmp/claude-contained-zellij-runtime/zellij/contract_version_1/test \
       CLAUDE_CONTAINED_ZELLIJ_TMP_DIR=/tmp/zellij-501 \
       "${repo_root}/image/zellij-pane-command.sh" env
   )"
@@ -253,6 +254,8 @@ xdg_suite() {
   _check "pane command removes Zellij-only helper env" $?
   ! grep -Fq "CLAUDE_CONTAINED_ZELLIJ_TMP_DIR=" <<<"$out"
   _check "pane command removes Zellij temp helper env" $?
+  ! grep -Fq "CLAUDE_CONTAINED_ZELLIJ_SOCKET=" <<<"$out"
+  _check "pane command removes Zellij socket helper env" $?
 
   return "$fails"
 }
@@ -295,8 +298,10 @@ EOF
     "${repo_root}/image/zellij-run.sh" "$session" -- echo "hello world" >/dev/null 2>&1
   _check "zellij-run treats (EXITED) list-sessions output as not live" $?
 
-  grep -Fq -- "--config /etc/claude-contained/zellij/config.kdl --data-dir ${zhome}/.claude-contained/zellij/data --server /tmp/claude-contained-zellij-runtime/${session}.sock attach --create ${session} options --default-layout" "$zlog"
-  _check "zellij-run uses pinned config, data dir, server socket, and default layout" $?
+  grep -Fq -- "--config /etc/claude-contained/zellij/config.kdl --data-dir ${zhome}/.claude-contained/zellij/data attach --create ${session} options --default-layout" "$zlog"
+  _check "zellij-run uses pinned config, data dir, and default layout" $?
+  ! grep -Fq -- "--server" "$zlog"
+  _check "zellij-run lets XDG_RUNTIME_DIR control the Zellij socket" $?
 
   layout="/tmp/claude-contained-zellij-runtime/${session}.layout.kdl"
   grep -Fq 'args "echo" "hello world"' "$layout"
@@ -304,6 +309,8 @@ EOF
 
   [[ -d "/tmp/zellij-$(id -u)/zellij-log" ]]
   _check "zellij-run pre-creates Zellij's temp log directory" $?
+  [[ -d "/tmp/claude-contained-zellij-runtime/zellij/contract_version_1" ]]
+  _check "zellij-run pre-creates Zellij's runtime socket directory" $?
   [[ -d "${zhome}/.claude-contained/zellij/cache/org/Zellij-Contributors/Zellij" ]]
   _check "zellij-run pre-creates Zellij's project cache directory" $?
 

@@ -112,13 +112,18 @@ if [ "${CLAUDE_CONTAINED_ZELLIJ:-}" = "1" ] && [ -n "${CLAUDE_CONTAINED_ZELLIJ_S
     "${HOST_HOME}/.claude-contained/zellij/data" \
     "${HOST_HOME}/.claude-contained/zellij/cache/org/Zellij-Contributors/Zellij" \
     "${_zellij_tmp}/zellij-log" \
-    "${_zellij_runtime}" 2>/dev/null || true
+    "${_zellij_runtime}/zellij/contract_version_1" 2>/dev/null || true
   touch "${_zellij_tmp}/zellij-log/zellij.log" 2>/dev/null || true
   chown -R dev:dev \
     "${HOST_HOME}/.claude-contained/zellij" \
     "${_zellij_tmp}" \
     "${_zellij_runtime}" 2>/dev/null || true
-  chmod 700 "${_zellij_tmp}" "${_zellij_tmp}/zellij-log" "${_zellij_runtime}" 2>/dev/null || true
+  chmod 700 \
+    "${_zellij_tmp}" \
+    "${_zellij_tmp}/zellij-log" \
+    "${_zellij_runtime}" \
+    "${_zellij_runtime}/zellij" \
+    "${_zellij_runtime}/zellij/contract_version_1" 2>/dev/null || true
   chmod 600 "${_zellij_tmp}/zellij-log/zellij.log" 2>/dev/null || true
 fi
 

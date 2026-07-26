@@ -103,7 +103,9 @@ if [ "${CLAUDE_CONTAINED_ZELLIJ:-}" = "1" ] && [ -n "${CLAUDE_CONTAINED_ZELLIJ_S
     "${_home}/.claude-contained/zellij/cache/org/Zellij-Contributors"
     "${_home}/.claude-contained/zellij/cache/org/Zellij-Contributors/Zellij"
     "/tmp/claude-contained-zellij-runtime"
-    "/tmp/claude-contained-zellij-runtime/${CLAUDE_CONTAINED_ZELLIJ_SESSION}.sock"
+    "/tmp/claude-contained-zellij-runtime/zellij"
+    "/tmp/claude-contained-zellij-runtime/zellij/contract_version_1"
+    "/tmp/claude-contained-zellij-runtime/zellij/contract_version_1/${CLAUDE_CONTAINED_ZELLIJ_SESSION}"
     "/tmp/claude-contained-zellij-runtime/${CLAUDE_CONTAINED_ZELLIJ_SESSION}.layout.kdl"
     "/tmp/zellij-${_zellij_uid}"
     "/tmp/zellij-${_zellij_uid}/zellij-log"
@@ -146,10 +148,10 @@ if [ -n "${SSH_AUTH_SOCK:-}" ]; then
   socket_paths+=("${SSH_AUTH_SOCK}")
 fi
 
-# Zellij uses a per-session Unix socket for client/server communication. The
-# launcher pins it under /tmp so it never persists outside the container.
+# Zellij uses a per-session Unix socket for client/server communication. Keeping
+# XDG_RUNTIME_DIR under /tmp makes the socket tree container-local.
 if [ "${CLAUDE_CONTAINED_ZELLIJ:-}" = "1" ] && [ -n "${CLAUDE_CONTAINED_ZELLIJ_SESSION:-}" ]; then
-  socket_paths+=("/tmp/claude-contained-zellij-runtime/${CLAUDE_CONTAINED_ZELLIJ_SESSION}.sock")
+  socket_paths+=("/tmp/claude-contained-zellij-runtime/zellij/contract_version_1/${CLAUDE_CONTAINED_ZELLIJ_SESSION}")
 fi
 
 if [ ${#socket_paths[@]} -gt 0 ]; then
