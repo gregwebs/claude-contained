@@ -61,7 +61,11 @@ DEFAULT_DOMAINS='[
 # launchers already populate with the working dir, every extra dir, and the
 # worktree's main repo.
 #
-# The node_modules overlay and --share-skills mounts need no special handling:
+# The contained Claude profile is mounted at ~/.claude and is also visible under
+# ~/.claude-contained/claude through the shared state directory. Keep both paths
+# writable so either route works under srt's literal path matching.
+#
+# The node_modules overlay and shared skill mounts need no special handling:
 # they land inside a project dir and inside ~/.claude/skills respectively, so the
 # entries below already cover them.
 _home="${HOST_HOME:-$HOME}"
@@ -69,6 +73,7 @@ write_paths=(
   /tmp
   "${_home}/.claude"
   "${_home}/.claude-contained"
+  "${_home}/.claude-contained/claude"
   "${_home}/.codex"
   "${_home}/.copilot"
   "${_home}/.gemini"

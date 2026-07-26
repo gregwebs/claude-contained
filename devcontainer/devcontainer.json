@@ -8,8 +8,12 @@
 
   "mounts": [
     "source=${localWorkspaceFolder},target=${localWorkspaceFolder},type=bind,consistency=cached",
-    "source=${localEnv:HOME}/.claude,target=${localEnv:HOME}/.claude,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.claude-contained/claude,target=${localEnv:HOME}/.claude,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.claude-contained,target=${localEnv:HOME}/.claude-contained,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.claude/skills,target=${localEnv:HOME}/.claude/skills,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.claude/agents,target=${localEnv:HOME}/.claude/agents,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.claude/commands,target=${localEnv:HOME}/.claude/commands,type=bind,consistency=cached",
+    "source=${localEnv:HOME}/.claude/plugins,target=${localEnv:HOME}/.claude/plugins,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.m2,target=${localEnv:HOME}/.m2,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.vaadin,target=${localEnv:HOME}/.vaadin,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.gitconfig,target=${localEnv:HOME}/.gitconfig,type=bind,readonly"

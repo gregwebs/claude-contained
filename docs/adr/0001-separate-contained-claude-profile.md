@@ -1,0 +1,3 @@
+# Separate Contained Claude Profile
+
+Contained Claude runs default to a container-specific profile at `~/.claude-contained/claude`, mounted inside the container as `~/.claude`, while Claude account state stays shared through `~/.claude-contained/.claude.json` and host Claude extension resources are mounted from `~/.claude/{skills,agents,commands,plugins}`. We chose this over bind-mounting host `~/.claude` wholesale so contained runs can have different user settings without duplicating login state or common extensions; `--share-host-claude` remains as a compatibility path for the legacy behavior.

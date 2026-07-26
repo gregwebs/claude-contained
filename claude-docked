@@ -24,6 +24,7 @@ Options:
   -y, --yolo         Skip all permission prompts (tool-specific flag)
   -N, --contained-node-modules  Use container-specific node_modules (skip prompt)
   --share-skills=DIR  Mount shared skill folders from DIR (opt-in)
+  --share-host-claude  Mount host ~/.claude directly as container ~/.claude
   --readonly-extras  Mount all extra dirs read-only (suffix overrides per-path)
   -a, --attach [NAME]  Attach to running container (runs tool, or bash with -s)
   -h, --help         Show this help message
@@ -34,7 +35,13 @@ Behavior:
   - Additional directories are automatically added via --add-dir (claude, codex only).
   - Append :ro to an extra dir to mount it read-only (or :rw to force read-write).
     The working directory cannot be read-only.
-  - Tool configs (~/.claude, ~/.codex, ~/.copilot, ~/.gemini, ~/.vibe), Maven cache (~/.m2), and Vaadin state (~/.vaadin) are bind-mounted.
+  - Claude uses ~/.claude-contained/claude as container ~/.claude by default.
+    Account state remains shared through ~/.claude-contained/.claude.json, and
+    host ~/.claude skills, agents, commands, and plugins are mounted into the
+    contained profile. Use --share-host-claude or
+    CLAUDE_CONTAINED_SHARE_HOST_CLAUDE=1 to mount host ~/.claude directly.
+  - Other tool configs (~/.codex, ~/.copilot, ~/.gemini, ~/.vibe), Maven cache
+    (~/.m2), and Vaadin state (~/.vaadin) are bind-mounted.
   - --share-skills=DIR mounts DIR as each tool's skills directory.
     For Codex, ~/.codex/skills/.system is mounted back over DIR/.system
     so built-in skills remain visible while new installs write to DIR.
@@ -247,6 +254,8 @@ host_forwards=()
 dns_servers=()
 srt_allow_hosts=()
 srt_disable=0
+share_host_claude=0
+[[ "${CLAUDE_CONTAINED_SHARE_HOST_CLAUDE:-}" == "1" ]] && share_host_claude=1
 while [[ "${1:-}" == -* ]]; do
   case "${1:-}" in
     -h|--help)
@@ -267,6 +276,10 @@ while [[ "${1:-}" == -* ]]; do
         echo "error: --share-skills requires a non-empty directory" >&2
         exit 2
       fi
+      shift
+      ;;
+    --share-host-claude)
+      share_host_claude=1
       shift
       ;;
     --rebuild)
@@ -900,7 +913,15 @@ fi
 
 # Capture host HOME for path parity
 HOST_HOME="$HOME"
+HOST_CLAUDE_CONTAINED="${HOST_HOME}/.claude-contained"
 HOST_CLAUDE_DIR="${HOST_HOME}/.claude"
+HOST_CONTAINED_CLAUDE_DIR="${HOST_CLAUDE_CONTAINED}/claude"
+CONTAINER_CLAUDE_DIR="${HOST_HOME}/.claude"
+if [[ $share_host_claude -eq 1 ]]; then
+  HOST_CLAUDE_PROFILE_DIR="$HOST_CLAUDE_DIR"
+else
+  HOST_CLAUDE_PROFILE_DIR="$HOST_CONTAINED_CLAUDE_DIR"
+fi
 HOST_CODEX_DIR="${HOST_HOME}/.codex"
 HOST_GEMINI_DIR="${HOST_HOME}/.gemini"
 HOST_COPILOT_DIR="${HOST_HOME}/.copilot"
@@ -910,7 +931,13 @@ HOST_VAADIN_DIR="${HOST_HOME}/.vaadin"
 HOST_GITCONFIG="${HOST_HOME}/.gitconfig"
 
 # Ensure persistent directories exist on host
-mkdir -p "${HOST_CLAUDE_DIR}" "${HOST_CODEX_DIR}" "${HOST_COPILOT_DIR}" "${HOST_GEMINI_DIR}" "${HOST_VIBE_DIR}" "${HOST_M2_DIR}" "${HOST_VAADIN_DIR}"
+mkdir -p "${HOST_CLAUDE_DIR}" "${HOST_CLAUDE_CONTAINED}" "${HOST_CLAUDE_PROFILE_DIR}" "${HOST_CODEX_DIR}" "${HOST_COPILOT_DIR}" "${HOST_GEMINI_DIR}" "${HOST_VIBE_DIR}" "${HOST_M2_DIR}" "${HOST_VAADIN_DIR}"
+
+if [[ $share_host_claude -eq 0 ]]; then
+  for claude_resource_dir in skills agents commands plugins; do
+    mkdir -p "${HOST_CLAUDE_DIR}/${claude_resource_dir}" "${HOST_CLAUDE_PROFILE_DIR}/${claude_resource_dir}"
+  done
+fi
 
 # Build container args
 CLAUDE_MEMORY="${CLAUDE_MEMORY:-8g}"
@@ -959,7 +986,7 @@ container_argv=(
   -w "${main_host}"
   ${HOST_TZ:+-e "TZ=${HOST_TZ}"}
   ${AI_GH_TOKEN:+-e "GH_TOKEN=${AI_GH_TOKEN}"}
-  --mount "type=bind,src=${HOST_CLAUDE_DIR},dst=${HOST_HOME}/.claude"
+  --mount "type=bind,src=${HOST_CLAUDE_PROFILE_DIR},dst=${CONTAINER_CLAUDE_DIR}"
   --mount "type=bind,src=${HOST_CODEX_DIR},dst=${HOST_HOME}/.codex"
   --mount "type=bind,src=${HOST_COPILOT_DIR},dst=${HOST_HOME}/.copilot"
   --mount "type=bind,src=${HOST_GEMINI_DIR},dst=${HOST_HOME}/.gemini"
@@ -968,6 +995,17 @@ container_argv=(
   --mount "type=bind,src=${HOST_VAADIN_DIR},dst=${HOST_HOME}/.vaadin"
   --mount "type=bind,src=${main_host},dst=${main_host}"
 )
+
+add_claude_extension_resource_mounts() {
+  local resource
+
+  [[ $share_host_claude -eq 1 ]] && return 0
+  for resource in skills agents commands plugins; do
+    container_argv+=( --mount "type=bind,src=${HOST_CLAUDE_DIR}/${resource},dst=${CONTAINER_CLAUDE_DIR}/${resource}" )
+  done
+}
+
+add_claude_extension_resource_mounts
 
 add_shared_skills_mount() {
   local dst="$1"
@@ -979,7 +1017,7 @@ add_shared_skills_mount() {
 }
 
 if [[ -n "$share_skills_dir" ]]; then
-  add_shared_skills_mount "${HOST_CLAUDE_DIR}/skills" "${HOST_CLAUDE_DIR}"
+  add_shared_skills_mount "${CONTAINER_CLAUDE_DIR}/skills" "${HOST_CLAUDE_PROFILE_DIR}"
   add_shared_skills_mount "${HOST_CODEX_DIR}/skills" "${HOST_CODEX_DIR}"
   add_shared_skills_mount "${HOST_HOME}/.agents/skills" "${HOST_HOME}/.agents"
   add_shared_skills_mount "${HOST_COPILOT_DIR}/skills" "${HOST_COPILOT_DIR}"
@@ -1059,10 +1097,8 @@ fi
 # See: https://github.com/apple/containerization/issues/79
 # Canonical location is ~/.claude-contained/.claude.json; ~/.claude.json is a symlink to it.
 # All containers access the same file via virtiofs, so Claude Code's own locking works.
-HOST_CLAUDE_CONTAINED="${HOST_HOME}/.claude-contained"
 HOST_CLAUDE_JSON="${HOST_HOME}/.claude.json"
 SHARED_CLAUDE_JSON="${HOST_CLAUDE_CONTAINED}/.claude.json"
-mkdir -p "${HOST_CLAUDE_CONTAINED}"
 
 # Git config (for commit identity)
 # Copy to shared directory for consistency with claude-contained (entrypoint copies to ~/.gitconfig)
