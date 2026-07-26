@@ -143,7 +143,7 @@ fi
 # entrypoint entirely, so attach paths route through srt-run instead.
 if [ "${SRT_DISABLE:-}" != "1" ]; then
   if /usr/local/bin/srt-settings.sh; then
-    set -- srt --settings "${SRT_SETTINGS_PATH:-/run/srt-settings.json}" "$@"
+    set -- srt --settings "${SRT_SETTINGS_PATH:-/run/srt-settings.json}" -- "$@"
   else
     echo "entrypoint: failed to generate sandbox policy; refusing to run unsandboxed." >&2
     echo "            re-run with --no-sandbox to bypass deliberately." >&2

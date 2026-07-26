@@ -16,7 +16,7 @@ Options:
   -p HOST:CONTAINER  Publish container port to host (can be repeated)
   -e, --env KEY=VALUE  Set an env var for the tool process (can be repeated)
   --no-project-env   Ignore the project's .claude-contained/env file
-  --dns IP           Use IP as a DNS resolver (can be repeated)
+  --dns IP           Use IP as a DNS resolver (default: 1.1.1.1; repeatable)
   --allow-host HOST  Allow sandbox egress to HOST (can be repeated)
   --no-sandbox       Disable the srt sandbox (debugging escape hatch)
   -s, --shell        Start a bash shell instead of the AI tool (for debugging)
@@ -51,8 +51,9 @@ Behavior:
     so built-in skills remain visible while new installs write to DIR.
   - SSH agent forwarding is disabled by default; use --ssh to enable (for git push).
   - Apple Containers defaults the container's resolver to the vmnet gateway, which
-    often cannot resolve. Use --dns 1.1.1.1, or set CLAUDE_DNS=1.1.1.1 (comma-
-    separated for several) to apply it to every run without typing the flag.
+    often cannot resolve. The launcher uses --dns 1.1.1.1 by default. Explicit
+    --dns wins; set CLAUDE_DNS=system to use the runtime default, or
+    CLAUDE_DNS=1.1.1.1,8.8.8.8 for a per-user list.
   - -e/--env passes env vars to the tool. KEY=VALUE lines in the main directory's
     .claude-contained/env are also applied (--env wins; --no-project-env skips the
     file). That file is writable from inside the container, so keys that would
@@ -1420,10 +1421,18 @@ fi
 # Build container args
 CLAUDE_MEMORY="${CLAUDE_MEMORY:-8g}"
 # Apple Containers points the container at the vmnet gateway (192.168.64.1) for
-# DNS, which is frequently unreachable; --dns overrides it. CLAUDE_DNS supplies
-# a default (comma-separated) so it does not have to be typed on every run.
-if [[ ${#dns_servers[@]} -eq 0 && -n "${CLAUDE_DNS:-}" ]]; then
-  IFS=',' read -ra dns_servers <<< "${CLAUDE_DNS}"
+# DNS, which is frequently unreachable. Use Cloudflare's resolver by default so
+# contained agents can reach their API without an extra flag. Explicit --dns
+# still wins, and CLAUDE_DNS=system opts back into the runtime default resolver.
+if [[ ${#dns_servers[@]} -eq 0 ]]; then
+  if [[ ${CLAUDE_DNS+x} ]]; then
+    case "$CLAUDE_DNS" in
+      ""|system|none) ;;
+      *) IFS=',' read -ra dns_servers <<< "${CLAUDE_DNS}" ;;
+    esac
+  else
+    dns_servers=(1.1.1.1)
+  fi
 fi
 if [[ -n "$custom_container_name" ]]; then
   container_name="$custom_container_name"

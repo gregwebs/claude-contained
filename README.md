@@ -72,7 +72,7 @@ claude-contained [options] [main_dir] [extra_dir ...] [-- <tool args...>]
 | `-p HOST:CONTAINER` | Publish container port to host (can be repeated) |
 | `-e`, `--env KEY=VALUE` | Set an env var for the tool process (can be repeated). See [Environment Variables](#environment-variables) |
 | `--no-project-env` | Ignore the project's `.claude-contained/env` file |
-| `--dns IP` | Use `IP` as a DNS resolver (can be repeated). See [DNS](#dns) |
+| `--dns IP` | Use `IP` as a DNS resolver (can be repeated; Apple default is `1.1.1.1`). See [DNS](#dns) |
 | `--allow-host HOST` | Allow sandbox egress to `HOST` (can be repeated). See [Sandboxing](#sandboxing) |
 | `--no-sandbox` | Disable the srt sandbox for this run (debugging escape hatch) |
 | `-s`, `--shell` | Start a bash shell instead of the AI tool (for debugging) |
@@ -254,20 +254,24 @@ container builder start --dns 1.1.1.1
 
 The builder keeps that setting, so subsequent builds work without further flags.
 
-**At run time**, use `--dns`:
+**At run time**, `claude-contained` now supplies `--dns 1.1.1.1` by default so
+interactive agent traffic does not depend on the flaky vmnet resolver. To choose a different
+resolver, use `--dns`:
 
 ```bash
 claude-contained --dns 1.1.1.1 .
 ```
 
-To avoid typing it every run, set `CLAUDE_DNS` (comma-separated for several):
+To set a per-user resolver list, use `CLAUDE_DNS` (comma-separated for several):
 
 ```bash
 export CLAUDE_DNS=1.1.1.1,8.8.8.8
 ```
 
-An explicit `--dns` flag overrides `CLAUDE_DNS`. Both work with `claude-docked`
-too, though Docker usually resolves fine without them.
+An explicit `--dns` flag overrides `CLAUDE_DNS`. Set `CLAUDE_DNS=system` (or
+`CLAUDE_DNS=none`) to opt back into the runtime's default resolver. `claude-docked`
+does not add a resolver by default because Docker usually resolves fine, but the same
+`--dns` and `CLAUDE_DNS` override rules apply.
 
 If DNS still fails, check whether something local is holding port 53
 (`sudo lsof -nP -iUDP:53`) — a local resolver, VPN client, or iCloud Private Relay

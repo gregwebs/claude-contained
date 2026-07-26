@@ -51,7 +51,8 @@ Behavior:
     so built-in skills remain visible while new installs write to DIR.
   - SSH agent forwarding is disabled by default; use --ssh to enable (for git push).
   - --dns overrides the container's resolvers; set CLAUDE_DNS=1.1.1.1 (comma-
-    separated for several) to apply it to every run without typing the flag.
+    separated for several) to apply it to every run without typing the flag, or
+    CLAUDE_DNS=system to use Docker's runtime default.
   - -e/--env passes env vars to the tool. KEY=VALUE lines in the main directory's
     .claude-contained/env are also applied (--env wins; --no-project-env skips the
     file). That file is writable from inside the container, so keys that would
@@ -1408,10 +1409,13 @@ fi
 # Build container args
 CLAUDE_MEMORY="${CLAUDE_MEMORY:-8g}"
 # CLAUDE_DNS supplies a default (comma-separated) so --dns does not have to be
-# typed on every run. Kept in parity with claude-contained, where the vmnet
-# gateway resolver is frequently unreachable.
-if [[ ${#dns_servers[@]} -eq 0 && -n "${CLAUDE_DNS:-}" ]]; then
-  IFS=',' read -ra dns_servers <<< "${CLAUDE_DNS}"
+# typed on every run. CLAUDE_DNS=system/none explicitly keeps Docker's runtime
+# resolver.
+if [[ ${#dns_servers[@]} -eq 0 && ${CLAUDE_DNS+x} ]]; then
+  case "$CLAUDE_DNS" in
+    ""|system|none) ;;
+    *) IFS=',' read -ra dns_servers <<< "${CLAUDE_DNS}" ;;
+  esac
 fi
 if [[ -n "$custom_container_name" ]]; then
   container_name="$custom_container_name"
