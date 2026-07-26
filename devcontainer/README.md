@@ -20,10 +20,18 @@ This template enables VS Code devcontainer workflow with the claude-contained im
 
 2. **VS Code with Dev Containers extension installed**
 
-3. **Required host directories** (created automatically by Claude Code):
-   - `~/.claude` - Claude configuration
-   - `~/.claude-contained` - Relocated credentials
+3. **Required host directories**:
+   - `~/.claude-contained/claude` - contained Claude settings and profile state
+   - `~/.claude-contained` - shared Claude account state, including `.claude.json`
+   - `~/.claude/{skills,agents,commands,plugins}` - shared Claude extension resources
    - `~/.m2` - Maven cache (optional, create if needed: `mkdir -p ~/.m2`)
+
+   Create the Claude directories before first use if they do not already exist:
+   ```bash
+   mkdir -p ~/.claude-contained/claude ~/.claude/{skills,agents,commands,plugins}
+   ```
+
+Contained Claude settings are separate from host Claude settings. The template mounts `~/.claude-contained/claude` as the container's `~/.claude`; host `~/.claude/settings.json` is not mounted. Login/account state remains shared through `~/.claude-contained/.claude.json`, and the common extension resource directories above are mounted from the host Claude profile.
 
 ## Usage
 
@@ -80,7 +88,7 @@ The image includes JetBrains Runtime 25. To use a different JDK, you would need 
 
 1. **Image must be pre-built**: Unlike Dockerfile-based devcontainers, this references a pre-built image
 
-2. **Don't run simultaneously with standalone**: Avoid running this devcontainer while also running `claude-contained` or `claude-docked` with the same `~/.claude` directory
+2. **Don't run simultaneously with standalone**: Avoid running this devcontainer while also running `claude-contained` or `claude-docked` against the same contained Claude profile
 
 3. **UID/GID differences**: The devcontainer runs as the `dev` user. File permissions are generally handled well by VS Code, but you may see different ownership than on host
 

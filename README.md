@@ -2,14 +2,15 @@
 
 Seamlessly run CLI coding agents (Claude, Codex, Gemini, Vibe) inside an [Apple Container](https://github.com/apple/container) or [Docker](https://www.docker.com) container with persistent state. 
 
-The main goal is to provide a seamless experience; `alias claude='claude-contained --yolo'` and now `claude` runs in a container with your settings. Only `.` or the folders you specify are shared with the container.
-History is retained (even if you switch back to un-contained `claude`). 
+The main goal is to provide a seamless experience; `alias claude='claude-contained --yolo'` and now `claude` runs in a container with a contained Claude profile. Only `.` or the folders you specify are shared with the container.
+Login/account state and common Claude extension resources are retained even if you switch back to un-contained `claude`.
 
 There are some caveats:
 
 - **Host localhost access**: `-H PORT` works with `claude-docked` (Docker) but not `claude-contained` (Apple Containers) for services bound to localhost. See [Accessing Host Services](#accessing-host-services). (Apple Containers seems to be gaining support soon.)
 - **`~/.claude.json` is relocated**: On first run, your `~/.claude.json` is moved to `~/.claude-contained/.claude.json` and replaced with a symlink. This allows containers to share the file. **If you delete `~/.claude-contained/`, you will lose your Claude credentials and some settings.** You'll have to log in again. This is a limitation on how files can be shared with the container. 
-- **Don't mix contained and uncontained at the same time**: Running `claude-contained` and regular `claude` simultaneously may cause issues, as both access the same config file but through different paths. Run one or the other, not both at once. This will be fixed in the future.
+- **Contained Claude settings are separate**: By default, contained runs use `~/.claude-contained/claude` as their Claude profile and do not mount host `~/.claude/settings.json`. Host Claude extension resources (`skills`, `agents`, `commands`, `plugins`) and `~/.claude-contained/.claude.json` are still shared.
+- **Be careful mixing contained and uncontained at the same time**: Regular `claude` and contained Claude use separate settings by default, but they still share account state and extension resources. Concurrent writes to those shared files may conflict.
 - **Codex and PATH**: Codex runs commands via `bash -lc`, which sources `/etc/profile` and resets PATH to the Debian default. This means tools installed outside standard locations (e.g., via SDKMAN) won't be found unless symlinked into `/usr/local/bin/`. When the Java layer is included, the image has symlinks for `java`, `javac`, `jar`, `mvn`, and `jbang`. If you install additional tools in non-standard paths, add similar symlinks in the Dockerfile.
 
 ## Quick Start
@@ -78,6 +79,7 @@ claude-contained [options] [main_dir] [extra_dir ...] [-- <tool args...>]
 | `-y`, `--yolo` | Skip all permission prompts (tool-specific flag) |
 | `-N`, `--contained-node-modules` | Use container-specific node_modules (skip prompt) |
 | `--share-skills=DIR` | Mount shared skill folders from `DIR` (opt-in, no default; use a full path) |
+| `--share-host-claude` | Compatibility mode: mount host `~/.claude` directly as container `~/.claude` |
 | `-a`, `--attach [NAME]` | Attach to running container (runs tool, or bash with `-s`) |
 | `-h`, `--help` | Show help message |
 
@@ -85,19 +87,23 @@ claude-contained [options] [main_dir] [extra_dir ...] [-- <tool args...>]
 
 | Tool | Command | Yolo Flag | Config Dir |
 |------|---------|-----------|------------|
-| [Claude Code](https://claude.ai/code) | `claude` | `--dangerously-skip-permissions` | `~/.claude` |
+| [Claude Code](https://claude.ai/code) | `claude` | `--dangerously-skip-permissions` | `~/.claude-contained/claude` mounted as `~/.claude` |
 | [OpenAI Codex](https://github.com/openai/codex) | `codex` | `--yolo` | `~/.codex` |
 | [Google Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini` | `--yolo` | `~/.gemini` |
 | [Mistral Vibe](https://github.com/mistralai/mistral-vibe) | `vibe` | `--auto-approve` | `~/.vibe` |
 
-All config directories are bind-mounted regardless of which tool you run.
+The contained Claude profile and the other tools' config directories are bind-mounted regardless of which tool you run.
 
 ### Behavior
 
 - First directory is the working directory
 - Additional directories are mounted and auto-added via `--add-dir` (Claude and Codex only)
 - Append `:ro` to an extra dir to mount it read-only (or `:rw` to force read-write); use `--readonly-extras` to default all extras to read-only
-- Tool configs and Maven cache (`~/.m2`) are bind-mounted for persistence
+- Claude uses `~/.claude-contained/claude` as its contained profile by default. Host `~/.claude/settings.json` is not mounted or copied into that profile.
+- Claude account state remains shared through `~/.claude-contained/.claude.json`.
+- Host Claude extension resources are shared from `~/.claude/{skills,agents,commands,plugins}` into the contained profile.
+- Use `--share-host-claude` or `CLAUDE_CONTAINED_SHARE_HOST_CLAUDE=1` to restore the legacy behavior of mounting host `~/.claude` directly.
+- Other tool configs and Maven cache (`~/.m2`) are bind-mounted for persistence
 - `--share-skills=DIR` mounts `DIR` as each tool's skills directory: `~/.claude/skills`, `~/.codex/skills`, `~/.agents/skills`, and `~/.<tool>/skills` for Copilot, Gemini, and Vibe. For Codex, the host's `~/.codex/skills/.system` is mounted back over `DIR/.system` so built-in skills remain visible while new installs write to `DIR`. Use a full path; `~` is not expanded by the launcher.
 - SSH agent forwarding is disabled by default; use `-S`/`--ssh` to enable
 - Git worktrees are detected; main repository is included for full git access
@@ -122,6 +128,7 @@ claude-contained --rebuild .                        # Refresh AI tools first
 claude-contained --rebuild=full .                   # Full fresh rebuild first
 claude-contained -s                                 # Debug shell
 claude-contained --share-skills=/Users/me/Projects/skills . # Share skills into tool skill dirs
+claude-contained --share-host-claude .              # Legacy direct host ~/.claude sharing
 
 # Port forwarding
 claude-contained -p 8080:8080 .                     # Expose port 8080
@@ -406,7 +413,7 @@ Use the claude-contained image as a VS Code devcontainer for Java/Spring/Vaadin 
 ### Limitations
 
 - **Image must be pre-built**: Run `docker build` before using
-- **Don't run simultaneously**: Avoid running devcontainer while also using standalone `claude-contained` or `claude-docked` (shared `~/.claude` state)
+- **Don't run simultaneously**: Avoid running devcontainer while also using standalone `claude-contained` or `claude-docked` against the same contained Claude profile
 - **host.local may not work**: VS Code manages networking differently; use explicit port forwarding instead
 
 See `devcontainer/README.md` for detailed usage and customization options.
