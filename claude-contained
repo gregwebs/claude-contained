@@ -27,6 +27,8 @@ Options:
   --share-host-claude  Mount host ~/.claude directly as container ~/.claude
   --readonly-extras  Mount all extra dirs read-only (suffix overrides per-path)
   -a, --attach [NAME]  Attach to running container (runs tool, or bash with -s)
+  --zellij          Run the tool inside a persistent Zellij workspace
+  --new-session[=NAME]  With --zellij, start/resurrect a fresh session target
   -h, --help         Show this help message
 
 Behavior:
@@ -54,6 +56,8 @@ Behavior:
     one run, or --no-sandbox to turn it off while debugging.
   - Git worktrees are detected; main repository's .git directory is mounted for full git access.
   - Linked worktrees hidden from the container can be auto-locked while the container runs.
+  - --zellij starts a named Zellij session and keeps the container alive after detach.
+    Use --zellij --attach [NAME] to reconnect to a live Zellij session.
 
 Examples:
   claude-contained                     # Run claude in current directory
@@ -78,6 +82,9 @@ Examples:
   claude-contained --share-skills=/Users/me/Projects/skills .
   claude-contained -a                  # List and attach to running container
   claude-contained -a myproject        # Attach or create named container
+  claude-contained --zellij .          # Start this project in Zellij
+  claude-contained --zellij --attach   # Attach to a live Zellij-backed container
+  claude-contained --zellij --new-session=review .
 EOF
 }
 
@@ -132,6 +139,14 @@ build_attach_shell_cmd() {
   attach_cmd+=(bash)
 }
 
+build_zellij_attach_cmd() {
+  local session="$1"
+
+  attach_cmd=()
+  [[ $srt_disable -eq 0 ]] && attach_cmd+=(srt-run)
+  attach_cmd+=(/usr/local/bin/zellij-attach "$session")
+}
+
 # Environment args for exec (PATH not set by entrypoint when using exec)
 exec_env_args() {
   printf '%s ' -e "HOME=$HOME" -e "JAVA_HOME=/opt/jbr" -e "PATH=/opt/claude:/home/dev/.sdkman/candidates/maven/current/bin:/home/dev/.sdkman/candidates/jbang/current/bin:/opt/jbr/bin:$HOME/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -156,6 +171,95 @@ container_arch() {
   # Normalize macOS arm64 to Linux aarch64
   [[ "$arch" == "arm64" ]] && arch="aarch64"
   echo "$arch"
+}
+
+path_hash_8() {
+  local path="$1"
+
+  if command -v shasum &>/dev/null; then
+    printf '%s' "$path" | shasum -a 256 | awk '{print substr($1, 1, 8)}'
+  elif command -v sha256sum &>/dev/null; then
+    printf '%s' "$path" | sha256sum | awk '{print substr($1, 1, 8)}'
+  else
+    printf '%s' "$path" | cksum | awk '{printf "%08x\n", $1}'
+  fi
+}
+
+default_zellij_session_name() {
+  local dir="$1"
+
+  printf 'cc-%s-%s\n' "$(sanitize_foldername "$dir")" "$(path_hash_8 "$dir")"
+}
+
+validate_zellij_session_name() {
+  local name="$1"
+
+  if [[ -z "$name" ]]; then
+    echo "error: Zellij session name cannot be empty" >&2
+    return 1
+  fi
+  if [[ "$name" == -* || ! "$name" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+    echo "error: invalid Zellij session name: $name" >&2
+    echo "       Use only letters, numbers, '_', '.', and '-'; do not start with '-'." >&2
+    return 1
+  fi
+  return 0
+}
+
+list_running_aic_containers() {
+  container list --quiet 2>/dev/null | grep "^aic-" || true
+}
+
+zellij_session_from_env_lines() {
+  local line marker=0 session=""
+
+  while IFS= read -r line; do
+    case "$line" in
+      CLAUDE_CONTAINED_ZELLIJ=1) marker=1 ;;
+      CLAUDE_CONTAINED_ZELLIJ_SESSION=*) session="${line#CLAUDE_CONTAINED_ZELLIJ_SESSION=}" ;;
+    esac
+  done
+
+  [[ $marker -eq 1 && -n "$session" ]] && printf '%s\n' "$session"
+}
+
+container_zellij_session() {
+  local name="$1"
+
+  zellij_session_from_env_lines < <(
+    container inspect "$name" 2>/dev/null | jq -r '
+      def envlines:
+        if type == "array" then
+          .[] | if type == "string" then .
+                elif type == "object" and has("name") and has("value") then "\(.name)=\(.value)"
+                elif type == "object" then to_entries[] | "\(.key)=\(.value)"
+                else empty end
+        elif type == "object" then
+          to_entries[] | "\(.key)=\(.value)"
+        else empty end;
+      [
+        .configuration.initProcess.environment?,
+        .Configuration.InitProcess.Environment?,
+        .config.env?,
+        .Config.Env?
+      ] | .[]? | envlines
+    ' 2>/dev/null || true
+  )
+}
+
+load_live_zellij_records() {
+  local name session
+
+  zellij_container_names=()
+  zellij_session_names=()
+  while IFS= read -r name; do
+    [[ -z "$name" ]] && continue
+    session="$(container_zellij_session "$name")"
+    if [[ -n "$session" ]]; then
+      zellij_container_names+=("$name")
+      zellij_session_names+=("$session")
+    fi
+  done < <(list_running_aic_containers)
 }
 
 dir_is_empty() {
@@ -243,6 +347,10 @@ contained_node_modules=0
 attach_mode=0
 attach_name=""
 custom_container_name=""
+zellij_mode=0
+zellij_new_session=0
+zellij_new_session_name=""
+zellij_new_session_name_set=0
 rebuild_mode="none"
 tool="claude"
 ro_default=0
@@ -358,6 +466,24 @@ while [[ "${1:-}" == -* ]]; do
       srt_disable=1
       shift
       ;;
+    --zellij)
+      zellij_mode=1
+      shift
+      ;;
+    --new-session)
+      zellij_new_session=1
+      shift
+      if [[ -n "${1:-}" && "${1:-}" != -* && "${1:-}" != "." && "${1:-}" != */* && ! -e "${1:-}" ]]; then
+        echo "error: named Zellij sessions require --new-session=NAME" >&2
+        exit 2
+      fi
+      ;;
+    --new-session=*)
+      zellij_new_session=1
+      zellij_new_session_name_set=1
+      zellij_new_session_name="${1#*=}"
+      shift
+      ;;
     -a|--attach)
       attach_mode=1
       shift
@@ -372,6 +498,21 @@ while [[ "${1:-}" == -* ]]; do
       ;;
   esac
 done
+
+if [[ $zellij_new_session -eq 1 && $zellij_mode -eq 0 ]]; then
+  echo "error: --new-session is valid only with --zellij" >&2
+  exit 2
+fi
+if [[ $zellij_mode -eq 1 && $attach_mode -eq 1 && $shell_mode -eq 1 ]]; then
+  echo "error: --zellij --attach cannot be combined with --shell" >&2
+  exit 2
+fi
+if [[ $zellij_new_session_name_set -eq 1 ]]; then
+  validate_zellij_session_name "$zellij_new_session_name" || exit 2
+fi
+if [[ $zellij_mode -eq 1 && -n "$attach_name" ]]; then
+  validate_zellij_session_name "$attach_name" || exit 2
+fi
 
 if [[ -n "$share_skills_dir" ]]; then
   if [[ ! -d "$share_skills_dir" ]]; then
@@ -396,8 +537,59 @@ if [[ "$rebuild_mode" != "none" ]]; then
   exit 0
 fi
 
+if [[ $zellij_mode -eq 1 && $attach_mode -eq 1 ]]; then
+  load_live_zellij_records
+
+  if [[ -z "$attach_name" ]]; then
+    if [[ ${#zellij_container_names[@]} -eq 0 ]]; then
+      echo "No live Zellij sessions"
+      exit 0
+    fi
+    if [[ ${#zellij_container_names[@]} -eq 1 ]]; then
+      attach_name="${zellij_session_names[0]}"
+      attach_container="${zellij_container_names[0]}"
+    else
+      echo "Live Zellij sessions:"
+      for i in "${!zellij_container_names[@]}"; do
+        echo "  $((i+1))) ${zellij_session_names[$i]} (${zellij_container_names[$i]#aic-})"
+      done
+      echo ""
+      read -p "Select session (1-${#zellij_container_names[@]}, q to quit): " choice
+      if [[ -z "$choice" || "$choice" == "q" || "$choice" == "Q" ]]; then
+        exit 0
+      fi
+      if ! [[ "$choice" =~ ^[0-9]+$ ]] || (( choice < 1 || choice > ${#zellij_container_names[@]} )); then
+        echo "Invalid selection" >&2
+        exit 1
+      fi
+      attach_name="${zellij_session_names[$((choice-1))]}"
+      attach_container="${zellij_container_names[$((choice-1))]}"
+    fi
+  else
+    attach_container=""
+    match_count=0
+    for i in "${!zellij_container_names[@]}"; do
+      if [[ "${zellij_session_names[$i]}" == "$attach_name" ]]; then
+        attach_container="${zellij_container_names[$i]}"
+        match_count=$((match_count + 1))
+      fi
+    done
+    if [[ $match_count -eq 0 ]]; then
+      echo "No live Zellij session named ${attach_name}" >&2
+      exit 1
+    fi
+    if [[ $match_count -gt 1 ]]; then
+      echo "Multiple live containers report Zellij session ${attach_name}; refusing ambiguous attach" >&2
+      exit 1
+    fi
+  fi
+
+  build_zellij_attach_cmd "$attach_name"
+  exec container exec -it -u dev $(exec_env_args) "$attach_container" "${attach_cmd[@]}"
+fi
+
 # Handle attach mode
-if [[ $attach_mode -eq 1 ]]; then
+if [[ $attach_mode -eq 1 && $zellij_mode -eq 0 ]]; then
   # Get running containers with our prefix
   prefix="aic-"
   containers=()
@@ -878,6 +1070,40 @@ fi
 
 main_host="$(resolve_path "${paths[0]}")"
 
+zellij_session=""
+if [[ $zellij_mode -eq 1 ]]; then
+  if [[ $zellij_new_session_name_set -eq 1 ]]; then
+    zellij_session="$zellij_new_session_name"
+  else
+    zellij_session="$(default_zellij_session_name "$main_host")"
+  fi
+  validate_zellij_session_name "$zellij_session" || exit 2
+
+  load_live_zellij_records
+  zellij_target_live=0
+  for existing_session in "${zellij_session_names[@]+"${zellij_session_names[@]}"}"; do
+    if [[ "$existing_session" == "$zellij_session" ]]; then
+      zellij_target_live=1
+      break
+    fi
+  done
+
+  if [[ $zellij_target_live -eq 1 ]]; then
+    echo "Zellij session '${zellij_session}' is already live." >&2
+    echo "Use --zellij --attach ${zellij_session}, or choose a different session with --new-session=NAME." >&2
+    exit 1
+  fi
+
+  if [[ $zellij_new_session -eq 0 && ${#zellij_session_names[@]} -gt 0 ]]; then
+    echo "A Zellij-backed container is already running:" >&2
+    for existing_session in "${zellij_session_names[@]}"; do
+      echo "  ${existing_session}" >&2
+    done
+    echo "Use --zellij --attach [NAME] to reconnect, or --zellij --new-session[=NAME] to start another session." >&2
+    exit 1
+  fi
+fi
+
 mounted_roots=("$main_host")
 for p in "${paths[@]:1}"; do
   mounted_roots+=("$(resolve_path "$p")")
@@ -926,6 +1152,9 @@ HOST_GITCONFIG="${HOST_HOME}/.gitconfig"
 
 # Ensure persistent directories exist on host
 mkdir -p "${HOST_CLAUDE_DIR}" "${HOST_CLAUDE_CONTAINED}" "${HOST_CLAUDE_PROFILE_DIR}" "${HOST_CODEX_DIR}" "${HOST_COPILOT_DIR}" "${HOST_GEMINI_DIR}" "${HOST_VIBE_DIR}" "${HOST_M2_DIR}" "${HOST_VAADIN_DIR}"
+if [[ $zellij_mode -eq 1 ]]; then
+  mkdir -p "${HOST_CLAUDE_CONTAINED}/zellij/data" "${HOST_CLAUDE_CONTAINED}/zellij/cache"
+fi
 
 if [[ $share_host_claude -eq 0 ]]; then
   for claude_resource_dir in skills agents commands plugins; do
@@ -1064,6 +1293,12 @@ if [[ ${#srt_allow_hosts[@]} -gt 0 ]]; then
   IFS=','; allow_hosts_str="${srt_allow_hosts[*]}"; unset IFS
   container_argv+=( -e "SRT_ALLOW_HOSTS=${allow_hosts_str}" )
 fi
+if [[ $zellij_mode -eq 1 ]]; then
+  container_argv+=(
+    -e "CLAUDE_CONTAINED_ZELLIJ=1"
+    -e "CLAUDE_CONTAINED_ZELLIJ_SESSION=${zellij_session}"
+  )
+fi
 
 # SSH agent forwarding (opt-in for security)
 if [[ $ssh_mode -eq 1 ]]; then
@@ -1188,11 +1423,26 @@ if [[ ${#tool_args[@]} -gt 0 ]]; then
 fi
 
 # Run container
+run_argv=()
 if [[ $shell_mode -eq 1 ]]; then
-  "${container_argv[@]}" claude-contained:latest bash && container_exit=0 || container_exit=$?
+  run_argv=(bash)
 else
-  "${container_argv[@]}" claude-contained:latest "${tool_argv[@]}" && container_exit=0 || container_exit=$?
+  run_argv=("${tool_argv[@]}")
 fi
+if [[ $zellij_mode -eq 1 ]]; then
+  run_argv=(
+    bash -lc
+    'if ! command -v "$0" >/dev/null 2>&1; then
+       echo "error: claude-contained image is missing Zellij support (zellij-run)." >&2
+       echo "       Rebuild it with: claude-contained --rebuild=full" >&2
+       exit 127
+     fi
+     exec "$0" "$@"'
+    zellij-run "$zellij_session" -- "${run_argv[@]}"
+  )
+fi
+
+"${container_argv[@]}" claude-contained:latest "${run_argv[@]}" && container_exit=0 || container_exit=$?
 
 check_for_updates
 

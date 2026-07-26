@@ -93,6 +93,24 @@ if [ -n "${GIT_PROTECT_DIRS:-}" ]; then
   done
 fi
 
+if [ "${CLAUDE_CONTAINED_ZELLIJ:-}" = "1" ] && [ -n "${CLAUDE_CONTAINED_ZELLIJ_SESSION:-}" ]; then
+  _zellij_uid="${HOST_UID:-$(id -u)}"
+  write_paths+=(
+    "${_home}/.claude-contained/zellij"
+    "${_home}/.claude-contained/zellij/data"
+    "${_home}/.claude-contained/zellij/cache"
+    "${_home}/.claude-contained/zellij/cache/org"
+    "${_home}/.claude-contained/zellij/cache/org/Zellij-Contributors"
+    "${_home}/.claude-contained/zellij/cache/org/Zellij-Contributors/Zellij"
+    "/tmp/claude-contained-zellij-runtime"
+    "/tmp/claude-contained-zellij-runtime/${CLAUDE_CONTAINED_ZELLIJ_SESSION}.sock"
+    "/tmp/claude-contained-zellij-runtime/${CLAUDE_CONTAINED_ZELLIJ_SESSION}.layout.kdl"
+    "/tmp/zellij-${_zellij_uid}"
+    "/tmp/zellij-${_zellij_uid}/zellij-log"
+    "/tmp/zellij-${_zellij_uid}/zellij-log/zellij.log"
+  )
+fi
+
 # Read-only extras appear in GIT_PROTECT_DIRS too. Listing them here is harmless:
 # the bind mount is read-only, and the kernel wins over srt's policy.
 
@@ -120,10 +138,22 @@ else
   user_json='{}'
 fi
 
+socket_paths=()
+
 # SSH agent forwarding hands the socket in at /ssh-agent; allow it only when the
 # launcher actually set up forwarding.
 if [ -n "${SSH_AUTH_SOCK:-}" ]; then
-  sock_json="[\"${SSH_AUTH_SOCK}\"]"
+  socket_paths+=("${SSH_AUTH_SOCK}")
+fi
+
+# Zellij uses a per-session Unix socket for client/server communication. The
+# launcher pins it under /tmp so it never persists outside the container.
+if [ "${CLAUDE_CONTAINED_ZELLIJ:-}" = "1" ] && [ -n "${CLAUDE_CONTAINED_ZELLIJ_SESSION:-}" ]; then
+  socket_paths+=("/tmp/claude-contained-zellij-runtime/${CLAUDE_CONTAINED_ZELLIJ_SESSION}.sock")
+fi
+
+if [ ${#socket_paths[@]} -gt 0 ]; then
+  sock_json="$(printf '%s\n' "${socket_paths[@]}" | jq -R . | jq -sc 'unique')"
 else
   sock_json='[]'
 fi

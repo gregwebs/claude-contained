@@ -81,6 +81,8 @@ claude-contained [options] [main_dir] [extra_dir ...] [-- <tool args...>]
 | `--share-skills=DIR` | Mount shared skill folders from `DIR` (opt-in, no default; use a full path) |
 | `--share-host-claude` | Compatibility mode: mount host `~/.claude` directly as container `~/.claude` |
 | `-a`, `--attach [NAME]` | Attach to running container (runs tool, or bash with `-s`) |
+| `--zellij` | Run the tool inside a persistent Zellij workspace |
+| `--new-session[=NAME]` | With `--zellij`, start/resurrect the target session even when another Zellij container is live |
 | `-h`, `--help` | Show help message |
 
 ### Supported Tools
@@ -108,6 +110,8 @@ The contained Claude profile and the other tools' config directories are bind-mo
 - SSH agent forwarding is disabled by default; use `-S`/`--ssh` to enable
 - Git worktrees are detected; main repository is included for full git access
 - If a mounted main repository has linked worktrees outside the mounted directories, the launcher offers to auto-lock those worktrees while the container runs (otherwise an in-container `git worktree prune`/`git gc` could remove them). Auto-lock reasons use `cc-autolocked-by:` and are removed when the last owning container exits. The locking is self-healing — a lock left behind by a launcher that was killed is reclaimed automatically by the next run — and fail-safe, applying the locks even if the internal mutex is unavailable so the container never runs with worktrees unprotected.
+- `--zellij` starts the selected tool, or `bash` with `--shell`, inside a named Zellij session. The default session is `cc-{project}-{path-hash}`. Zellij data lives in the Zellij session store at `~/.claude-contained/zellij/`; live sockets stay inside the container under `/tmp`.
+- Detaching from Zellij keeps the container running until that Zellij session is killed. Plain `--zellij` refuses when any Zellij-backed container is already live; use `--zellij --attach [NAME]` to reconnect or `--zellij --new-session[=NAME]` to start/resurrect another session.
 
 ### Examples
 
@@ -130,6 +134,13 @@ claude-contained -s                                 # Debug shell
 claude-contained --share-skills=/Users/me/Projects/skills . # Share skills into tool skill dirs
 claude-contained --share-host-claude .              # Legacy direct host ~/.claude sharing
 
+# Zellij workspaces
+claude-contained --zellij .                         # Start this project in Zellij
+claude-contained --zellij --attach                  # Attach when exactly one Zellij session is live
+claude-contained --zellij --attach review           # Attach to a named live Zellij session
+claude-contained --zellij --new-session=review .    # Start/resurrect a named Zellij session
+claude-contained --zellij --shell .                 # Start bash as the initial Zellij pane
+
 # Port forwarding
 claude-contained -p 8080:8080 .                     # Expose port 8080
 claude-contained -H 3845 .                          # Forward host:3845 to container
@@ -149,6 +160,22 @@ claude-docked --rebuild=full .
 `tools` rebuilds the AI CLI portion of the image and everything after it, which updates Claude Code, Codex, Gemini, Vibe, and Copilot without invalidating the entire build. If that targeted rebuild fails, the launcher automatically retries with a full rebuild.
 
 `full` forces a clean rebuild of the entire image and pulls the latest base image. Rebuild requires the launcher script to run from this repo checkout, or via a symlink into it, so it can find the local `Dockerfile`.
+
+## Zellij Workspaces
+
+`--zellij` makes Zellij the top-level process inside the container. The initial pane runs the same command the launcher would normally run: Claude, Codex, Copilot, Gemini, Vibe, or `bash` with `--shell`. The entrypoint still wraps Zellij in the srt sandbox unless `--no-sandbox` is set, so child panes inherit the same network policy.
+
+Session names are either explicit (`--new-session=review`, `--zellij --attach review`) or generated from the project path as `cc-{sanitized-basename}-{8-char-path-hash}`. Explicit names must use only letters, numbers, `_`, `.`, and `-`, and cannot start with `-`. Use `--new-session=NAME` for named sessions; `--new-session NAME` is rejected so it cannot be confused with `main_dir`.
+
+Attach behavior is intentionally strict:
+
+- `--zellij --attach [NAME]` attaches only to a live Zellij-backed container; it never creates a replacement container.
+- Bare `--zellij --attach` attaches directly if exactly one Zellij session is live, otherwise it prompts.
+- `--zellij --attach --shell` is invalid; attach reconnects to the existing Zellij workspace as-is.
+
+The Zellij session store is `~/.claude-contained/zellij/`. Zellij cache and data persist there, but runtime sockets are pinned to `/tmp/claude-contained-zellij-runtime/` inside the container so stale host sockets are not reused across container lifetimes.
+
+If `--zellij` reports `zellij-run: command not found`, your launcher is newer than the local image. Rebuild once with `claude-contained --rebuild=full` or `claude-docked --rebuild=full`, then retry.
 
 ### Optional Java Layer
 

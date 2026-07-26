@@ -1,0 +1,114 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+session="${1:-}"
+if [[ -z "$session" ]]; then
+  echo "zellij-run: missing session name" >&2
+  exit 2
+fi
+shift
+if [[ "${1:-}" == "--" ]]; then
+  shift
+fi
+if [[ $# -eq 0 ]]; then
+  set -- bash
+fi
+
+remember_xdg_var() {
+  local name="$1"
+  local value_var="CLAUDE_CONTAINED_PRE_ZELLIJ_${name}"
+  local set_var="${value_var}_SET"
+
+  if [[ "${!name+x}" == "x" ]]; then
+    export "${set_var}=1"
+    export "${value_var}=${!name}"
+  else
+    export "${set_var}=0"
+    unset "$value_var"
+  fi
+}
+
+kdl_quote() {
+  local s="$1"
+  s="${s//\\/\\\\}"
+  s="${s//\"/\\\"}"
+  s="${s//$'\n'/\\n}"
+  s="${s//$'\r'/\\r}"
+  s="${s//$'\t'/\\t}"
+  printf '"%s"' "$s"
+}
+
+remember_xdg_var XDG_CACHE_HOME
+remember_xdg_var XDG_DATA_HOME
+remember_xdg_var XDG_RUNTIME_DIR
+remember_xdg_var TMPDIR
+
+config_file="/etc/claude-contained/zellij/config.kdl"
+zellij_root="${HOME}/.claude-contained/zellij"
+data_dir="${zellij_root}/data"
+cache_dir="${zellij_root}/cache"
+runtime_dir="/tmp/claude-contained-zellij-runtime"
+tmp_dir="/tmp/zellij-$(id -u)"
+log_dir="${tmp_dir}/zellij-log"
+server_socket="${runtime_dir}/${session}.sock"
+layout_file="${runtime_dir}/${session}.layout.kdl"
+
+export CLAUDE_CONTAINED_ZELLIJ_CONFIG="$config_file"
+export CLAUDE_CONTAINED_ZELLIJ_DATA_DIR="$data_dir"
+export CLAUDE_CONTAINED_ZELLIJ_CACHE_DIR="$cache_dir"
+export CLAUDE_CONTAINED_ZELLIJ_RUNTIME_DIR="$runtime_dir"
+export CLAUDE_CONTAINED_ZELLIJ_SERVER="$server_socket"
+export CLAUDE_CONTAINED_ZELLIJ_TMP_DIR="$tmp_dir"
+export XDG_DATA_HOME="$data_dir"
+export XDG_CACHE_HOME="$cache_dir"
+export XDG_RUNTIME_DIR="$runtime_dir"
+export TMPDIR="/tmp"
+
+mkdir -p \
+  "$data_dir" \
+  "$cache_dir" \
+  "${cache_dir}/org/Zellij-Contributors/Zellij" \
+  "$runtime_dir" \
+  "$log_dir"
+chmod 700 "$runtime_dir" "$tmp_dir" "$log_dir" 2>/dev/null || true
+
+tmp_layout="${layout_file}.$$"
+{
+  printf 'layout {\n'
+  printf '    pane command="/usr/local/bin/zellij-pane-command" {\n'
+  printf '        args'
+  for arg in "$@"; do
+    printf ' '
+    kdl_quote "$arg"
+  done
+  printf '\n'
+  printf '    }\n'
+  printf '}\n'
+} > "$tmp_layout"
+mv -f "$tmp_layout" "$layout_file"
+
+zellij_cmd=(zellij --config "$config_file" --data-dir "$data_dir" --server "$server_socket")
+
+zellij_session_is_live() {
+  local line first
+
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    first="${line%% *}"
+    if [[ "$first" == "$session" && "$line" != *"(EXITED"* ]]; then
+      return 0
+    fi
+  done < <("${zellij_cmd[@]}" list-sessions --no-formatting 2>/dev/null || true)
+  return 1
+}
+
+set +e
+"${zellij_cmd[@]}" attach --create "$session" options --default-layout "$layout_file"
+zellij_status=$?
+set -e
+
+while zellij_session_is_live; do
+  sleep "${CLAUDE_CONTAINED_ZELLIJ_WAIT_SECONDS:-2}"
+done
+
+exit "$zellij_status"
