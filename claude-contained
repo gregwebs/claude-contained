@@ -30,7 +30,7 @@ Options:
   --readonly-extras  Mount all extra dirs read-only (suffix overrides per-path)
   -a, --attach [NAME]  Attach to running container (runs tool, or bash with -s)
   --zellij          Run the tool inside a persistent Zellij workspace
-  --new-session[=NAME]  With --zellij, start/resurrect a fresh session target
+  --new-session[=NAME]  With --zellij, start a fresh session target
   -h, --help         Show this help message
 
 Behavior:
@@ -394,6 +394,8 @@ container_zellij_session() {
 
   zellij_session_from_env_lines < <(
     container inspect "$name" 2>/dev/null | jq -r '
+      def inspect_objects:
+        if type == "array" then .[] else . end;
       def envlines:
         if type == "array" then
           .[] | if type == "string" then .
@@ -403,7 +405,7 @@ container_zellij_session() {
         elif type == "object" then
           to_entries[] | "\(.key)=\(.value)"
         else empty end;
-      [
+      inspect_objects | [
         .configuration.initProcess.environment?,
         .Configuration.InitProcess.Environment?,
         .config.env?,

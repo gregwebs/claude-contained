@@ -84,7 +84,7 @@ claude-contained [options] [main_dir] [extra_dir ...] [-- <tool args...>]
 | `--share-host-claude` | Compatibility mode: mount host `~/.claude` directly as container `~/.claude` |
 | `-a`, `--attach [NAME]` | Attach to running container (runs tool, or bash with `-s`) |
 | `--zellij` | Run the tool inside a persistent Zellij workspace |
-| `--new-session[=NAME]` | With `--zellij`, start/resurrect the target session even when another Zellij container is live |
+| `--new-session[=NAME]` | With `--zellij`, start the target session even when another Zellij container is live |
 | `-h`, `--help` | Show help message |
 
 ### Supported Tools
@@ -113,7 +113,7 @@ The contained Claude profile and the other tools' config directories are bind-mo
 - Git worktrees are detected; main repository is included for full git access
 - If a mounted main repository has linked worktrees outside the mounted directories, the launcher offers to auto-lock those worktrees while the container runs (otherwise an in-container `git worktree prune`/`git gc` could remove them). Auto-lock reasons use `cc-autolocked-by:` and are removed when the last owning container exits. The locking is self-healing — a lock left behind by a launcher that was killed is reclaimed automatically by the next run — and fail-safe, applying the locks even if the internal mutex is unavailable so the container never runs with worktrees unprotected.
 - `--zellij` starts the selected tool, or `bash` with `--shell`, inside a named Zellij session. The default session is `cc-{project}-{path-hash}`. Zellij data lives in the Zellij session store at `~/.claude-contained/zellij/`; live sockets stay inside the container under `/tmp`.
-- Detaching from Zellij keeps the container running until that Zellij session is killed. Plain `--zellij` refuses when any Zellij-backed container is already live; use `--zellij --attach [NAME]` to reconnect or `--zellij --new-session[=NAME]` to start/resurrect another session.
+- Detaching from Zellij keeps the container running until that Zellij session is killed. Plain `--zellij` refuses when any Zellij-backed container is already live; use `--zellij --attach [NAME]` to reconnect or `--zellij --new-session[=NAME]` to start another session.
 
 ### Examples
 
@@ -142,7 +142,7 @@ claude-contained -e 'GREETING=hello world' -e DEBUG=1 .     # Repeatable; values
 claude-contained --zellij .                         # Start this project in Zellij
 claude-contained --zellij --attach                  # Attach when exactly one Zellij session is live
 claude-contained --zellij --attach review           # Attach to a named live Zellij session
-claude-contained --zellij --new-session=review .    # Start/resurrect a named Zellij session
+claude-contained --zellij --new-session=review .    # Start a named Zellij session
 claude-contained --zellij --shell .                 # Start bash as the initial Zellij pane
 
 # Port forwarding
@@ -177,7 +177,7 @@ Attach behavior is intentionally strict:
 - Bare `--zellij --attach` attaches directly if exactly one Zellij session is live, otherwise it prompts.
 - `--zellij --attach --shell` is invalid; attach reconnects to the existing Zellij workspace as-is.
 
-The Zellij session store is `~/.claude-contained/zellij/`. Zellij cache and data persist there, but runtime sockets are pinned to `/tmp/claude-contained-zellij-runtime/` inside the container so stale host sockets are not reused across container lifetimes. Under the Linux srt backend, marked Zellij runs set `allowAllUnixSockets` because path-specific Unix socket allowlisting is not available there.
+The Zellij session store is `~/.claude-contained/zellij/`. Zellij cache and data persist there, but runtime sockets are pinned to `/tmp/claude-contained-zellij-runtime/` inside the container so stale host sockets are not reused across container lifetimes. A new `--zellij` launch removes saved metadata for that session before creating the initial layout, so stale panes cannot override the current tool command. Under the Linux srt backend, marked Zellij runs set `allowAllUnixSockets` because path-specific Unix socket allowlisting is not available there.
 
 If `--zellij` reports `zellij-run: command not found`, your launcher is newer than the local image. Rebuild once with `claude-contained --rebuild=full` or `claude-docked --rebuild=full`, then retry.
 

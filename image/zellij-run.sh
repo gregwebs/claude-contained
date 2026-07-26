@@ -6,6 +6,10 @@ if [[ -z "$session" ]]; then
   echo "zellij-run: missing session name" >&2
   exit 2
 fi
+if [[ "$session" == -* || ! "$session" =~ ^[A-Za-z0-9_.-]+$ ]]; then
+  echo "zellij-run: invalid session name: $session" >&2
+  exit 2
+fi
 shift
 if [[ "${1:-}" == "--" ]]; then
   shift
@@ -14,7 +18,7 @@ if [[ $# -eq 0 ]]; then
   set -- bash
 fi
 
-remember_xdg_var() {
+remember_pre_zellij_var() {
   local name="$1"
   local value_var="CLAUDE_CONTAINED_PRE_ZELLIJ_${name}"
   local set_var="${value_var}_SET"
@@ -38,10 +42,16 @@ kdl_quote() {
   printf '"%s"' "$s"
 }
 
-remember_xdg_var XDG_CACHE_HOME
-remember_xdg_var XDG_DATA_HOME
-remember_xdg_var XDG_RUNTIME_DIR
-remember_xdg_var TMPDIR
+if [[ -z "${SHELL:-}" ]]; then
+  export SHELL=/bin/bash
+fi
+
+remember_pre_zellij_var XDG_CACHE_HOME
+remember_pre_zellij_var XDG_DATA_HOME
+remember_pre_zellij_var XDG_RUNTIME_DIR
+remember_pre_zellij_var TMPDIR
+remember_pre_zellij_var PATH
+remember_pre_zellij_var SHELL
 
 config_file="/etc/claude-contained/zellij/config.kdl"
 zellij_root="${HOME}/.claude-contained/zellij"
@@ -108,25 +118,21 @@ zellij_session_is_live() {
   return 1
 }
 
-zellij_session_is_exited() {
-  local line first
-
-  while IFS= read -r line; do
-    [[ -z "$line" ]] && continue
-    first="${line%% *}"
-    if [[ "$first" == "$session" && "$line" == *"(EXITED"* ]]; then
-      return 0
-    fi
-  done < <("${zellij_cmd[@]}" list-sessions --no-formatting 2>/dev/null || true)
-  return 1
+forget_saved_session_state() {
+  rm -rf -- \
+    "${cache_dir}/zellij/contract_version_1/session_info/${session}" \
+    "${data_dir}/zellij/contract_version_1/session_info/${session}"
 }
 
-set +e
-if zellij_session_is_exited; then
-  "${zellij_cmd[@]}" attach --create --force-run-commands "$session"
-else
-  "${zellij_cmd[@]}" --new-session-with-layout "$layout_name" --session "$session"
+if zellij_session_is_live; then
+  echo "zellij-run: session ${session} is already live" >&2
+  exit 1
 fi
+
+forget_saved_session_state
+
+set +e
+"${zellij_cmd[@]}" attach --forget --create "$session" options --default-layout "$layout_name"
 zellij_status=$?
 set -e
 

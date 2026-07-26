@@ -30,7 +30,7 @@ Options:
   --readonly-extras  Mount all extra dirs read-only (suffix overrides per-path)
   -a, --attach [NAME]  Attach to running container (runs tool, or bash with -s)
   --zellij          Run the tool inside a persistent Zellij workspace
-  --new-session[=NAME]  With --zellij, start/resurrect a fresh session target
+  --new-session[=NAME]  With --zellij, start a fresh session target
   -h, --help         Show this help message
 
 Behavior:
