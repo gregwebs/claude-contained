@@ -19,3 +19,7 @@ _Avoid_: Claude credentials
 **Claude extension resources**:
 Shared Claude file resources such as skills, agents, commands, and plugins.
 _Avoid_: Claude settings
+
+**Zellij session store**:
+The host-backed Zellij state reserved for contained runs, used to resurrect named terminal workspaces after their container processes exit.
+_Avoid_: Zellij config, Zellij cache

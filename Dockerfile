@@ -59,6 +59,22 @@ RUN set -eux; \
     rm -rf /tmp/bun.zip /tmp/bun-linux-${BUN_ARCH}; \
     bun --version
 
+# ---- Zellij terminal workspace ---------------------------------------------
+ARG ZELLIJ_VERSION=0.44.3
+RUN set -eux; \
+    ARCH="$(dpkg --print-architecture)"; \
+    case "$ARCH" in \
+      arm64)  ZELLIJ_TARGET="aarch64-unknown-linux-musl" ;; \
+      amd64)  ZELLIJ_TARGET="x86_64-unknown-linux-musl" ;; \
+      *)      echo "Unsupported architecture: $ARCH"; exit 1 ;; \
+    esac; \
+    URL="https://github.com/zellij-org/zellij/releases/download/v${ZELLIJ_VERSION}/zellij-${ZELLIJ_TARGET}.tar.gz"; \
+    curl -fL "$URL" -o /tmp/zellij.tar.gz; \
+    tar -xzf /tmp/zellij.tar.gz -C /usr/local/bin zellij; \
+    chmod +x /usr/local/bin/zellij; \
+    rm -f /tmp/zellij.tar.gz; \
+    zellij --version
+
 # ---- Language Servers + AI CLIs --------------------------------------------
 ARG AI_TOOLS_CACHE_BUST=stable
 RUN set -eux; \
@@ -239,7 +255,13 @@ RUN mkdir -p /etc/claude-code \
 # srt-run wraps a command for `container exec`, which bypasses the entrypoint.
 COPY image/srt-settings.sh /usr/local/bin/srt-settings.sh
 COPY image/srt-run.sh /usr/local/bin/srt-run
-RUN chmod +x /usr/local/bin/srt-settings.sh /usr/local/bin/srt-run
+COPY image/zellij/ /etc/claude-contained/zellij/
+COPY image/zellij-run.sh /usr/local/bin/zellij-run
+COPY image/zellij-attach.sh /usr/local/bin/zellij-attach
+COPY image/zellij-pane-command.sh /usr/local/bin/zellij-pane-command
+RUN chmod +x /usr/local/bin/srt-settings.sh /usr/local/bin/srt-run \
+    /usr/local/bin/zellij-run /usr/local/bin/zellij-attach \
+    /usr/local/bin/zellij-pane-command
 
 # ---- Entrypoint (host.local setup + path parity) ---------------------------
 COPY image/entrypoint.sh /usr/local/bin/entrypoint.sh

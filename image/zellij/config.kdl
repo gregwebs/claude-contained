@@ -1,0 +1,12 @@
+default_mode "normal"
+on_force_close "detach"
+
+session_serialization true
+pane_viewport_serialization false
+
+show_startup_tips false
+show_release_notes false
+support_kitty_keyboard_protocol false
+
+web_server false
+web_sharing "disabled"

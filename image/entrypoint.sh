@@ -104,6 +104,24 @@ if [ -n "${GIT_PROTECT_DIRS:-}" ]; then
   done
 fi
 
+if [ "${CLAUDE_CONTAINED_ZELLIJ:-}" = "1" ] && [ -n "${CLAUDE_CONTAINED_ZELLIJ_SESSION:-}" ]; then
+  _zellij_uid="${HOST_UID:-$(id -u dev)}"
+  _zellij_tmp="/tmp/zellij-${_zellij_uid}"
+  _zellij_runtime="/tmp/claude-contained-zellij-runtime"
+  mkdir -p \
+    "${HOST_HOME}/.claude-contained/zellij/data" \
+    "${HOST_HOME}/.claude-contained/zellij/cache/org/Zellij-Contributors/Zellij" \
+    "${_zellij_tmp}/zellij-log" \
+    "${_zellij_runtime}" 2>/dev/null || true
+  touch "${_zellij_tmp}/zellij-log/zellij.log" 2>/dev/null || true
+  chown -R dev:dev \
+    "${HOST_HOME}/.claude-contained/zellij" \
+    "${_zellij_tmp}" \
+    "${_zellij_runtime}" 2>/dev/null || true
+  chmod 700 "${_zellij_tmp}" "${_zellij_tmp}/zellij-log" "${_zellij_runtime}" 2>/dev/null || true
+  chmod 600 "${_zellij_tmp}/zellij-log/zellij.log" 2>/dev/null || true
+fi
+
 # Start virtual framebuffer so Chrome/Chromium can run without a real display
 if [ -z "${DISPLAY:-}" ]; then
   export DISPLAY=:99

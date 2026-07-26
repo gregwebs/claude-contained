@@ -155,6 +155,19 @@ gen_settings GIT_PROTECT_DIRS="/p" >/dev/null 2>&1
 jq -e '.network.allowUnixSockets | length == 0' "$out" >/dev/null
 _check "no unix sockets allowed without SSH_AUTH_SOCK" $?
 
+gen_settings GIT_PROTECT_DIRS="/p" HOST_UID=1234 CLAUDE_CONTAINED_ZELLIJ=1 CLAUDE_CONTAINED_ZELLIJ_SESSION=cc-test >/dev/null 2>&1
+jq -e '.network.allowUnixSockets | index("/tmp/claude-contained-zellij-runtime/cc-test.sock")' "$out" >/dev/null
+_check "Zellij session socket is allowed only for marked Zellij runs" $?
+jq -e --arg h "$home" '
+  .filesystem.allowWrite as $w
+  | ($w | index($h + "/.claude-contained/zellij/data"))
+    and ($w | index($h + "/.claude-contained/zellij/cache/org/Zellij-Contributors/Zellij"))
+    and ($w | index("/tmp/claude-contained-zellij-runtime"))
+    and ($w | index("/tmp/claude-contained-zellij-runtime/cc-test.layout.kdl"))
+    and ($w | index("/tmp/zellij-1234/zellij-log/zellij.log"))
+' "$out" >/dev/null
+_check "Zellij literal runtime, cache, and log paths are writable under srt" $?
+
 echo "== tamper resistance =="
 
 # 13. The sandboxed process must be able to read its policy and unable to edit it.
