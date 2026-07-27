@@ -82,7 +82,7 @@ claude-contained [options] [-- <tool args...>]
 | `-w`, `--worktree` | Auto-include git worktree's main repository (skip prompt) |
 | `-y`, `--yolo` | Skip all permission prompts (tool-specific flag) |
 | `-N`, `--contained-node-modules` | Use container-specific node_modules (skip prompt) |
-| `--share-skills DIR` | Mount shared skill folders from `DIR` (opt-in, no default; use a full path) |
+| `--share-skills DIR` | Mount shared skill folders from `DIR` read-only (opt-in, no default; use a full path) |
 | `--share-host-claude` | Compatibility mode: mount host `~/.claude` directly as container `~/.claude` |
 | `-a`, `--attach [NAME]` | Attach to a running container; errors if none matches |
 | `--name NAME` | Name for a new container (mutually exclusive with `--attach`) |
@@ -112,7 +112,7 @@ The contained Claude profile and the other tools' config directories are bind-mo
 - Host Claude extension resources are shared from `~/.claude/{skills,agents,commands,plugins}` into the contained profile.
 - Use `--share-host-claude` or `CLAUDE_CONTAINED_SHARE_HOST_CLAUDE=1` to restore the legacy behavior of mounting host `~/.claude` directly.
 - Other tool configs and Maven cache (`~/.m2`) are bind-mounted for persistence
-- `--share-skills DIR` mounts `DIR` as each tool's skills directory: `~/.claude/skills`, `~/.codex/skills`, `~/.agents/skills`, and `~/.<tool>/skills` for Copilot, Gemini, and Vibe. For Codex, the host's `~/.codex/skills/.system` is mounted back over `DIR/.system` so built-in skills remain visible while new installs write to `DIR`. Use a full path; `~` is not expanded by the launcher.
+- `--share-skills DIR` mounts `DIR` read-only as each tool's skills directory: `~/.claude/skills`, `~/.codex/skills`, `~/.agents/skills`, and `~/.<tool>/skills` for Copilot, Gemini, and Vibe. `DIR` itself and symlink targets found under it are also mounted read-only at path-parity locations so absolute symlinks keep resolving and writable project or extra mounts do not bypass the shared-skills read-only view. Symlinked files mount their containing directory read-only. For Codex, the host's `~/.codex/skills/.system` is mounted back read-only over `DIR/.system` so built-in skills remain visible. Use a full path; `~` is not expanded by the launcher.
 - SSH agent forwarding is disabled by default; use `-S`/`--ssh` to enable
 - Git worktrees are detected; main repository is included for full git access
 - If a mounted main repository has linked worktrees outside the mounted directories, the launcher offers to auto-lock those worktrees while the container runs (otherwise an in-container `git worktree prune`/`git gc` could remove them). Auto-lock reasons use `cc-autolocked-by:` and are removed when the last owning container exits. The locking is self-healing — a lock left behind by a launcher that was killed is reclaimed automatically by the next run — and fail-safe, applying the locks even if the internal mutex is unavailable so the container never runs with worktrees unprotected.
@@ -138,7 +138,7 @@ claude-contained -y -t codex                        # Codex with --yolo
 claude-contained --rebuild                          # Refresh AI tools, then exit
 claude-contained --rebuild=full                     # Full fresh rebuild, then exit
 claude-contained -s                                 # Debug shell
-claude-contained --share-skills /Users/me/Projects/skills  # Share skills into tool skill dirs
+claude-contained --share-skills /Users/me/Projects/skills  # Share read-only skills into tool skill dirs
 claude-contained --share-host-claude                # Legacy direct host ~/.claude sharing
 claude-contained -e API_URL=http://host.local:8080          # Set an env var for the tool
 claude-contained -e 'GREETING=hello world' -e DEBUG=1       # Repeatable; values may contain spaces

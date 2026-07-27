@@ -27,7 +27,7 @@ Options:
   -W, --lock-worktrees  Auto-lock hidden linked worktrees (skip prompt)
   -y, --yolo         Skip all permission prompts (tool-specific flag)
   -N, --contained-node-modules  Use container-specific node_modules (skip prompt)
-  --share-skills DIR  Mount shared skill folders from DIR (opt-in)
+  --share-skills DIR  Mount shared skill folders from DIR read-only (opt-in)
   --share-host-claude  Mount host ~/.claude directly as container ~/.claude
   --readonly-extras  Mount all extra mounts read-only (suffix overrides per-path)
   -a, --attach [NAME]  Attach to a running container; errors if none matches
@@ -52,9 +52,11 @@ Behavior:
     CLAUDE_CONTAINED_SHARE_HOST_CLAUDE=1 to mount host ~/.claude directly.
   - Other tool configs (~/.codex, ~/.copilot, ~/.gemini, ~/.vibe), Maven cache
     (~/.m2), and Vaadin state (~/.vaadin) are bind-mounted.
-  - --share-skills DIR mounts DIR as each tool's skills directory.
-    For Codex, ~/.codex/skills/.system is mounted back over DIR/.system
-    so built-in skills remain visible while new installs write to DIR.
+  - --share-skills DIR mounts DIR read-only as each tool's skills directory.
+    DIR itself and symlink targets under it are also mounted read-only at
+    path-parity locations so absolute symlinks keep resolving. For Codex,
+    ~/.codex/skills/.system is mounted back read-only over DIR/.system so
+    built-in skills remain visible.
   - SSH agent forwarding is disabled by default; use --ssh to enable (for git push).
   - Apple Containers defaults the container's resolver to the vmnet gateway, which
     often cannot resolve. The launcher uses --dns 1.1.1.1 by default. Explicit
@@ -1572,6 +1574,12 @@ container_argv=(
   --mount "type=bind,src=${HOST_VAADIN_DIR},dst=${HOST_HOME}/.vaadin"
   --mount "type=bind,src=${main_host},dst=${main_host}"
 )
+user_mount_srcs=("$main_host")
+user_mount_dsts=("$main_host")
+user_mount_modes=("rw")
+shared_skill_readonly_mount_srcs=()
+shared_skill_readonly_mount_dsts=()
+shared_skill_seen_scan_dirs=()
 
 # User env (--env, .claude-contained/env) plus the TZ/GH_TOKEN built-ins folded
 # into the same list, so every key is emitted exactly once.
@@ -1583,34 +1591,169 @@ add_claude_extension_resource_mounts() {
 
   [[ $share_host_claude -eq 1 ]] && return 0
   for resource in skills agents commands plugins; do
+    [[ "$resource" == "skills" && -n "$share_skills_dir" ]] && continue
     container_argv+=( --mount "type=bind,src=${HOST_CLAUDE_DIR}/${resource},dst=${CONTAINER_CLAUDE_DIR}/${resource}" )
   done
 }
 
 add_claude_extension_resource_mounts
 
+path_is_equal_or_child() {
+  local parent="$1"
+  local child="$2"
+
+  [[ "$child" == "$parent" || "$child" == "$parent"/* ]]
+}
+
+user_mount_index_for_dst() {
+  local dst="$1"
+  local i
+
+  for (( i = 0; i < ${#user_mount_dsts[@]}; i++ )); do
+    if [[ "${user_mount_dsts[$i]}" == "$dst" ]]; then
+      printf '%s\n' "$i"
+      return 0
+    fi
+  done
+  return 1
+}
+
+user_readonly_mount_covers_path() {
+  local dst="$1"
+  local i
+
+  for (( i = 0; i < ${#user_mount_dsts[@]}; i++ )); do
+    [[ "${user_mount_modes[$i]}" == "ro" ]] || continue
+    path_is_equal_or_child "${user_mount_dsts[$i]}" "$dst" && return 0
+  done
+  return 1
+}
+
+shared_skill_readonly_mount_index_for_dst() {
+  local dst="$1"
+  local i
+
+  for (( i = 0; i < ${#shared_skill_readonly_mount_dsts[@]}; i++ )); do
+    if [[ "${shared_skill_readonly_mount_dsts[$i]}" == "$dst" ]]; then
+      printf '%s\n' "$i"
+      return 0
+    fi
+  done
+  return 1
+}
+
+shared_skill_readonly_mount_covers_path() {
+  local dst="$1"
+  local i
+
+  for (( i = 0; i < ${#shared_skill_readonly_mount_dsts[@]}; i++ )); do
+    path_is_equal_or_child "${shared_skill_readonly_mount_dsts[$i]}" "$dst" && return 0
+  done
+  return 1
+}
+
+add_shared_skill_readonly_mount() {
+  local src="$1"
+  local dst="$2"
+  local allow_readonly_cover="${3:-0}"
+  local label="${4:-shared skills}"
+  local idx
+
+  if idx="$(user_mount_index_for_dst "$dst")"; then
+    if [[ "${user_mount_modes[$idx]}" == "ro" && "${user_mount_srcs[$idx]}" == "$src" ]]; then
+      return 0
+    fi
+    if [[ "${user_mount_modes[$idx]}" == "rw" ]]; then
+      echo "error: --share-skills read-only mount conflicts with writable mount: $dst" >&2
+      echo "       remove the duplicate -m or mark it :ro" >&2
+    else
+      echo "error: --share-skills read-only mount conflicts with a different mount at: $dst" >&2
+    fi
+    exit 2
+  fi
+
+  if idx="$(shared_skill_readonly_mount_index_for_dst "$dst")"; then
+    if [[ "${shared_skill_readonly_mount_srcs[$idx]}" == "$src" ]]; then
+      return 0
+    fi
+    echo "error: --share-skills read-only mount conflicts with another shared-skills mount at: $dst" >&2
+    exit 2
+  fi
+
+  if [[ "$allow_readonly_cover" -eq 1 ]]; then
+    user_readonly_mount_covers_path "$dst" && return 0
+    shared_skill_readonly_mount_covers_path "$dst" && return 0
+  fi
+
+  container_argv+=( --mount "type=bind,src=${src},dst=${dst},readonly" )
+  shared_skill_readonly_mount_srcs+=("$src")
+  shared_skill_readonly_mount_dsts+=("$dst")
+  echo "Sharing ${label}: ${src} -> ${dst} (read-only)" >&2
+}
+
 add_shared_skills_mount() {
   local dst="$1"
   local dst_parent="$2"
 
   [[ -n "$dst_parent" ]] && mkdir -p "$dst_parent"
-  container_argv+=( --mount "type=bind,src=${share_skills_dir},dst=${dst}" )
-  echo "Sharing skills: ${share_skills_dir} -> ${dst}" >&2
+  add_shared_skill_readonly_mount "$share_skills_dir" "$dst" 0 "skills"
 }
 
-if [[ -n "$share_skills_dir" ]]; then
+shared_skill_scan_dir_seen() {
+  local dir="$1"
+  local seen
+
+  for seen in "${shared_skill_seen_scan_dirs[@]+"${shared_skill_seen_scan_dirs[@]}"}"; do
+    [[ "$seen" == "$dir" ]] && return 0
+  done
+  return 1
+}
+
+scan_shared_skill_symlink_tree() {
+  local scan_dir="$1"
+  local link_path
+  local resolved_target
+  local mount_dir
+
+  scan_dir="$(resolve_path "$scan_dir")"
+  [[ -d "$scan_dir" ]] || return 0
+  shared_skill_scan_dir_seen "$scan_dir" && return 0
+  shared_skill_seen_scan_dirs+=("$scan_dir")
+
+  while IFS= read -r -d '' link_path; do
+    resolved_target="$(resolve_path "$link_path")"
+    if [[ ! -e "$resolved_target" ]]; then
+      echo "error: --share-skills symlink target does not exist: $link_path -> $resolved_target" >&2
+      exit 2
+    fi
+
+    if [[ -d "$resolved_target" ]]; then
+      add_shared_skill_readonly_mount "$resolved_target" "$resolved_target" 1 "symlinked skills target"
+      scan_shared_skill_symlink_tree "$resolved_target"
+    else
+      mount_dir="$(dirname "$resolved_target")"
+      mount_dir="$(resolve_path "$mount_dir")"
+      add_shared_skill_readonly_mount "$mount_dir" "$mount_dir" 1 "symlinked skills file parent"
+    fi
+  done < <(find "$scan_dir" -type l -print0)
+}
+
+add_shared_skills_mounts() {
   add_shared_skills_mount "${CONTAINER_CLAUDE_DIR}/skills" "${HOST_CLAUDE_PROFILE_DIR}"
   add_shared_skills_mount "${HOST_CODEX_DIR}/skills" "${HOST_CODEX_DIR}"
   add_shared_skills_mount "${HOST_HOME}/.agents/skills" "${HOST_HOME}/.agents"
   add_shared_skills_mount "${HOST_COPILOT_DIR}/skills" "${HOST_COPILOT_DIR}"
   add_shared_skills_mount "${HOST_GEMINI_DIR}/skills" "${HOST_GEMINI_DIR}"
   add_shared_skills_mount "${HOST_VIBE_DIR}/skills" "${HOST_VIBE_DIR}"
+  add_shared_skill_readonly_mount "$share_skills_dir" "$share_skills_dir" 1 "shared skills source"
 
   if [[ -d "${HOST_CODEX_DIR}/skills/.system" ]]; then
-    container_argv+=( --mount "type=bind,src=${HOST_CODEX_DIR}/skills/.system,dst=${HOST_CODEX_DIR}/skills/.system" )
-    echo "Sharing Codex system skills: ${HOST_CODEX_DIR}/skills/.system -> ${HOST_CODEX_DIR}/skills/.system" >&2
+    add_shared_skill_readonly_mount "${HOST_CODEX_DIR}/skills/.system" "${HOST_CODEX_DIR}/skills/.system" 0 "Codex system skills"
+    scan_shared_skill_symlink_tree "${HOST_CODEX_DIR}/skills/.system"
   fi
-fi
+
+  scan_shared_skill_symlink_tree "$share_skills_dir"
+}
 
 # Mount worktree's main repository .git directory (not the working tree)
 if [[ -n "$worktree_main_repo" ]]; then
@@ -1732,9 +1875,16 @@ for i in "${!paths[@]}"; do
   mopts="type=bind,src=${hp},dst=${hp}"
   [[ "${path_modes[$i]}" == "ro" ]] && mopts="${mopts},readonly"
   container_argv+=( --mount "$mopts" )
+  user_mount_srcs+=("$hp")
+  user_mount_dsts+=("$hp")
+  user_mount_modes+=("${path_modes[$i]}")
   # Only claude and codex support --add-dir
   [[ "$tool" == "claude" || "$tool" == "codex" ]] && tool_argv+=( --add-dir "${hp}" )
 done
+
+if [[ -n "$share_skills_dir" ]]; then
+  add_shared_skills_mounts
+fi
 
 # Platform-specific node_modules overlay
 if [[ "$(uname)" != "Linux" ]]; then
