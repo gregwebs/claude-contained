@@ -18,7 +18,7 @@ RUN set -eux; \
       git openssh-client ca-certificates ripgrep jq \
       curl bash xz-utils unzip tzdata \
       python3 python3-pip python3-venv \
-      iproute2 gosu socat \
+      iproute2 gosu socat util-linux \
       libasound2 libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 \
       libcups2 libdbus-1-3 libdrm2 libgbm1 libgtk-3-0 \
       libnspr4 libnss3 libpango-1.0-0 libxcomposite1 libxdamage1 \
@@ -253,14 +253,17 @@ RUN mkdir -p /etc/claude-code \
 # srt's Linux dependencies -- bubblewrap, socat, ripgrep -- are already installed
 # with the base packages above. srt-settings.sh generates the per-run policy;
 # srt-run wraps a command for `container exec`, which bypasses the entrypoint.
+# shell-run starts debug shells through a child PTY when needed.
 COPY image/srt-settings.sh /usr/local/bin/srt-settings.sh
 COPY image/srt-run.sh /usr/local/bin/srt-run
+COPY image/shell-run.sh /usr/local/bin/shell-run
 COPY image/claude-native-link.sh /usr/local/bin/claude-native-link
 COPY image/zellij/ /etc/claude-contained/zellij/
 COPY image/zellij-run.sh /usr/local/bin/zellij-run
 COPY image/zellij-attach.sh /usr/local/bin/zellij-attach
 COPY image/zellij-pane-command.sh /usr/local/bin/zellij-pane-command
 RUN chmod +x /usr/local/bin/srt-settings.sh /usr/local/bin/srt-run \
+    /usr/local/bin/shell-run \
     /usr/local/bin/claude-native-link \
     /usr/local/bin/zellij-run /usr/local/bin/zellij-attach \
     /usr/local/bin/zellij-pane-command

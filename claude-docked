@@ -137,6 +137,10 @@ get_tool_path() {
   esac
 }
 
+get_shell_path() {
+  echo "/usr/local/bin/shell-run"
+}
+
 # Build command array for attach mode (tool path + flags)
 # Sets global attach_cmd array
 build_attach_cmd() {
@@ -153,12 +157,12 @@ build_attach_cmd() {
   fi
 }
 
-# Build command array for attaching a debug shell (sandbox wrapper + bash)
+# Build command array for attaching a debug shell (sandbox wrapper + shell-run)
 # Sets global attach_cmd array
 build_attach_shell_cmd() {
   attach_cmd=()
   [[ $srt_disable -eq 0 ]] && attach_cmd+=(srt-run)
-  attach_cmd+=(bash)
+  attach_cmd+=("$(get_shell_path)")
 }
 
 build_zellij_attach_cmd() {
@@ -1936,7 +1940,11 @@ fi
 # Run container
 run_argv=()
 if [[ $shell_mode -eq 1 ]]; then
-  run_argv=(bash)
+  if [[ $zellij_mode -eq 1 ]]; then
+    run_argv=(bash)
+  else
+    run_argv=("$(get_shell_path)")
+  fi
 else
   run_argv=("${tool_argv[@]}")
 fi

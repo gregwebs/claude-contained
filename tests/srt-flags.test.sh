@@ -54,6 +54,8 @@ suite() {
   out="$(launcher_argv "$target")"
   ! grep -q '^SRT_' <<<"$out"
   _check "default run emits no SRT_ env vars" $?
+  grep -qx '/usr/local/bin/shell-run' <<<"$out"
+  _check "debug shell run uses shell-run helper" $?
 
   # 2. --no-sandbox is the documented escape hatch.
   out="$(launcher_argv "$target" --no-sandbox)"
@@ -106,7 +108,7 @@ suite() {
 
     srt_disable=0
     build_attach_shell_cmd
-    [[ "${attach_cmd[0]}" == "srt-run" && "${attach_cmd[1]}" == "bash" ]]
+    [[ "${attach_cmd[0]}" == "srt-run" && "${attach_cmd[1]}" == "/usr/local/bin/shell-run" ]]
   )
   _check "attach debug shell is prefixed with srt-run" $?
 
@@ -117,7 +119,7 @@ suite() {
 
     srt_disable=1
     build_attach_shell_cmd
-    [[ "${attach_cmd[0]}" == "bash" && ${#attach_cmd[@]} -eq 1 ]]
+    [[ "${attach_cmd[0]}" == "/usr/local/bin/shell-run" && ${#attach_cmd[@]} -eq 1 ]]
   )
   _check "attach debug shell drops srt-run under --no-sandbox" $?
 

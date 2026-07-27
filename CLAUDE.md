@@ -39,6 +39,7 @@ Single-context layout: read root `CONTEXT.md` and relevant ADRs under `docs/adr/
   - `image/claude-native-link.sh` - Creates `~/.local/bin/claude` through a native-shaped `~/.local/share/claude/versions/<version>` symlink when no host launcher exists.
   - `image/srt-settings.sh` - Generates the per-run srt sandbox policy (see "Sandboxing" below).
   - `image/srt-run.sh` - Installed as `/usr/local/bin/srt-run`; wraps a command in the sandbox for `container exec`, which bypasses the entrypoint.
+  - `image/shell-run.sh` - Installed as `/usr/local/bin/shell-run`; starts debug shells through `script(1)` when a TTY is present so bash gets a controlling terminal after the sandbox/runtime handoff.
   - `image/zellij/config.kdl` - Minimal Zellij config for contained workspaces.
   - `image/zellij-run.sh` - Installed as `/usr/local/bin/zellij-run`; starts/attaches a session and keeps the container alive while it remains live.
   - `image/zellij-attach.sh` - Installed as `/usr/local/bin/zellij-attach`; reconnects to an already-live session from `container exec`/`docker exec`.

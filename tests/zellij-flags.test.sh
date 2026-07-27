@@ -140,7 +140,7 @@ suite() {
   rc=$?
   [[ $rc -eq 0 ]] && line_has "$out" "CLAUDE_CONTAINED_ZELLIJ=1" && line_has "$out" "CLAUDE_CONTAINED_ZELLIJ_SESSION=Good_1.2-3"
   _check "--session=NAME accepts valid names and emits env markers" $?
-  line_has "$out" "zellij-run" && line_has "$out" "Good_1.2-3" && line_has "$out" "bash"
+  line_has "$out" "zellij-run" && line_has "$out" "Good_1.2-3" && line_has "$out" "bash" && ! line_has "$out" "/usr/local/bin/shell-run"
   _check "--zellij --shell launches bash inside zellij-run" $?
   file_has "$out" "missing Zellij support" && file_has "$out" "${target} --rebuild=full"
   _check "--zellij command includes stale-image rebuild hint" $?
