@@ -8,6 +8,20 @@ Claude Code Contained is a bash-based containerization wrapper that runs AI codi
 
 Run `claude-contained --help` (or `claude-docked --help`) for build/run commands and flags.
 
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live as local markdown under `.scratch/<feature-slug>/`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the default five canonical triage labels. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context layout: read root `CONTEXT.md` and relevant ADRs under `docs/adr/`. See `docs/agents/domain.md`.
+
 ## Architecture
 
 ### Key Files
