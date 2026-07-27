@@ -63,7 +63,7 @@ launcher_run() { # launcher_run <target> <home> <project> [extra env...]
   shift 3
 
   env "$@" HOME="$home" PATH="${stub_dir}:$PATH" \
-    "${repo_root}/${target}" -N -s "$project" >/dev/null 2>&1
+    "${repo_root}/${target}" -N -s -C "$project" >/dev/null 2>&1
 }
 
 echo "== srt placeholder cleanup =="

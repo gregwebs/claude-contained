@@ -136,10 +136,10 @@ suite() {
   out="$(mktemp)"
   err="$(mktemp)"
 
-  ZELLIJ_STUB_MODE=none launcher_run "$target" "$out" "$err" --zellij --new-session=Good_1.2-3 -N -s "$proj"
+  ZELLIJ_STUB_MODE=none launcher_run "$target" "$out" "$err" --zellij --session=Good_1.2-3 -N -s -C "$proj"
   rc=$?
   [[ $rc -eq 0 ]] && line_has "$out" "CLAUDE_CONTAINED_ZELLIJ=1" && line_has "$out" "CLAUDE_CONTAINED_ZELLIJ_SESSION=Good_1.2-3"
-  _check "--new-session=NAME accepts valid names and emits env markers" $?
+  _check "--session=NAME accepts valid names and emits env markers" $?
   line_has "$out" "zellij-run" && line_has "$out" "Good_1.2-3" && line_has "$out" "bash"
   _check "--zellij --shell launches bash inside zellij-run" $?
   file_has "$out" "missing Zellij support" && file_has "$out" "${target} --rebuild=full"
@@ -149,52 +149,65 @@ suite() {
     _check "Docker run emits Zellij labels" $?
   fi
 
-  ZELLIJ_STUB_MODE=none launcher_run "$target" "$out" "$err" --zellij --new-session= -N -s "$proj"
+  ZELLIJ_STUB_MODE=none launcher_run "$target" "$out" "$err" --zellij --session= -N -s -C "$proj"
   rc=$?
-  [[ $rc -eq 2 ]] && file_has "$err" "Zellij session name cannot be empty"
-  _check "--new-session= rejects empty names" $?
+  [[ $rc -eq 2 ]] && file_has "$err" "--session requires a non-empty name"
+  _check "--session= rejects empty names" $?
 
-  ZELLIJ_STUB_MODE=none launcher_run "$target" "$out" "$err" --zellij --new-session=bad/name -N -s "$proj"
+  ZELLIJ_STUB_MODE=none launcher_run "$target" "$out" "$err" --zellij --session=bad/name -N -s -C "$proj"
   rc=$?
   [[ $rc -eq 2 ]] && file_has "$err" "invalid Zellij session name"
-  _check "--new-session=NAME rejects slashes" $?
+  _check "--session=NAME rejects slashes" $?
 
-  ZELLIJ_STUB_MODE=none launcher_run "$target" "$out" "$err" --zellij --new-session loose-name -N -s "$proj"
+  # With no positionals left, the space form is unambiguous and accepted.
+  ZELLIJ_STUB_MODE=none launcher_run "$target" "$out" "$err" --zellij --session loose-name -N -s -C "$proj"
   rc=$?
-  [[ $rc -eq 2 ]] && file_has "$err" "require --new-session=NAME"
-  _check "--new-session NAME is rejected as ambiguous" $?
+  [[ $rc -eq 0 ]] && line_has "$out" "CLAUDE_CONTAINED_ZELLIJ_SESSION=loose-name"
+  _check "--session NAME space form is accepted" $?
 
-  ZELLIJ_STUB_MODE=one launcher_run "$target" "$out" "$err" --zellij -N -s "$proj"
+  # --new-session is a force flag now; it must not swallow a following name.
+  ZELLIJ_STUB_MODE=none launcher_run "$target" "$out" "$err" --zellij --new-session=review -N -s -C "$proj"
+  rc=$?
+  [[ $rc -eq 2 ]] && file_has "$err" "use --session=NAME"
+  _check "--new-session=NAME is rejected in favor of --session" $?
+
+  ZELLIJ_STUB_MODE=one launcher_run "$target" "$out" "$err" --zellij -N -s -C "$proj"
   rc=$?
   [[ $rc -eq 1 ]] && file_has "$err" "already running" && file_has "$err" "--zellij --attach"
   _check "plain --zellij refuses when any Zellij container is live" $?
 
-  ZELLIJ_STUB_MODE=one launcher_run "$target" "$out" "$err" --zellij --new-session=alpha -N -s "$proj"
+  ZELLIJ_STUB_MODE=one launcher_run "$target" "$out" "$err" --zellij --session=alpha -N -s -C "$proj"
   rc=$?
-  [[ $rc -eq 1 ]] && file_has "$err" "already live" && file_has "$err" "--new-session=NAME"
+  [[ $rc -eq 1 ]] && file_has "$err" "already live" && file_has "$err" "--session=NAME"
   _check "new launch refuses if target session is live" $?
 
-  ZELLIJ_STUB_MODE=one launcher_run "$target" "$out" "$err" --zellij --new-session -N -s "$proj"
+  ZELLIJ_STUB_MODE=one launcher_run "$target" "$out" "$err" --zellij --new-session -N -s -C "$proj"
   rc=$?
   [[ $rc -eq 0 ]] && line_has "$out" "zellij-run"
   _check "bare --new-session allows another live Zellij container" $?
 
-  ZELLIJ_STUB_MODE=none launcher_run "$target" "$out" "$err" --zellij --attach alpha
+  ZELLIJ_STUB_MODE=none launcher_run "$target" "$out" "$err" --zellij --attach --session alpha
   rc=$?
   [[ $rc -eq 1 ]] && file_has "$err" "No live Zellij session named alpha" && file_missing "$out" "run"
-  _check "--zellij --attach NAME never falls back to container creation" $?
+  _check "--zellij --attach --session NAME never falls back to container creation" $?
+
+  # Under --zellij the session is named only by --session; -a must refuse a name.
+  ZELLIJ_STUB_MODE=one launcher_run "$target" "$out" "$err" --zellij --attach alpha
+  rc=$?
+  [[ $rc -eq 2 ]] && file_has "$err" "takes no name with --zellij"
+  _check "--zellij --attach NAME is rejected in favor of --session" $?
 
   ZELLIJ_STUB_MODE=none launcher_run "$target" "$out" "$err" --zellij --attach --shell
   rc=$?
   [[ $rc -eq 2 ]] && file_has "$err" "cannot be combined with --shell"
   _check "--zellij --attach --shell is rejected" $?
 
-  ZELLIJ_STUB_MODE=one launcher_run "$target" "$out" "$err" --zellij --attach alpha
+  ZELLIJ_STUB_MODE=one launcher_run "$target" "$out" "$err" --zellij --attach --session alpha
   rc=$?
   [[ $rc -eq 0 ]] && line_has "$out" "exec" && line_has "$out" "aic-z1" && line_has "$out" "srt-run" && line_has "$out" "/usr/local/bin/zellij-attach" && line_has "$out" "alpha"
-  _check "--zellij --attach NAME execs zellij-attach through srt-run" $?
+  _check "--zellij --attach --session NAME execs zellij-attach through srt-run" $?
 
-  ZELLIJ_STUB_MODE=one launcher_run "$target" "$out" "$err" --zellij --attach --no-sandbox alpha
+  ZELLIJ_STUB_MODE=one launcher_run "$target" "$out" "$err" --zellij --attach --no-sandbox --session alpha
   rc=$?
   [[ $rc -eq 0 ]] && line_has "$out" "/usr/local/bin/zellij-attach" && ! line_has "$out" "srt-run"
   _check "--zellij attach drops srt-run under --no-sandbox" $?
@@ -204,7 +217,7 @@ suite() {
   [[ $rc -eq 0 ]] && line_has "$out" "/usr/local/bin/zellij-attach" && line_has "$out" "alpha"
   _check "bare --zellij --attach directly attaches when exactly one session is live" $?
 
-  ZELLIJ_STUB_MODE=none launcher_run "$target" "$out" "$err" --zellij --new-session=gamma -N -t codex "$proj" -- --model gpt-5
+  ZELLIJ_STUB_MODE=none launcher_run "$target" "$out" "$err" --zellij --session=gamma -N -t codex -C "$proj" -- --model gpt-5
   rc=$?
   [[ $rc -eq 0 ]] && line_has "$out" "CLAUDE_CONTAINED_ZELLIJ_SESSION=gamma" && line_has "$out" "zellij-run" && line_has "$out" "codex" && line_has "$out" "--model" && line_has "$out" "gpt-5"
   _check "--zellij wraps tool command and preserves tool args" $?

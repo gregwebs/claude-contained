@@ -25,7 +25,7 @@ line_count() { grep -Fxc -- "$2" <<<"$1" || true; }
 
 launcher_argv() { # launcher_argv <target> [flags...]
   local target="$1"; shift
-  HOME="$home" PATH="${stub_dir}:$PATH" "${repo_root}/${target}" "$@" -N -s "$proj" 2>/dev/null
+  HOME="$home" PATH="${stub_dir}:$PATH" "${repo_root}/${target}" "$@" -N -s -C "$proj" 2>/dev/null
 }
 
 stub_dir="$(mktemp -d)"

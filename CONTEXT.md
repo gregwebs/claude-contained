@@ -4,6 +4,18 @@ AI Contained runs local coding agents inside containers while preserving selecte
 
 ## Language
 
+**Project directory**:
+The single directory a contained run is centered on, mounted at the same path inside the container and used as the working directory.
+_Avoid_: main dir, main_host, working directory, project root
+
+**Extra mount**:
+An additional host directory made visible to a run at the same path, optionally read-only.
+_Avoid_: extra dir, volume, bind
+
+**Container runtime**:
+The engine that executes contained sessions — either Apple Containers or Docker.
+_Avoid_: backend, engine, driver, provider
+
 **Host Claude profile**:
 The user's normal Claude Code profile directory at `~/.claude`, used by uncontained Claude Code.
 _Avoid_: Host Claude config
