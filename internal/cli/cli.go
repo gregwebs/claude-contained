@@ -1,0 +1,375 @@
+// Package cli parses the launcher's flag-only command line into a Config.
+//
+// The whole flag surface is parsed here even though ticket 02 only executes the
+// basic run path. Splitting the parser would mean porting it twice, and the
+// flag-only CLI is one unit: `--` handling, the require_value rule and the
+// unknown-flag arm all interact. Flags whose behavior is not ported yet are
+// recognized and validated exactly as bash does, then refused with exit 3.
+package cli
+
+import (
+	"fmt"
+	"io"
+	"strings"
+
+	"claude-contained/internal/host"
+)
+
+// Exit codes. 0/1/2 mirror bash; 3 is deliberately unused by both bash
+// launchers, so the differential harness reports an unported path as a
+// divergence instead of letting it pass as a matching error.
+const (
+	ExitOK        = 0
+	ExitFailure   = 1
+	ExitUsage     = 2
+	ExitUnported  = 3
+	unportedIntro = "error: %s is not yet supported by the Go launcher\n"
+)
+
+// ExitError carries the process exit code for a failure that has already
+// reported itself to stderr. Returning it rather than exiting keeps every exit
+// funnelled through main, which is what lets cleanup run on every path.
+type ExitError struct{ Code int }
+
+func (e *ExitError) Error() string { return fmt.Sprintf("exit %d", e.Code) }
+
+func exitWith(code int) error { return &ExitError{Code: code} }
+
+// Config is the parsed command line.
+type Config struct {
+	ShellMode            bool
+	SSHMode              bool
+	WorktreeMode         bool
+	LockWorktrees        bool
+	YoloMode             bool
+	ContainedNodeModules bool
+	AttachMode           bool
+	AttachName           string
+	CustomContainerName  string
+	ProjectDir           string
+	ExtraMounts          []string
+	ToolArgs             []string
+	ZellijMode           bool
+	ZellijNewSession     bool
+	ZellijSessionName    string
+	ZellijSessionNameSet bool
+	RebuildMode          string
+	Tool                 string
+	ReadonlyExtras       bool
+	ShareSkillsDir       string
+	ShareHostClaude      bool
+	PortMaps             []string
+	HostForwards         []string
+	DNSServers           []string
+	SrtAllowHosts        []string
+	SrtDisable           bool
+	EnvFlagArgs          []string
+	NoProjectEnv         bool
+	// HelpRequested short-circuits everything else.
+	HelpRequested bool
+}
+
+// Parse mirrors claude-contained:604-878: the flag loop, then the post-parse
+// validation block, in that order. Messages are written verbatim, because the
+// differential harness compares stderr byte for byte.
+//
+// Bash also has a pre-loop shortcut for a leading -h/--help (:553-556). It is
+// not reproduced because it is unobservable: the loop's own -h/--help arm
+// handles the same input identically, and anything earlier in argv already
+// short-circuits in both.
+//
+// progName is the runtime-specific program name; it appears only in the two
+// error arms that embed it. shareHostClaudeEnv carries
+// CLAUDE_CONTAINED_SHARE_HOST_CLAUDE.
+func Parse(args []string, progName string, shareHostClaudeEnv bool, stderr io.Writer) (Config, error) {
+	cfg := Config{
+		RebuildMode:     "none",
+		Tool:            "claude",
+		ShareHostClaude: shareHostClaudeEnv,
+	}
+
+	requireValue := func(flag, value, what string) error {
+		if value == "" || strings.HasPrefix(value, "-") {
+			if what == "" {
+				what = "a value"
+			}
+			fmt.Fprintf(stderr, "error: %s requires %s\n", flag, what)
+			return exitWith(ExitUsage)
+		}
+		return nil
+	}
+
+	// requireInline covers the `--flag=` forms that carry their own empty check.
+	requireInline := func(flag, value, what string) error {
+		if value == "" {
+			fmt.Fprintf(stderr, "error: %s requires %s\n", flag, what)
+			return exitWith(ExitUsage)
+		}
+		return nil
+	}
+
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+
+		// `--` matches -* and must be handled before any flag dispatch, or the
+		// unknown-flag arm below would swallow it. Everything after the first
+		// `--` goes to the tool verbatim, including any further `--`.
+		if arg == "--" {
+			cfg.ToolArgs = append(cfg.ToolArgs, args[i+1:]...)
+			break
+		}
+
+		next := ""
+		if i+1 < len(args) {
+			next = args[i+1]
+		}
+
+		switch {
+		case arg == "-h" || arg == "--help":
+			cfg.HelpRequested = true
+			return cfg, nil
+
+		case arg == "-C" || arg == "--dir":
+			if err := requireValue("-C/--dir", next, ""); err != nil {
+				return cfg, err
+			}
+			cfg.ProjectDir = next
+			i++
+		case strings.HasPrefix(arg, "--dir="):
+			v := strings.TrimPrefix(arg, "--dir=")
+			if err := requireInline("--dir", v, "a non-empty directory"); err != nil {
+				return cfg, err
+			}
+			cfg.ProjectDir = v
+
+		case arg == "-m" || arg == "--mount":
+			if err := requireValue("-m/--mount", next, ""); err != nil {
+				return cfg, err
+			}
+			cfg.ExtraMounts = append(cfg.ExtraMounts, next)
+			i++
+		case strings.HasPrefix(arg, "--mount="):
+			v := strings.TrimPrefix(arg, "--mount=")
+			if err := requireInline("--mount", v, "a non-empty directory"); err != nil {
+				return cfg, err
+			}
+			cfg.ExtraMounts = append(cfg.ExtraMounts, v)
+
+		case arg == "--name":
+			if err := requireValue("--name", next, ""); err != nil {
+				return cfg, err
+			}
+			cfg.CustomContainerName = next
+			i++
+		case strings.HasPrefix(arg, "--name="):
+			v := strings.TrimPrefix(arg, "--name=")
+			if err := requireInline("--name", v, "a non-empty name"); err != nil {
+				return cfg, err
+			}
+			cfg.CustomContainerName = v
+
+		case arg == "--session":
+			if err := requireValue("--session", next, ""); err != nil {
+				return cfg, err
+			}
+			cfg.ZellijSessionName = next
+			cfg.ZellijSessionNameSet = true
+			i++
+		case strings.HasPrefix(arg, "--session="):
+			v := strings.TrimPrefix(arg, "--session=")
+			cfg.ZellijSessionName = v
+			cfg.ZellijSessionNameSet = true
+			if err := requireInline("--session", v, "a non-empty name"); err != nil {
+				return cfg, err
+			}
+
+		case arg == "--readonly-extras":
+			cfg.ReadonlyExtras = true
+
+		case arg == "--share-skills":
+			if err := requireValue("--share-skills", next, ""); err != nil {
+				return cfg, err
+			}
+			cfg.ShareSkillsDir = next
+			i++
+		case strings.HasPrefix(arg, "--share-skills="):
+			v := strings.TrimPrefix(arg, "--share-skills=")
+			if err := requireInline("--share-skills", v, "a non-empty directory"); err != nil {
+				return cfg, err
+			}
+			cfg.ShareSkillsDir = v
+
+		case arg == "--share-host-claude":
+			cfg.ShareHostClaude = true
+
+		case arg == "--rebuild":
+			cfg.RebuildMode = "tools"
+		case strings.HasPrefix(arg, "--rebuild="):
+			// No validation here; bash validates centrally in run_rebuild.
+			cfg.RebuildMode = strings.TrimPrefix(arg, "--rebuild=")
+
+		case arg == "-R":
+			// Optional value: with no positionals left, any non-flag token here
+			// is the mode.
+			if next != "" && !strings.HasPrefix(next, "-") {
+				cfg.RebuildMode = next
+				i++
+			} else {
+				cfg.RebuildMode = "tools"
+			}
+
+		case arg == "-s" || arg == "--shell":
+			cfg.ShellMode = true
+		case arg == "-S" || arg == "--ssh":
+			cfg.SSHMode = true
+		case arg == "-w" || arg == "--worktree":
+			cfg.WorktreeMode = true
+		case arg == "-W" || arg == "--lock-worktrees":
+			cfg.LockWorktrees = true
+		case arg == "-y" || arg == "--yolo":
+			cfg.YoloMode = true
+		case arg == "-N" || arg == "--contained-node-modules":
+			cfg.ContainedNodeModules = true
+
+		case arg == "-t" || arg == "--tool":
+			// Note: there is no --tool= form; it falls through to the
+			// unknown-flag arm, as in bash.
+			if err := requireValue("-t/--tool", next, ""); err != nil {
+				return cfg, err
+			}
+			cfg.Tool = next
+			i++
+
+		case arg == "-e" || arg == "--env":
+			// A leading dash can never be a valid assignment, so treat it as a
+			// missing value rather than swallowing the next flag.
+			if err := requireValue("-e/--env", next, "KEY=VALUE"); err != nil {
+				return cfg, err
+			}
+			cfg.EnvFlagArgs = append(cfg.EnvFlagArgs, next)
+			i++
+		case strings.HasPrefix(arg, "--env="):
+			// Deliberately no empty check: bash lets `--env=` through to the
+			// assignment validator.
+			cfg.EnvFlagArgs = append(cfg.EnvFlagArgs, strings.TrimPrefix(arg, "--env="))
+
+		case arg == "--no-project-env":
+			cfg.NoProjectEnv = true
+
+		case arg == "-p":
+			if err := requireValue("-p", next, ""); err != nil {
+				return cfg, err
+			}
+			cfg.PortMaps = append(cfg.PortMaps, next)
+			i++
+		case arg == "-H":
+			if err := requireValue("-H", next, ""); err != nil {
+				return cfg, err
+			}
+			cfg.HostForwards = append(cfg.HostForwards, next)
+			i++
+
+		case arg == "--dns":
+			if err := requireValue("--dns", next, ""); err != nil {
+				return cfg, err
+			}
+			cfg.DNSServers = append(cfg.DNSServers, next)
+			i++
+		case strings.HasPrefix(arg, "--dns="):
+			cfg.DNSServers = append(cfg.DNSServers, strings.TrimPrefix(arg, "--dns="))
+
+		case arg == "--allow-host":
+			if err := requireValue("--allow-host", next, ""); err != nil {
+				return cfg, err
+			}
+			cfg.SrtAllowHosts = append(cfg.SrtAllowHosts, next)
+			i++
+		case strings.HasPrefix(arg, "--allow-host="):
+			cfg.SrtAllowHosts = append(cfg.SrtAllowHosts, strings.TrimPrefix(arg, "--allow-host="))
+
+		case arg == "--no-sandbox":
+			cfg.SrtDisable = true
+		case arg == "--zellij":
+			cfg.ZellijMode = true
+		case arg == "--new-session":
+			// Force flag only: --session NAME carries the name.
+			cfg.ZellijNewSession = true
+		case strings.HasPrefix(arg, "--new-session="):
+			fmt.Fprintln(stderr, "error: --new-session no longer takes a name; use --session=NAME")
+			return cfg, exitWith(ExitUsage)
+
+		case arg == "-a" || arg == "--attach":
+			cfg.AttachMode = true
+			// Optional value. Nothing is positional, so any non-flag token here
+			// is the container name.
+			if next != "" && !strings.HasPrefix(next, "-") {
+				cfg.AttachName = next
+				i++
+			}
+
+		case strings.HasPrefix(arg, "-"):
+			fmt.Fprintf(stderr, "error: unknown flag: %s\n", arg)
+			fmt.Fprintf(stderr, "       run '%s --help' for the supported flags\n", progName)
+			return cfg, exitWith(ExitUsage)
+
+		default:
+			fmt.Fprintf(stderr, "error: positional arguments are no longer accepted: %s\n", arg)
+			fmt.Fprintf(stderr, "       use -C/--dir for the project directory:  %s -C %s\n", progName, arg)
+			fmt.Fprintf(stderr, "       use -m/--mount for extra directories:    %s -m %s\n", progName, arg)
+			fmt.Fprintf(stderr, "       (bare '%s' uses the current directory)\n", progName)
+			return cfg, exitWith(ExitUsage)
+		}
+	}
+
+	if err := validate(&cfg, stderr); err != nil {
+		return cfg, err
+	}
+	return cfg, nil
+}
+
+// validate mirrors claude-contained:826-878. Order matters: each check's
+// message and exit status is observable, and the --name rewrite happens here
+// rather than at use.
+func validate(cfg *Config, stderr io.Writer) error {
+	if cfg.ZellijNewSession && !cfg.ZellijMode {
+		fmt.Fprintln(stderr, "error: --new-session is valid only with --zellij")
+		return exitWith(ExitUsage)
+	}
+	if cfg.ZellijSessionNameSet && !cfg.ZellijMode {
+		fmt.Fprintln(stderr, "error: --session is valid only with --zellij")
+		return exitWith(ExitUsage)
+	}
+	if cfg.ZellijMode && cfg.AttachMode && cfg.ShellMode {
+		fmt.Fprintln(stderr, "error: --zellij --attach cannot be combined with --shell")
+		return exitWith(ExitUsage)
+	}
+	// Under --zellij the target is a session, named only by --session.
+	// Accepting a name on -a as well would give one token two meanings again.
+	if cfg.ZellijMode && cfg.AttachName != "" {
+		fmt.Fprintln(stderr, "error: -a/--attach takes no name with --zellij; use --session=NAME")
+		return exitWith(ExitUsage)
+	}
+	if cfg.AttachMode && cfg.CustomContainerName != "" {
+		fmt.Fprintln(stderr, "error: --name cannot be combined with -a/--attach")
+		fmt.Fprintln(stderr, "       --name names a new container; --attach reconnects to an existing one.")
+		return exitWith(ExitUsage)
+	}
+	if cfg.ZellijSessionNameSet {
+		if err := ValidateZellijSessionName(cfg.ZellijSessionName, stderr); err != nil {
+			return err
+		}
+	}
+	// --name takes a bare name; the container name downstream expects the aic-
+	// prefix and the same sanitizing every generated name gets.
+	if cfg.CustomContainerName != "" {
+		cfg.CustomContainerName = "aic-" + host.SanitizeFolderName(strings.TrimPrefix(cfg.CustomContainerName, "aic-"))
+	}
+	if cfg.ZellijMode && cfg.AttachMode && len(cfg.EnvFlagArgs) > 0 {
+		fmt.Fprintln(stderr, "error: --env cannot be combined with --zellij --attach")
+		fmt.Fprintln(stderr, "       Attaching starts a Zellij client; the pane keeps the environment it was")
+		fmt.Fprintln(stderr, "       created with, so the variable would silently never reach the tool.")
+		fmt.Fprintln(stderr, "       Set it when the session is created instead.")
+		return exitWith(ExitUsage)
+	}
+	return nil
+}

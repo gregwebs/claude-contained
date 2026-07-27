@@ -15,3 +15,15 @@ claude-docked
 tests
 devcontainer
 .claude
+
+# The Go launcher: sources build on the host, and bin/ holds a multi-megabyte
+# binary that has no business being shipped to the builder. Note that the
+# top-level `*.md` above does not match nested paths, so .scratch needs its own
+# entry.
+go.mod
+go.sum
+Makefile
+cmd
+internal
+bin
+.scratch

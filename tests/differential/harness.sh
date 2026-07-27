@@ -4,18 +4,22 @@
 # given invocation across two independent runs, comparing the full observable
 # result -- runtime arguments, stdout, stderr, exit status, and a filesystem
 # manifest -- rather than just the command line. See README.md in this
-# directory for why the comparison is target-vs-itself today (bash is still
-# the only implementation) and how prompts are handled under non-terminal
-# stdin.
+# directory for why target-vs-itself is still the default mode, how --compare
+# crosses two launchers, and how prompts are handled under non-terminal stdin.
 #
 # Usage:
-#   tests/differential/harness.sh [--target NAME]...
+#   tests/differential/harness.sh [--target NAME]... [--compare REF:CANDIDATE]...
+#                                 [--case GLOB]...
 #
-# With no --target, runs against both claude-contained and claude-docked.
-# Each is compared against itself: two fresh, isolated invocations of the
-# same corpus entry against the same target, which is what proves the
-# isolation and normalization are complete (ticket 02 points a Go binary in
-# as a genuinely different target once one exists).
+# With neither --target nor --compare, runs against both claude-contained and
+# claude-docked. Each is compared against itself: two fresh, isolated
+# invocations of the same corpus entry against the same target, which is what
+# proves the isolation and normalization are complete.
+#
+# --compare REF:CANDIDATE runs the two sides against *different* launchers,
+# which is how the Go launcher is proven equivalent to a bash reference.
+# --case restricts the corpus by basename glob, so a caller can assert the
+# subset a given ticket implements while the rest stays wired up.
 set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -30,10 +34,25 @@ source "${here}/lib/manifest.sh"
 source "${here}/lib/isolate.sh"
 
 targets=()
+compares=()
+case_globs=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --target)
       targets+=("$2")
+      shift 2
+      ;;
+    --compare)
+      # REF:CANDIDATE -- run each corpus entry once per side against two
+      # *different* launchers, instead of twice against the same one.
+      compares+=("$2")
+      shift 2
+      ;;
+    --case)
+      # Repeatable glob over corpus basenames, so a caller can assert the
+      # subset a given ticket actually implements while the rest of the corpus
+      # stays wired up.
+      case_globs+=("$2")
       shift 2
       ;;
     *)
@@ -42,7 +61,9 @@ while [[ $# -gt 0 ]]; do
       ;;
   esac
 done
-[[ ${#targets[@]} -eq 0 ]] && targets=(claude-contained claude-docked)
+if [[ ${#targets[@]} -eq 0 && ${#compares[@]} -eq 0 ]]; then
+  targets=(claude-contained claude-docked)
+fi
 
 project_template="$(mktemp -d)"
 
@@ -136,8 +157,11 @@ prep() {
   printf '%s' "$content" | neutralize_paths "$home" "$proj" | neutralize_path_hash "$proj" | normalize_text
 }
 
+# run_corpus_entry <case_file> <target_a> <target_b> <label>
+# The two targets are the same launcher for --target self-comparison and
+# different ones for --compare; everything downstream is identical either way.
 run_corpus_entry() {
-  local case_file="$1" target="$2"
+  local case_file="$1" target_a="$2" target_b="$3" label="$4"
   local root_a root_b proj_a home_a stub_a proj_b home_b stub_b
   local out_a err_a exit_a argv_a out_b err_b exit_b argv_b
   local baseline_a baseline_b post_a post_b
@@ -158,13 +182,13 @@ run_corpus_entry() {
   out_a="$(mktemp)"; err_a="$(mktemp)"; exit_a="$(mktemp)"; argv_a="$(mktemp)"
   out_b="$(mktemp)"; err_b="$(mktemp)"; exit_b="$(mktemp)"; argv_b="$(mktemp)"
 
-  run_side "$target" "$proj_a" "$home_a" "$stub_a" "$out_a" "$err_a" "$exit_a" "$argv_a"
-  run_side "$target" "$proj_b" "$home_b" "$stub_b" "$out_b" "$err_b" "$exit_b" "$argv_b"
+  run_side "$target_a" "$proj_a" "$home_a" "$stub_a" "$out_a" "$err_a" "$exit_a" "$argv_a"
+  run_side "$target_b" "$proj_b" "$home_b" "$stub_b" "$out_b" "$err_b" "$exit_b" "$argv_b"
 
   post_a="$(capture_manifest "$home_a" HOME; capture_manifest "$proj_a" PROJ)"
   post_b="$(capture_manifest "$home_b" HOME; capture_manifest "$proj_b" PROJ)"
 
-  echo "== ${target}: $(basename "$case_file") -- ${CASE_DESCRIPTION} =="
+  echo "== ${label}: $(basename "$case_file") -- ${CASE_DESCRIPTION} =="
 
   if side_is_empty "$out_a" "$err_a" "$exit_a" "$argv_a" "$baseline_a" "$post_a" \
     || side_is_empty "$out_b" "$err_b" "$exit_b" "$argv_b" "$baseline_b" "$post_b"; then
@@ -207,28 +231,71 @@ run_corpus_entry() {
 }
 
 shopt -s nullglob
-case_files=("${corpus_dir}"/*.case)
+all_case_files=("${corpus_dir}"/*.case)
 shopt -u nullglob
 
-if [[ ${#case_files[@]} -eq 0 ]]; then
+if [[ ${#all_case_files[@]} -eq 0 ]]; then
   echo "error: no corpus entries found in ${corpus_dir}" >&2
   exit 2
 fi
 
-for target in "${targets[@]}"; do
-  if [[ ! -x "${repo_root}/${target}" ]]; then
-    echo "error: target not found or not executable: ${repo_root}/${target}" >&2
+# --case restricts the corpus by basename glob. Without it, everything runs.
+case_files=()
+if [[ ${#case_globs[@]} -eq 0 ]]; then
+  case_files=("${all_case_files[@]}")
+else
+  for case_file in "${all_case_files[@]}"; do
+    for glob in "${case_globs[@]}"; do
+      # shellcheck disable=SC2053
+      if [[ "$(basename "$case_file")" == $glob ]]; then
+        case_files+=("$case_file")
+        break
+      fi
+    done
+  done
+  if [[ ${#case_files[@]} -eq 0 ]]; then
+    echo "error: no corpus entries matched: ${case_globs[*]}" >&2
     exit 2
   fi
+fi
+
+# require_target <name>; both modes resolve targets relative to the repo root.
+require_target() {
+  if [[ ! -x "${repo_root}/${1}" ]]; then
+    echo "error: target not found or not executable: ${repo_root}/${1}" >&2
+    exit 2
+  fi
+}
+
+comparison_count=0
+
+for target in "${targets[@]+"${targets[@]}"}"; do
+  require_target "$target"
+  comparison_count=$((comparison_count + 1))
   for case_file in "${case_files[@]}"; do
-    run_corpus_entry "$case_file" "$target"
+    run_corpus_entry "$case_file" "$target" "$target" "$target"
+  done
+done
+
+for pair in "${compares[@]+"${compares[@]}"}"; do
+  if [[ "$pair" != *:* ]]; then
+    echo "error: --compare expects REF:CANDIDATE, got: ${pair}" >&2
+    exit 2
+  fi
+  ref="${pair%%:*}"
+  candidate="${pair#*:}"
+  require_target "$ref"
+  require_target "$candidate"
+  comparison_count=$((comparison_count + 1))
+  for case_file in "${case_files[@]}"; do
+    run_corpus_entry "$case_file" "$ref" "$candidate" "${ref} vs ${candidate}"
   done
 done
 
 rm -rf "$project_template"
 
 echo
-echo "${total_entries} corpus entr$([[ $total_entries -eq 1 ]] && echo y || echo ies) run across ${#targets[@]} target(s)."
+echo "${total_entries} corpus entr$([[ $total_entries -eq 1 ]] && echo y || echo ies) run across ${comparison_count} comparison(s)."
 if [[ $total_failed -gt 0 || $total_harness_errors -gt 0 ]]; then
   echo "${total_failed} failed, ${total_harness_errors} harness error(s)."
   exit 1

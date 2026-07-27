@@ -26,6 +26,12 @@ launcher_argv() { # launcher_argv <target> <flags...>
   HOME="$home" PATH="${stub_dir}:$PATH" "${repo_root}/${target}" "$@" -N -s -C "$proj" 2>/dev/null
 }
 
+# A compiled binary cannot be sourced, so the CLAUDE_CONTAINED_LIB_ONLY unit
+# checks below apply only to the bash launchers.
+target_is_bash_launcher() { # target_is_bash_launcher <target>
+  [[ "$1" == "claude-contained" || "$1" == "claude-docked" ]]
+}
+
 stub_dir="$(mktemp -d)"
 proj="$(mktemp -d)"
 home="$(mktemp -d)"
@@ -77,8 +83,18 @@ suite() {
   grep -qx '1.1.1.1' <<<"$out" && grep -qx 'SRT_ALLOW_HOSTS=c.example' <<<"$out"
   _check "--dns and --allow-host coexist" $?
 
-  # 6-9. Attach builders. `container exec` skips the entrypoint, so the wrapper
-  #      has to be prepended here or the attached process runs unsandboxed.
+  # 6-10. Attach builders. `container exec` skips the entrypoint, so the wrapper
+  #       has to be prepended here or the attached process runs unsandboxed.
+  #
+  # These assertions source the target to unit-test its shell functions, which
+  # only works for a bash launcher. When the suite is pointed at the Go binary
+  # they are skipped rather than failed -- the Go equivalents are ticket 07's
+  # own unit tests, not this suite's job.
+  if ! target_is_bash_launcher "$target"; then
+    echo "  SKIP: attach-builder unit checks (target is not a bash launcher)"
+    return "$fails"
+  fi
+
   (
     export CLAUDE_CONTAINED_LIB_ONLY=1
     # shellcheck disable=SC1090
@@ -139,7 +155,8 @@ suite() {
 }
 
 total=0
-for target in claude-contained claude-docked; do
+read -ra targets <<< "${CLAUDE_CONTAINED_TEST_TARGETS:-claude-contained claude-docked}"
+for target in "${targets[@]}"; do
   echo "== ${target} =="
   suite "$target"
   total=$((total + $?))

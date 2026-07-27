@@ -166,7 +166,8 @@ suite() {
 }
 
 total=0
-for target in claude-contained claude-docked; do
+read -ra targets <<< "${CLAUDE_CONTAINED_TEST_TARGETS:-claude-contained claude-docked}"
+for target in "${targets[@]}"; do
   echo "== ${target} =="
   suite "$target"
   total=$((total + $?))

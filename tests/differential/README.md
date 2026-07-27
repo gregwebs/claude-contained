@@ -14,22 +14,31 @@ on total disagreement.
 ## Usage
 
 ```
-tests/differential/harness.sh [--target NAME]...
+tests/differential/harness.sh [--target NAME]... [--compare REF:CANDIDATE]...
+                              [--case GLOB]...
 ```
 
-With no `--target`, runs the whole corpus against both `claude-contained` and
-`claude-docked`. Exits non-zero if anything diverges, or if a corpus entry
-turns out to be a no-op (see "The no-observable-result guard" below).
+With neither `--target` nor `--compare`, runs the whole corpus against both
+`claude-contained` and `claude-docked`. Exits non-zero if anything diverges, or
+if a corpus entry turns out to be a no-op (see "The no-observable-result guard"
+below).
 
-## Why target-vs-itself, not contained-vs-docked
+`--compare REF:CANDIDATE` runs each corpus entry once per side against two
+*different* launchers and diffs across them — this is how the Go launcher is
+proven equivalent to a bash reference. `--case GLOB` (repeatable) restricts the
+corpus by basename, so a caller can assert the subset a given ticket implements
+while the rest stays wired up. Both target names resolve relative to the
+repository root, so `--compare claude-contained:bin/claude-go` works.
 
-This harness is a prefactor for the planned Go rewrite (see
-`.scratch/go-launcher/issues/`): once a Go binary exists, it becomes one side
-of the comparison and a bash launcher the other, proving the port is
-behavior-preserving. Today, before that binary exists, each corpus entry is
-instead run **twice against the same target** — two fresh, fully isolated
-invocations of `claude-contained`, and separately of `claude-docked` — and
-the two runs are compared against each other.
+## Why target-vs-itself is still the default
+
+This harness is a prefactor for the Go rewrite (see
+`.scratch/go-launcher/issues/`): the Go binary is one side of the comparison
+and a bash launcher the other, proving the port is behavior-preserving. That is
+what `--compare` does. The *default* mode remains running each corpus entry
+**twice against the same target** — two fresh, fully isolated invocations of
+`claude-contained`, and separately of `claude-docked` — with the two runs
+compared against each other.
 
 This is deliberate, not a placeholder. `claude-contained` and `claude-docked`
 have a few small, *intentional* differences (`claude-docked` has no forced
@@ -44,9 +53,11 @@ independent runs of one target produce byte-identical *normalized* output.
 That's the real substance of the ticket: the isolation is complete (neither
 run can observe the other's mutations) and the normalization of
 timestamp/PID/path noise is complete (two runs of the identical invocation
-never spuriously diverge). Once a Go binary exists, the exact same
-machinery — `--target ./claude-go --target claude-contained` — compares it
-against a bash reference instead of against itself.
+never spuriously diverge). The same machinery, driven by
+`--compare claude-contained:bin/claude-go`, compares the Go launcher against a
+bash reference instead of against itself. Note that two `--target` flags do
+*not* cross-compare — each is still run against itself; crossing requires
+`--compare`.
 
 ## How prompts are handled under non-terminal stdin
 
