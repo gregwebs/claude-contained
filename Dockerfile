@@ -15,7 +15,7 @@ COPY Dockerfile custom-packages.tx[t] /tmp/
 RUN set -eux; \
     # Base packages
     BASE_PACKAGES=" \
-      git openssh-client ca-certificates ripgrep jq \
+      git make openssh-client ca-certificates ripgrep jq \
       curl bash xz-utils unzip tzdata \
       python3 python3-pip python3-venv \
       iproute2 gosu socat util-linux \
@@ -37,6 +37,16 @@ RUN set -eux; \
       $BASE_PACKAGES \
       $CUSTOM_PACKAGES \
     && rm -rf /var/lib/apt/lists/*
+
+# ---- Install git-secrets ----------------------------------------------------
+ARG GIT_SECRETS_VERSION=1.3.0
+RUN set -eux; \
+    curl -fL "https://github.com/awslabs/git-secrets/archive/refs/tags/${GIT_SECRETS_VERSION}.tar.gz" -o /tmp/git-secrets.tar.gz; \
+    mkdir -p /tmp/git-secrets; \
+    tar -xzf /tmp/git-secrets.tar.gz -C /tmp/git-secrets --strip-components=1; \
+    make -C /tmp/git-secrets install PREFIX=/usr/local; \
+    rm -rf /tmp/git-secrets /tmp/git-secrets.tar.gz; \
+    git secrets --scan /dev/null
 
 # ---- Install Bun ------------------------------------------------------------
 ARG BUN_VERSION=latest
