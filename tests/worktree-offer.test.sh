@@ -96,7 +96,7 @@ for target in claude-contained claude-docked; do
   (
     export CLAUDE_CONTAINED_LIB_ONLY=1
     # shellcheck disable=SC1090
-    source "${repo_root_dir}/${target}" . >/dev/null 2>&1
+    source "${repo_root_dir}/${target}" -C . >/dev/null 2>&1
     set +e
     suite "$target"
   )

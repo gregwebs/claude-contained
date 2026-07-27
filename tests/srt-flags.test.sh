@@ -23,7 +23,7 @@ repo_root="$(dirname "$here")"
 # on PATH that just echoes its argv.
 launcher_argv() { # launcher_argv <target> <flags...>
   local target="$1"; shift
-  HOME="$home" PATH="${stub_dir}:$PATH" "${repo_root}/${target}" "$@" -N -s "$proj" 2>/dev/null
+  HOME="$home" PATH="${stub_dir}:$PATH" "${repo_root}/${target}" "$@" -N -s -C "$proj" 2>/dev/null
 }
 
 stub_dir="$(mktemp -d)"
@@ -80,7 +80,7 @@ suite() {
   (
     export CLAUDE_CONTAINED_LIB_ONLY=1
     # shellcheck disable=SC1090
-    source "${repo_root}/${target}" . >/dev/null 2>&1
+    source "${repo_root}/${target}" -C . >/dev/null 2>&1
 
     tool="claude"; yolo_mode=0; srt_disable=0
     build_attach_cmd
@@ -91,7 +91,7 @@ suite() {
   (
     export CLAUDE_CONTAINED_LIB_ONLY=1
     # shellcheck disable=SC1090
-    source "${repo_root}/${target}" . >/dev/null 2>&1
+    source "${repo_root}/${target}" -C . >/dev/null 2>&1
 
     tool="claude"; yolo_mode=0; srt_disable=1
     build_attach_cmd
@@ -102,7 +102,7 @@ suite() {
   (
     export CLAUDE_CONTAINED_LIB_ONLY=1
     # shellcheck disable=SC1090
-    source "${repo_root}/${target}" . >/dev/null 2>&1
+    source "${repo_root}/${target}" -C . >/dev/null 2>&1
 
     srt_disable=0
     build_attach_shell_cmd
@@ -113,7 +113,7 @@ suite() {
   (
     export CLAUDE_CONTAINED_LIB_ONLY=1
     # shellcheck disable=SC1090
-    source "${repo_root}/${target}" . >/dev/null 2>&1
+    source "${repo_root}/${target}" -C . >/dev/null 2>&1
 
     srt_disable=1
     build_attach_shell_cmd
@@ -125,7 +125,7 @@ suite() {
   (
     export CLAUDE_CONTAINED_LIB_ONLY=1
     # shellcheck disable=SC1090
-    source "${repo_root}/${target}" . >/dev/null 2>&1
+    source "${repo_root}/${target}" -C . >/dev/null 2>&1
 
     tool="claude"; yolo_mode=1; srt_disable=0
     build_attach_cmd

@@ -4,12 +4,14 @@ set -euo pipefail
 show_help() {
   cat <<'EOF'
 Usage:
-  claude-contained [options] [main_dir] [extra_dir ...] [-- <tool args...>]
+  claude-contained [options] [-- <tool args...>]
 
 Description:
   Runs AI coding assistants inside an Apple Containers sandbox.
 
 Options:
+  -C, --dir DIR      Project directory (default: current directory)
+  -m, --mount DIR[:ro|:rw]  Mount an extra directory (can be repeated)
   -t, --tool TOOL    AI tool to run: claude (default), codex, copilot, gemini, vibe
   -R, --rebuild[=MODE]  Rebuild image and exit: tools (default) or full
   -H PORT[:HOSTPORT] Forward host port to container localhost (can be repeated)
@@ -25,20 +27,24 @@ Options:
   -W, --lock-worktrees  Auto-lock hidden linked worktrees (skip prompt)
   -y, --yolo         Skip all permission prompts (tool-specific flag)
   -N, --contained-node-modules  Use container-specific node_modules (skip prompt)
-  --share-skills=DIR  Mount shared skill folders from DIR (opt-in)
+  --share-skills DIR  Mount shared skill folders from DIR (opt-in)
   --share-host-claude  Mount host ~/.claude directly as container ~/.claude
-  --readonly-extras  Mount all extra dirs read-only (suffix overrides per-path)
-  -a, --attach [NAME]  Attach to running container (runs tool, or bash with -s)
-  --zellij          Run the tool inside a persistent Zellij workspace
-  --new-session[=NAME]  With --zellij, start a fresh session target
+  --readonly-extras  Mount all extra mounts read-only (suffix overrides per-path)
+  -a, --attach [NAME]  Attach to a running container; errors if none matches
+  --name NAME        Name for a new container (mutually exclusive with --attach)
+  --zellij           Run the tool inside a persistent Zellij workspace
+  --session NAME     With --zellij, the Zellij session to start or attach to
+  --new-session      With --zellij, start even when another session is live
   -h, --help         Show this help message
 
 Behavior:
-  - If no directories are provided, defaults to the current directory.
+  - There are no positional arguments. The project directory comes from -C
+    (default: the current directory) and extra mounts from -m; everything after
+    the first -- is passed to the tool verbatim.
   - Directories are mounted at their original host paths for full path parity.
-  - Additional directories are automatically added via --add-dir (claude, codex only).
-  - Append :ro to an extra dir to mount it read-only (or :rw to force read-write).
-    The working directory cannot be read-only.
+  - Extra mounts are automatically added via --add-dir (claude, codex only).
+  - Append :ro to an extra mount to mount it read-only (or :rw to force
+    read-write). The project directory cannot be read-only.
   - Claude uses ~/.claude-contained/claude as container ~/.claude by default.
     Account state remains shared through ~/.claude-contained/.claude.json, and
     host ~/.claude skills, agents, commands, and plugins are mounted into the
@@ -46,7 +52,7 @@ Behavior:
     CLAUDE_CONTAINED_SHARE_HOST_CLAUDE=1 to mount host ~/.claude directly.
   - Other tool configs (~/.codex, ~/.copilot, ~/.gemini, ~/.vibe), Maven cache
     (~/.m2), and Vaadin state (~/.vaadin) are bind-mounted.
-  - --share-skills=DIR mounts DIR as each tool's skills directory.
+  - --share-skills DIR mounts DIR as each tool's skills directory.
     For Codex, ~/.codex/skills/.system is mounted back over DIR/.system
     so built-in skills remain visible while new installs write to DIR.
   - SSH agent forwarding is disabled by default; use --ssh to enable (for git push).
@@ -54,8 +60,8 @@ Behavior:
     often cannot resolve. The launcher uses --dns 1.1.1.1 by default. Explicit
     --dns wins; set CLAUDE_DNS=system to use the runtime default, or
     CLAUDE_DNS=1.1.1.1,8.8.8.8 for a per-user list.
-  - -e/--env passes env vars to the tool. KEY=VALUE lines in the main directory's
-    .claude-contained/env are also applied (--env wins; --no-project-env skips the
+  - -e/--env passes env vars to the tool. KEY=VALUE lines in the project
+    directory's .claude-contained/env are also applied (--env wins; --no-project-env skips the
     file). That file is writable from inside the container, so keys that would
     subvert the sandbox are refused from it. Neither applies when attaching to an
     existing container, and --env is refused with --zellij --attach, where the
@@ -66,35 +72,37 @@ Behavior:
   - Git worktrees are detected; main repository's .git directory is mounted for full git access.
   - Linked worktrees hidden from the container can be auto-locked while the container runs.
   - --zellij starts a named Zellij session and keeps the container alive after detach.
-    Use --zellij --attach [NAME] to reconnect to a live Zellij session.
+    Use --zellij --attach [--session NAME] to reconnect to a live Zellij session.
 
 Examples:
   claude-contained                     # Run claude in current directory
-  claude-contained -t codex .          # Run codex instead
-  claude-contained -t copilot .        # Run copilot instead
-  claude-contained -t gemini .         # Run gemini instead
-  claude-contained -t vibe .           # Run vibe instead
-  claude-contained . ../other/project  # Mount extra directories
-  claude-contained . ../lib:ro         # Mount ../lib read-only
-  claude-contained --readonly-extras . ../a ../b  # All extras read-only
-  claude-contained . -- --model sonnet # Pass args to tool
-  claude-contained -y -t codex .       # Codex with --yolo
-  claude-contained -S .                # Enable SSH agent (for git push)
+  claude-contained -t codex            # Run codex instead
+  claude-contained -t copilot          # Run copilot instead
+  claude-contained -t gemini           # Run gemini instead
+  claude-contained -t vibe             # Run vibe instead
+  claude-contained -C ~/code/my-app    # Run in a specific project directory
+  claude-contained -m ../other/project # Mount an extra directory
+  claude-contained -m ../lib:ro        # Mount ../lib read-only
+  claude-contained --readonly-extras -m ../a -m ../b  # All extra mounts read-only
+  claude-contained -- --model sonnet   # Pass args to tool
+  claude-contained -y -t codex         # Codex with --yolo
+  claude-contained -S                  # Enable SSH agent (for git push)
   claude-contained -s                  # Debug shell in current directory
   claude-contained --rebuild           # Refresh AI tools, then exit
   claude-contained --rebuild=full      # Full fresh rebuild, then exit
-  claude-contained -p 8080:8080 .      # Expose port 8080
-  claude-contained -H 3845 .           # Forward host:3845 to container localhost:3845
-  claude-contained -e API_URL=http://host.local:8080 .  # Set an env var
-  claude-contained --dns 1.1.1.1 .     # Fix DNS when the vmnet resolver fails
-  claude-contained --allow-host example.com .  # Permit one extra egress host
-  claude-contained --no-sandbox -s .   # Debug shell with the sandbox off
-  claude-contained --share-skills=/Users/me/Projects/skills .
+  claude-contained -p 8080:8080        # Expose port 8080
+  claude-contained -H 3845             # Forward host:3845 to container localhost:3845
+  claude-contained -e API_URL=http://host.local:8080  # Set an env var
+  claude-contained --dns 1.1.1.1       # Fix DNS when the vmnet resolver fails
+  claude-contained --allow-host example.com  # Permit one extra egress host
+  claude-contained --no-sandbox -s     # Debug shell with the sandbox off
+  claude-contained --share-skills /Users/me/Projects/skills
   claude-contained -a                  # List and attach to running container
-  claude-contained -a myproject        # Attach or create named container
-  claude-contained --zellij .          # Start this project in Zellij
+  claude-contained -a myproject        # Attach to container aic-myproject
+  claude-contained --name myproject    # Create a container named aic-myproject
+  claude-contained --zellij            # Start this project in Zellij
   claude-contained --zellij --attach   # Attach to a live Zellij-backed container
-  claude-contained --zellij --new-session=review .
+  claude-contained --zellij --new-session --session=review
 EOF
 }
 
@@ -541,7 +549,8 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
   exit 0
 fi
 
-# Parse flags (can appear in any order)
+# Parse flags. Everything before `--` must be a flag: there are no positional
+# arguments, so no flag has to guess whether a bare token is its value or a path.
 shell_mode=0
 ssh_mode=0
 worktree_mode=0
@@ -551,10 +560,13 @@ contained_node_modules=0
 attach_mode=0
 attach_name=""
 custom_container_name=""
+main_dir=""
+extra_mounts=()
+tool_args=()
 zellij_mode=0
 zellij_new_session=0
-zellij_new_session_name=""
-zellij_new_session_name_set=0
+zellij_session_name=""
+zellij_session_name_set=0
 rebuild_mode="none"
 tool="claude"
 ro_default=0
@@ -572,19 +584,93 @@ user_env_origins=()
 user_env_args=()
 share_host_claude=0
 [[ "${CLAUDE_CONTAINED_SHARE_HOST_CLAUDE:-}" == "1" ]] && share_host_claude=1
-while [[ "${1:-}" == -* ]]; do
-  case "${1:-}" in
+# require_value <flag> <next-arg-or-empty> [what]; rejects a missing value or a
+# value that is really the next flag. Without this a trailing `--dns` died with
+# "unbound variable" under `set -u`. `what` names the expected form when that is
+# more useful than "a value".
+require_value() {
+  if [[ -z "${2:-}" || "${2}" == -* ]]; then
+    echo "error: ${1} requires ${3:-a value}" >&2
+    exit 2
+  fi
+}
+
+while [[ $# -gt 0 ]]; do
+  # `--` matches -* and must be handled before any flag dispatch, or the
+  # unknown-flag error below would swallow it. Everything after the first `--`
+  # goes to the tool verbatim, including any further `--`.
+  if [[ "$1" == "--" ]]; then
+    shift
+    tool_args=("$@")
+    break
+  fi
+  case "$1" in
     -h|--help)
       show_help
       exit 0
+      ;;
+    -C|--dir)
+      require_value "-C/--dir" "${2:-}"
+      main_dir="$2"
+      shift 2
+      ;;
+    --dir=*)
+      main_dir="${1#*=}"
+      if [[ -z "$main_dir" ]]; then
+        echo "error: --dir requires a non-empty directory" >&2
+        exit 2
+      fi
+      shift
+      ;;
+    -m|--mount)
+      require_value "-m/--mount" "${2:-}"
+      extra_mounts+=("$2")
+      shift 2
+      ;;
+    --mount=*)
+      if [[ -z "${1#*=}" ]]; then
+        echo "error: --mount requires a non-empty directory" >&2
+        exit 2
+      fi
+      extra_mounts+=("${1#*=}")
+      shift
+      ;;
+    --name)
+      require_value "--name" "${2:-}"
+      custom_container_name="$2"
+      shift 2
+      ;;
+    --name=*)
+      custom_container_name="${1#*=}"
+      if [[ -z "$custom_container_name" ]]; then
+        echo "error: --name requires a non-empty name" >&2
+        exit 2
+      fi
+      shift
+      ;;
+    --session)
+      require_value "--session" "${2:-}"
+      zellij_session_name="$2"
+      zellij_session_name_set=1
+      shift 2
+      ;;
+    --session=*)
+      zellij_session_name="${1#*=}"
+      zellij_session_name_set=1
+      if [[ -z "$zellij_session_name" ]]; then
+        echo "error: --session requires a non-empty name" >&2
+        exit 2
+      fi
+      shift
       ;;
     --readonly-extras)
       ro_default=1
       shift
       ;;
     --share-skills)
-      echo "error: --share-skills requires --share-skills=DIR" >&2
-      exit 2
+      require_value "--share-skills" "${2:-}"
+      share_skills_dir="$2"
+      shift 2
       ;;
     --share-skills=*)
       share_skills_dir="${1#*=}"
@@ -607,7 +693,9 @@ while [[ "${1:-}" == -* ]]; do
       shift
       ;;
     -R)
-      if [[ "${2:-}" == "tools" || "${2:-}" == "full" ]]; then
+      # Optional value: with no positionals left, any non-flag token here is the
+      # mode. Validated centrally in run_rebuild.
+      if [[ -n "${2:-}" && "${2}" != -* ]]; then
         rebuild_mode="$2"
         shift 2
       else
@@ -640,20 +728,16 @@ while [[ "${1:-}" == -* ]]; do
       shift
       ;;
     -t|--tool)
-      shift
-      tool="$1"
-      shift
+      require_value "-t/--tool" "${2:-}"
+      tool="$2"
+      shift 2
       ;;
     -e|--env)
-      shift
       # A leading dash can never be a valid assignment, so treat it as a missing
       # value rather than swallowing the next flag.
-      if [[ -z "${1:-}" || "${1}" == -* ]]; then
-        echo "error: -e/--env requires KEY=VALUE" >&2
-        exit 2
-      fi
-      env_flag_args+=("$1")
-      shift
+      require_value "-e/--env" "${2:-}" "KEY=VALUE"
+      env_flag_args+=("$2")
+      shift 2
       ;;
     --env=*)
       env_flag_args+=("${1#*=}")
@@ -664,28 +748,28 @@ while [[ "${1:-}" == -* ]]; do
       shift
       ;;
     -p)
-      shift
-      port_maps+=("$1")
-      shift
+      require_value "-p" "${2:-}"
+      port_maps+=("$2")
+      shift 2
       ;;
     -H)
-      shift
-      host_forwards+=("$1")
-      shift
+      require_value "-H" "${2:-}"
+      host_forwards+=("$2")
+      shift 2
       ;;
     --dns)
-      shift
-      dns_servers+=("$1")
-      shift
+      require_value "--dns" "${2:-}"
+      dns_servers+=("$2")
+      shift 2
       ;;
     --dns=*)
       dns_servers+=("${1#*=}")
       shift
       ;;
     --allow-host)
-      shift
-      srt_allow_hosts+=("$1")
-      shift
+      require_value "--allow-host" "${2:-}"
+      srt_allow_hosts+=("$2")
+      shift 2
       ;;
     --allow-host=*)
       srt_allow_hosts+=("${1#*=}")
@@ -700,30 +784,35 @@ while [[ "${1:-}" == -* ]]; do
       shift
       ;;
     --new-session)
+      # Force flag only: --session NAME carries the name.
       zellij_new_session=1
       shift
-      if [[ -n "${1:-}" && "${1:-}" != -* && "${1:-}" != "." && "${1:-}" != */* && ! -e "${1:-}" ]]; then
-        echo "error: named Zellij sessions require --new-session=NAME" >&2
-        exit 2
-      fi
       ;;
     --new-session=*)
-      zellij_new_session=1
-      zellij_new_session_name_set=1
-      zellij_new_session_name="${1#*=}"
-      shift
+      echo "error: --new-session no longer takes a name; use --session=NAME" >&2
+      exit 2
       ;;
     -a|--attach)
       attach_mode=1
       shift
-      # If next arg exists and doesn't start with - and isn't a path, treat as container name
-      if [[ -n "${1:-}" && "${1:-}" != -* && "${1:-}" != */* && "${1:-}" != "." ]]; then
+      # Optional value. Nothing is positional, so any non-flag token here is the
+      # container name.
+      if [[ -n "${1:-}" && "${1}" != -* ]]; then
         attach_name="$1"
         shift
       fi
       ;;
+    -*)
+      echo "error: unknown flag: $1" >&2
+      echo "       run 'claude-contained --help' for the supported flags" >&2
+      exit 2
+      ;;
     *)
-      break
+      echo "error: positional arguments are no longer accepted: $1" >&2
+      echo "       use -C/--dir for the project directory:  claude-contained -C $1" >&2
+      echo "       use -m/--mount for extra directories:    claude-contained -m $1" >&2
+      echo "       (bare 'claude-contained' uses the current directory)" >&2
+      exit 2
       ;;
   esac
 done
@@ -732,15 +821,32 @@ if [[ $zellij_new_session -eq 1 && $zellij_mode -eq 0 ]]; then
   echo "error: --new-session is valid only with --zellij" >&2
   exit 2
 fi
+if [[ $zellij_session_name_set -eq 1 && $zellij_mode -eq 0 ]]; then
+  echo "error: --session is valid only with --zellij" >&2
+  exit 2
+fi
 if [[ $zellij_mode -eq 1 && $attach_mode -eq 1 && $shell_mode -eq 1 ]]; then
   echo "error: --zellij --attach cannot be combined with --shell" >&2
   exit 2
 fi
-if [[ $zellij_new_session_name_set -eq 1 ]]; then
-  validate_zellij_session_name "$zellij_new_session_name" || exit 2
-fi
+# Under --zellij the target is a session, named only by --session. Accepting a
+# name on -a as well would give one token two meanings again.
 if [[ $zellij_mode -eq 1 && -n "$attach_name" ]]; then
-  validate_zellij_session_name "$attach_name" || exit 2
+  echo "error: -a/--attach takes no name with --zellij; use --session=NAME" >&2
+  exit 2
+fi
+if [[ $attach_mode -eq 1 && -n "$custom_container_name" ]]; then
+  echo "error: --name cannot be combined with -a/--attach" >&2
+  echo "       --name names a new container; --attach reconnects to an existing one." >&2
+  exit 2
+fi
+if [[ $zellij_session_name_set -eq 1 ]]; then
+  validate_zellij_session_name "$zellij_session_name" || exit 2
+fi
+# --name takes a bare name; container_name downstream expects the aic- prefix and
+# the same sanitizing every generated name gets.
+if [[ -n "$custom_container_name" ]]; then
+  custom_container_name="aic-$(sanitize_foldername "${custom_container_name#aic-}")"
 fi
 if [[ $zellij_mode -eq 1 && $attach_mode -eq 1 && ${#env_flag_args[@]} -gt 0 ]]; then
   echo "error: --env cannot be combined with --zellij --attach" >&2
@@ -782,6 +888,8 @@ fi
 
 if [[ $zellij_mode -eq 1 && $attach_mode -eq 1 ]]; then
   load_live_zellij_records
+  # The attach target is a Zellij session, named by --session (never by -a).
+  attach_name="$zellij_session_name"
 
   if [[ -z "$attach_name" ]]; then
     if [[ ${#zellij_container_names[@]} -eq 0 ]]; then
@@ -882,10 +990,11 @@ if [[ $attach_mode -eq 1 && $zellij_mode -eq 0 ]]; then
     fi
     # Check if container exists
     if [[ ${#containers[@]} -eq 0 ]] || ! printf '%s\n' "${containers[@]}" | grep -qx "$attach_name"; then
-      # Container doesn't exist - use as custom name for new container
-      raw_name="${attach_name#${prefix}}"
-      custom_container_name="${prefix}$(sanitize_foldername "$raw_name")"
-      # Fall through to create new container
+      # --attach reconnects only. Creating on a name miss used to be silent, so a
+      # typo started a second container instead of reporting the mistake.
+      echo "error: no running container named ${attach_name}" >&2
+      echo "       use --name ${attach_name#${prefix}} to create a new one" >&2
+      exit 1
     else
       if [[ $shell_mode -eq 1 ]]; then
         build_attach_shell_cmd
@@ -898,34 +1007,14 @@ if [[ $attach_mode -eq 1 && $zellij_mode -eq 0 ]]; then
   fi
 fi
 
-if [[ $# -eq 0 ]]; then
-  set -- "."
-fi
-
-# Split directories (before --) vs tool args (after --)
-paths=()
-tool_args=()
-seen_sep=0
-for a in "$@"; do
-  if [[ "$a" == "--" ]]; then
-    seen_sep=1
-    continue
-  fi
-  if [[ $seen_sep -eq 0 ]]; then
-    paths+=("$a")
-  else
-    tool_args+=("$a")
-  fi
-done
-
-# If user did: claude-contained -- <claude args...>
-if [[ ${#paths[@]} -eq 0 ]]; then
-  paths+=(".")
-fi
+# paths[0] is the project directory (-C, default cwd); the rest are extra mounts
+# (-m), in the order given. tool_args was filled by the parser at the first `--`.
+paths=( "${main_dir:-.}" )
+paths+=( "${extra_mounts[@]+"${extra_mounts[@]}"}" )
 
 # Strip :ro / :rw suffixes; build parallel path_modes[] (rw|ro per index).
-# Working dir (index 0) cannot be ro. --readonly-extras sets the default for
-# unsuffixed extras; an explicit suffix always wins.
+# Project directory (index 0) cannot be ro. --readonly-extras sets the default for
+# unsuffixed extra mounts; an explicit suffix always wins.
 path_modes=()
 for i in "${!paths[@]}"; do
   p="${paths[$i]}"
@@ -935,7 +1024,7 @@ for i in "${!paths[@]}"; do
   fi
   if [[ $i -eq 0 ]]; then
     if [[ "$mode" == "ro" ]]; then
-      echo "error: working directory cannot be read-only" >&2
+      echo "error: project directory cannot be read-only" >&2
       exit 2
     fi
     mode="rw"
@@ -1327,8 +1416,8 @@ print_user_env_summary
 
 zellij_session=""
 if [[ $zellij_mode -eq 1 ]]; then
-  if [[ $zellij_new_session_name_set -eq 1 ]]; then
-    zellij_session="$zellij_new_session_name"
+  if [[ $zellij_session_name_set -eq 1 ]]; then
+    zellij_session="$zellij_session_name"
   else
     zellij_session="$(default_zellij_session_name "$main_host")"
   fi
@@ -1345,7 +1434,7 @@ if [[ $zellij_mode -eq 1 ]]; then
 
   if [[ $zellij_target_live -eq 1 ]]; then
     echo "Zellij session '${zellij_session}' is already live." >&2
-    echo "Use --zellij --attach ${zellij_session}, or choose a different session with --new-session=NAME." >&2
+    echo "Use --zellij --attach --session ${zellij_session}, or choose a different session with --session=NAME." >&2
     exit 1
   fi
 
@@ -1354,7 +1443,7 @@ if [[ $zellij_mode -eq 1 ]]; then
     for existing_session in "${zellij_session_names[@]}"; do
       echo "  ${existing_session}" >&2
     done
-    echo "Use --zellij --attach [NAME] to reconnect, or --zellij --new-session[=NAME] to start another session." >&2
+    echo "Use --zellij --attach [--session NAME] to reconnect, or --zellij --new-session [--session NAME] to start another session." >&2
     exit 1
   fi
 fi

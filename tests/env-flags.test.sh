@@ -99,53 +99,53 @@ suite() {
   err="$(mktemp)"
   clear_project_env
 
-  launcher_run "$target" "$out" "$err" -e FOO=bar --env BAZ=qux --env=QUUX=1 -N -s "$proj"
+  launcher_run "$target" "$out" "$err" -e FOO=bar --env BAZ=qux --env=QUUX=1 -N -s -C "$proj"
   rc=$?
   [[ $rc -eq 0 ]] && line_has "$out" "FOO=bar" && line_has "$out" "BAZ=qux" && line_has "$out" "QUUX=1"
   _check "-e, --env, and --env= all reach the runtime" $?
 
-  launcher_run "$target" "$out" "$err" -e 'GREETING=hello world' -e 'CONN=k=v;x=y' -N -s "$proj"
+  launcher_run "$target" "$out" "$err" -e 'GREETING=hello world' -e 'CONN=k=v;x=y' -N -s -C "$proj"
   rc=$?
   [[ $rc -eq 0 ]] && line_has "$out" "GREETING=hello world" && line_has "$out" "CONN=k=v;x=y"
   _check "values keep spaces and embedded '='" $?
 
-  launcher_run "$target" "$out" "$err" -e DISPLAY=host.local:0 -N -s "$proj"
+  launcher_run "$target" "$out" "$err" -e DISPLAY=host.local:0 -N -s -C "$proj"
   rc=$?
   [[ $rc -eq 0 ]] && line_has "$out" "DISPLAY=host.local:0"
   _check "DISPLAY is passable (the entrypoint honors a pre-set value)" $?
 
-  launcher_run "$target" "$out" "$err" -e FOO=first -e FOO=second -N -s "$proj"
+  launcher_run "$target" "$out" "$err" -e FOO=first -e FOO=second -N -s -C "$proj"
   rc=$?
   [[ $rc -eq 0 ]] && line_has "$out" "FOO=second" && [[ "$(line_count "$out" "FOO=first")" -eq 0 ]] \
     && [[ "$(line_count "$out" "FOO=second")" -eq 1 ]]
   _check "a repeated key is emitted once, last value winning" $?
 
-  launcher_run "$target" "$out" "$err" -e TZ=UTC -N -s "$proj"
+  launcher_run "$target" "$out" "$err" -e TZ=UTC -N -s -C "$proj"
   rc=$?
   [[ $rc -eq 0 ]] && line_has "$out" "TZ=UTC" && [[ "$(grep -c '^TZ=' "$out")" -eq 1 ]]
   _check "user TZ replaces the host-timezone built-in instead of duplicating it" $?
 
-  launcher_run "$target" "$out" "$err" -e FOO=bar -N -s "$proj"
+  launcher_run "$target" "$out" "$err" -e FOO=bar -N -s -C "$proj"
   rc=$?
   [[ $rc -eq 0 ]] && file_has "$err" "env: FOO (--env)"
   _check "loaded keys are reported by name" $?
 
-  launcher_run "$target" "$out" "$err" -N -s "$proj"
+  launcher_run "$target" "$out" "$err" -N -s -C "$proj"
   rc=$?
   [[ $rc -eq 0 ]] && ! file_has "$err" "env:"
   _check "no env summary when nothing was passed" $?
 
-  launcher_run "$target" "$out" "$err" -e -N -s "$proj"
+  launcher_run "$target" "$out" "$err" -e -N -s -C "$proj"
   rc=$?
   [[ $rc -eq 2 ]] && file_has "$err" "requires KEY=VALUE"
   _check "bare -e fails with a message, not an unbound-variable crash" $?
 
-  launcher_run "$target" "$out" "$err" -e NOEQUALS -N -s "$proj"
+  launcher_run "$target" "$out" "$err" -e NOEQUALS -N -s -C "$proj"
   rc=$?
   [[ $rc -eq 2 ]] && file_has "$err" "expected KEY=VALUE"
   _check "--env without '=' is rejected" $?
 
-  launcher_run "$target" "$out" "$err" -e '9BAD=x' -N -s "$proj"
+  launcher_run "$target" "$out" "$err" -e '9BAD=x' -N -s -C "$proj"
   rc=$?
   [[ $rc -eq 2 ]] && file_has "$err" "not a valid environment variable name"
   _check "invalid key names are rejected" $?
@@ -153,13 +153,13 @@ suite() {
   for reserved in STAY_ROOT=1 SSH_AUTH_SOCK=/tmp/evil.sock HOME=/tmp PATH=/tmp \
                   JAVA_HOME=/tmp GIT_PROTECT_DIRS=/tmp HOST_HOME=/tmp \
                   SRT_DISABLE=1 CLAUDE_CONTAINED_ZELLIJ=1; do
-    launcher_run "$target" "$out" "$err" -e "$reserved" -N -s "$proj"
+    launcher_run "$target" "$out" "$err" -e "$reserved" -N -s -C "$proj"
     rc=$?
     [[ $rc -eq 2 ]] && file_has "$err" "reserved by claude-contained"
     _check "-e ${reserved%%=*} is refused" $?
   done
 
-  launcher_run "$target" "$out" "$err" -e NODE_OPTIONS=--require=/tmp/x.js -N -s "$proj"
+  launcher_run "$target" "$out" "$err" -e NODE_OPTIONS=--require=/tmp/x.js -N -s -C "$proj"
   rc=$?
   [[ $rc -eq 0 ]] && line_has "$out" "NODE_OPTIONS=--require=/tmp/x.js"
   _check "NODE_OPTIONS is allowed on the command line" $?
@@ -173,31 +173,31 @@ BAZ="from file"
 QUX=plain
 SPACED=a b c
 '
-  launcher_run "$target" "$out" "$err" -N -s "$proj"
+  launcher_run "$target" "$out" "$err" -N -s -C "$proj"
   rc=$?
   [[ $rc -eq 0 ]] && line_has "$out" "BAZ=from file" && line_has "$out" "QUX=plain" \
     && line_has "$out" "SPACED=a b c" && file_has "$err" "(.claude-contained/env)"
   _check "project env file is loaded, quotes stripped, comments skipped" $?
 
-  launcher_run "$target" "$out" "$err" --no-project-env -N -s "$proj"
+  launcher_run "$target" "$out" "$err" --no-project-env -N -s -C "$proj"
   rc=$?
   [[ $rc -eq 0 ]] && [[ "$(line_count "$out" "QUX=plain")" -eq 0 ]] && ! file_has "$err" "(.claude-contained/env)"
   _check "--no-project-env ignores the file" $?
 
-  launcher_run "$target" "$out" "$err" -e QUX=fromflag -N -s "$proj"
+  launcher_run "$target" "$out" "$err" -e QUX=fromflag -N -s -C "$proj"
   rc=$?
   [[ $rc -eq 0 ]] && line_has "$out" "QUX=fromflag" && [[ "$(line_count "$out" "QUX=plain")" -eq 0 ]] \
     && [[ "$(grep -c '^QUX=' "$out")" -eq 1 ]]
   _check "--env overrides the file, emitting the key once" $?
 
   printf 'CRLF=ok\r\n' > "${proj}/.claude-contained/env"
-  launcher_run "$target" "$out" "$err" -N -s "$proj"
+  launcher_run "$target" "$out" "$err" -N -s -C "$proj"
   rc=$?
   [[ $rc -eq 0 ]] && line_has "$out" "CRLF=ok"
   _check "CRLF line endings do not leak into the value" $?
 
   printf 'NOEOL=ok' > "${proj}/.claude-contained/env"
-  launcher_run "$target" "$out" "$err" -N -s "$proj"
+  launcher_run "$target" "$out" "$err" -N -s -C "$proj"
   rc=$?
   [[ $rc -eq 0 ]] && line_has "$out" "NOEOL=ok"
   _check "a final line without a newline is read" $?
@@ -206,28 +206,28 @@ SPACED=a b c
   write_project_env "EVIL=\$(touch ${canary})
 ALSO=\`touch ${canary}\`
 "
-  launcher_run "$target" "$out" "$err" -N -s "$proj"
+  launcher_run "$target" "$out" "$err" -N -s -C "$proj"
   rc=$?
   [[ $rc -eq 0 ]] && [[ ! -e "$canary" ]] && line_has "$out" "EVIL=\$(touch ${canary})"
   _check "the file is parsed literally, never evaluated" $?
 
   write_project_env 'STAY_ROOT=1
 '
-  launcher_run "$target" "$out" "$err" -N -s "$proj"
+  launcher_run "$target" "$out" "$err" -N -s -C "$proj"
   rc=$?
   [[ $rc -eq 2 ]] && file_has "$err" ".claude-contained/env:1" && file_has "$err" "reserved by claude-contained"
   _check "a reserved key in the file fails the launch, naming the line" $?
 
   write_project_env 'NODE_OPTIONS=--require=/tmp/x.js
 '
-  launcher_run "$target" "$out" "$err" -N -s "$proj"
+  launcher_run "$target" "$out" "$err" -N -s -C "$proj"
   rc=$?
   [[ $rc -eq 2 ]] && file_has "$err" "cannot be set from a project env file"
   _check "NODE_OPTIONS is refused from the file though allowed as a flag" $?
 
   write_project_env 'JUSTAKEY
 '
-  launcher_run "$target" "$out" "$err" -N -s "$proj"
+  launcher_run "$target" "$out" "$err" -N -s -C "$proj"
   rc=$?
   [[ $rc -eq 2 ]] && file_has "$err" ".claude-contained/env:1" && file_has "$err" "expected KEY=VALUE"
   _check "a malformed file line fails the launch" $?

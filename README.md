@@ -36,8 +36,8 @@ There are some caveats:
 
 4. Run:
    ```bash
-   claude-contained              # Current directory
-   claude-contained ./my-project # Specific directory
+   claude-contained                    # Current directory
+   claude-contained -C ./my-project    # Specific directory
    ```
 
 ### Docker
@@ -52,20 +52,22 @@ There are some caveats:
 
 3. Run:
    ```bash
-   claude-docked              # Current directory
-   claude-docked ./my-project # Specific directory
+   claude-docked                    # Current directory
+   claude-docked -C ./my-project    # Specific directory
    ```
 
 ## Usage
 
 ```
-claude-contained [options] [main_dir] [extra_dir ...] [-- <tool args...>]
+claude-contained [options] [-- <tool args...>]
 ```
 
 ### Options
 
 | Flag | Description |
 |------|-------------|
+| `-C`, `--dir DIR` | Project directory (default: current directory) |
+| `-m`, `--mount DIR[:ro\|:rw]` | Mount an extra directory at the same path (can be repeated) |
 | `-t`, `--tool TOOL` | AI tool to run: `claude` (default), `codex`, `gemini`, `vibe` |
 | `-R`, `--rebuild[=MODE]` | Rebuild image before run: `tools` (default) or `full` |
 | `-H PORT[:HOSTPORT]` | Forward host port to container localhost (can be repeated) |
@@ -80,11 +82,13 @@ claude-contained [options] [main_dir] [extra_dir ...] [-- <tool args...>]
 | `-w`, `--worktree` | Auto-include git worktree's main repository (skip prompt) |
 | `-y`, `--yolo` | Skip all permission prompts (tool-specific flag) |
 | `-N`, `--contained-node-modules` | Use container-specific node_modules (skip prompt) |
-| `--share-skills=DIR` | Mount shared skill folders from `DIR` (opt-in, no default; use a full path) |
+| `--share-skills DIR` | Mount shared skill folders from `DIR` (opt-in, no default; use a full path) |
 | `--share-host-claude` | Compatibility mode: mount host `~/.claude` directly as container `~/.claude` |
-| `-a`, `--attach [NAME]` | Attach to running container (runs tool, or bash with `-s`) |
+| `-a`, `--attach [NAME]` | Attach to a running container; errors if none matches |
+| `--name NAME` | Name for a new container (mutually exclusive with `--attach`) |
 | `--zellij` | Run the tool inside a persistent Zellij workspace |
-| `--new-session[=NAME]` | With `--zellij`, start the target session even when another Zellij container is live |
+| `--session NAME` | With `--zellij`, the Zellij session to start or attach to |
+| `--new-session` | With `--zellij`, start even when another Zellij container is live |
 | `-h`, `--help` | Show help message |
 
 ### Supported Tools
@@ -108,46 +112,52 @@ The contained Claude profile and the other tools' config directories are bind-mo
 - Host Claude extension resources are shared from `~/.claude/{skills,agents,commands,plugins}` into the contained profile.
 - Use `--share-host-claude` or `CLAUDE_CONTAINED_SHARE_HOST_CLAUDE=1` to restore the legacy behavior of mounting host `~/.claude` directly.
 - Other tool configs and Maven cache (`~/.m2`) are bind-mounted for persistence
-- `--share-skills=DIR` mounts `DIR` as each tool's skills directory: `~/.claude/skills`, `~/.codex/skills`, `~/.agents/skills`, and `~/.<tool>/skills` for Copilot, Gemini, and Vibe. For Codex, the host's `~/.codex/skills/.system` is mounted back over `DIR/.system` so built-in skills remain visible while new installs write to `DIR`. Use a full path; `~` is not expanded by the launcher.
+- `--share-skills DIR` mounts `DIR` as each tool's skills directory: `~/.claude/skills`, `~/.codex/skills`, `~/.agents/skills`, and `~/.<tool>/skills` for Copilot, Gemini, and Vibe. For Codex, the host's `~/.codex/skills/.system` is mounted back over `DIR/.system` so built-in skills remain visible while new installs write to `DIR`. Use a full path; `~` is not expanded by the launcher.
 - SSH agent forwarding is disabled by default; use `-S`/`--ssh` to enable
 - Git worktrees are detected; main repository is included for full git access
 - If a mounted main repository has linked worktrees outside the mounted directories, the launcher offers to auto-lock those worktrees while the container runs (otherwise an in-container `git worktree prune`/`git gc` could remove them). Auto-lock reasons use `cc-autolocked-by:` and are removed when the last owning container exits. The locking is self-healing — a lock left behind by a launcher that was killed is reclaimed automatically by the next run — and fail-safe, applying the locks even if the internal mutex is unavailable so the container never runs with worktrees unprotected.
 - `--zellij` starts the selected tool, or `bash` with `--shell`, inside a named Zellij session. The default session is `cc-{project}-{path-hash}`. Zellij data lives in the Zellij session store at `~/.claude-contained/zellij/`; live sockets stay inside the container under `/tmp`.
-- Detaching from Zellij keeps the container running until that Zellij session is killed. Plain `--zellij` refuses when any Zellij-backed container is already live; use `--zellij --attach [NAME]` to reconnect or `--zellij --new-session[=NAME]` to start another session.
+- Detaching from Zellij keeps the container running until that Zellij session is killed. Plain `--zellij` refuses when any Zellij-backed container is already live; use `--zellij --attach [--session NAME]` to reconnect or `--zellij --new-session [--session NAME]` to start another session.
 
 ### Examples
 
 ```bash
 # Tool selection
 claude-contained                                    # Claude (default)
-claude-contained -t codex .                         # OpenAI Codex
-claude-contained -t gemini .                        # Google Gemini CLI
-claude-contained -t vibe .                          # Mistral Vibe
+claude-contained -t codex                           # OpenAI Codex
+claude-contained -t gemini                          # Google Gemini CLI
+claude-contained -t vibe                            # Mistral Vibe
 
 # Common usage
-claude-contained . ../other/project                 # Multiple directories
-claude-contained . ../lib:ro                        # Mount ../lib read-only
-claude-contained --readonly-extras . ../a ../b      # All extras read-only
-claude-contained . -- --model sonnet --verbose      # Pass args to tool
-claude-contained -y -t codex .                      # Codex with --yolo
-claude-contained --rebuild .                        # Refresh AI tools first
-claude-contained --rebuild=full .                   # Full fresh rebuild first
+claude-contained -C ~/code/my-app                   # A specific project directory
+claude-contained -m ../other/project                # Mount an extra directory
+claude-contained -m ../lib:ro                       # Mount ../lib read-only
+claude-contained --readonly-extras -m ../a -m ../b  # All extra mounts read-only
+claude-contained -- --model sonnet --verbose        # Pass args to tool
+claude-contained -y -t codex                        # Codex with --yolo
+claude-contained --rebuild                          # Refresh AI tools, then exit
+claude-contained --rebuild=full                     # Full fresh rebuild, then exit
 claude-contained -s                                 # Debug shell
-claude-contained --share-skills=/Users/me/Projects/skills . # Share skills into tool skill dirs
-claude-contained --share-host-claude .              # Legacy direct host ~/.claude sharing
-claude-contained -e API_URL=http://host.local:8080 .        # Set an env var for the tool
-claude-contained -e 'GREETING=hello world' -e DEBUG=1 .     # Repeatable; values may contain spaces
+claude-contained --share-skills /Users/me/Projects/skills  # Share skills into tool skill dirs
+claude-contained --share-host-claude                # Legacy direct host ~/.claude sharing
+claude-contained -e API_URL=http://host.local:8080          # Set an env var for the tool
+claude-contained -e 'GREETING=hello world' -e DEBUG=1       # Repeatable; values may contain spaces
+
+# Containers
+claude-contained -a                                 # List and attach to a running container
+claude-contained -a myproject                       # Attach to container aic-myproject
+claude-contained --name myproject                   # Create a container named aic-myproject
 
 # Zellij workspaces
-claude-contained --zellij .                         # Start this project in Zellij
+claude-contained --zellij                           # Start this project in Zellij
 claude-contained --zellij --attach                  # Attach when exactly one Zellij session is live
-claude-contained --zellij --attach review           # Attach to a named live Zellij session
-claude-contained --zellij --new-session=review .    # Start a named Zellij session
-claude-contained --zellij --shell .                 # Start bash as the initial Zellij pane
+claude-contained --zellij --attach --session review # Attach to a named live Zellij session
+claude-contained --zellij --session=review          # Start a named Zellij session
+claude-contained --zellij --shell                   # Start bash as the initial Zellij pane
 
 # Port forwarding
-claude-contained -p 8080:8080 .                     # Expose port 8080
-claude-contained -H 3845 .                          # Forward host:3845 to container
+claude-contained -p 8080:8080                       # Expose port 8080
+claude-contained -H 3845                            # Forward host:3845 to container
 ```
 
 ## Rebuilding the Image
@@ -155,10 +165,10 @@ claude-contained -H 3845 .                          # Forward host:3845 to conta
 Use the launcher when you want the image refreshed before starting a new session:
 
 ```bash
-claude-contained --rebuild .      # Refresh AI CLI layers
-claude-contained --rebuild=full . # Full fresh rebuild (--pull --no-cache)
-claude-docked --rebuild .
-claude-docked --rebuild=full .
+claude-contained --rebuild      # Refresh AI CLI layers
+claude-contained --rebuild=full # Full fresh rebuild (--pull --no-cache)
+claude-docked --rebuild
+claude-docked --rebuild=full
 ```
 
 `tools` rebuilds the AI CLI portion of the image and everything after it, which updates Claude Code, Codex, Gemini, Vibe, and Copilot without invalidating the entire build. If that targeted rebuild fails, the launcher automatically retries with a full rebuild.
@@ -169,11 +179,11 @@ claude-docked --rebuild=full .
 
 `--zellij` makes Zellij the top-level process inside the container. The initial pane runs the same command the launcher would normally run: Claude, Codex, Copilot, Gemini, Vibe, or `bash` with `--shell`. The entrypoint still wraps Zellij in the srt sandbox unless `--no-sandbox` is set, so child panes inherit the same network policy.
 
-Session names are either explicit (`--new-session=review`, `--zellij --attach review`) or generated from the project path as `cc-{sanitized-basename}-{8-char-path-hash}`. Explicit names must use only letters, numbers, `_`, `.`, and `-`, and cannot start with `-`. Use `--new-session=NAME` for named sessions; `--new-session NAME` is rejected so it cannot be confused with `main_dir`.
+Session names are either explicit (`--session=review`, `--session review`) or generated from the project path as `cc-{sanitized-basename}-{8-char-path-hash}`. Explicit names must use only letters, numbers, `_`, `.`, and `-`, and cannot start with `-`. `--session` is the only way to name a session: `--new-session` is a force flag that takes no value, and `-a/--attach` refuses a name under `--zellij` so one token never means two things.
 
 Attach behavior is intentionally strict:
 
-- `--zellij --attach [NAME]` attaches only to a live Zellij-backed container; it never creates a replacement container.
+- `--zellij --attach [--session NAME]` attaches only to a live Zellij-backed container; it never creates a replacement container.
 - Bare `--zellij --attach` attaches directly if exactly one Zellij session is live, otherwise it prompts.
 - `--zellij --attach --shell` is invalid; attach reconnects to the existing Zellij workspace as-is.
 
@@ -223,7 +233,7 @@ The overlay directory persists on the host, so dependencies survive across conta
 Use `-N` (or `--contained-node-modules`) to auto-accept without prompting:
 
 ```bash
-claude-contained -N .
+claude-contained -N
 ```
 
 ### .gitignore
@@ -259,7 +269,7 @@ interactive agent traffic does not depend on the flaky vmnet resolver. To choose
 resolver, use `--dns`:
 
 ```bash
-claude-contained --dns 1.1.1.1 .
+claude-contained --dns 1.1.1.1
 ```
 
 To set a per-user resolver list, use `CLAUDE_DNS` (comma-separated for several):
@@ -282,7 +292,7 @@ can break the vmnet resolver. See [apple/container#402](https://github.com/apple
 Pass variables to the tool process with `-e`/`--env`, repeatable:
 
 ```bash
-claude-contained -e API_URL=http://host.local:8080 -e 'GREETING=hello world' .
+claude-contained -e API_URL=http://host.local:8080 -e 'GREETING=hello world'
 ```
 
 To avoid retyping them, put `KEY=VALUE` lines in the main directory's
@@ -360,7 +370,7 @@ A default allowlist covers what the AI CLIs need to function: the provider APIs,
 OAuth for each bundled tool**, npm, PyPI, and GitHub. To extend it for a single run:
 
 ```bash
-claude-contained --allow-host example.com --allow-host '*.internal.dev' .
+claude-contained --allow-host example.com --allow-host '*.internal.dev'
 ```
 
 For a persistent policy, create `~/.claude-contained/srt-settings.json`:
@@ -387,8 +397,8 @@ root-owned and read-only, so the sandboxed process cannot rewrite its own allowl
 When something cannot reach the network, the first question is whether the sandbox is the cause:
 
 ```bash
-claude-contained --no-sandbox .        # run with the sandbox off
-claude-contained --no-sandbox -s .     # unsandboxed debug shell
+claude-contained --no-sandbox           # run with the sandbox off
+claude-contained --no-sandbox -s        # unsandboxed debug shell
 ```
 
 `--no-sandbox` is independent of `-s/--shell`, so you can also get a *sandboxed* shell (`-s`
@@ -417,8 +427,8 @@ The container runs in an isolated network, so `localhost` refers to the containe
 Use `-H PORT` to forward host ports to container localhost. This works because Docker Desktop has special routing to reach services bound to `127.0.0.1` on the host.
 
 ```bash
-claude-docked -H 3845 .           # Forward host:3845 to container localhost:3845
-claude-docked -H 3845 -H 8080 .   # Multiple ports
+claude-docked -H 3845           # Forward host:3845 to container localhost:3845
+claude-docked -H 3845 -H 8080     # Multiple ports
 ```
 
 ### Apple Containers (`claude-contained`) - Limited Host Access
@@ -439,7 +449,7 @@ For localhost-bound services, use `claude-docked` instead.
 Figma Desktop MCP binds to `localhost:3845`. Use Docker:
 
 ```bash
-claude-docked -H 3845 .
+claude-docked -H 3845
 ```
 
 **Requirements:**

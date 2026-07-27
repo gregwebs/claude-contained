@@ -24,7 +24,7 @@ launcher_argv() { # launcher_argv <target> <home> <flags...>
   shift 2
   env -u CLAUDE_CONTAINED_SHARE_HOST_CLAUDE \
     HOME="$home" PATH="${stub_dir}:$PATH" \
-    "${repo_root}/${target}" "$@" -N -s "$proj" 2>/dev/null
+    "${repo_root}/${target}" "$@" -N -s -C "$proj" 2>/dev/null
 }
 
 launcher_argv_with_shared_host_env() { # launcher_argv_with_shared_host_env <target> <home>
@@ -32,7 +32,7 @@ launcher_argv_with_shared_host_env() { # launcher_argv_with_shared_host_env <tar
   local home="$2"
   CLAUDE_CONTAINED_SHARE_HOST_CLAUDE=1 \
     HOME="$home" PATH="${stub_dir}:$PATH" \
-    "${repo_root}/${target}" -N -s "$proj" 2>/dev/null
+    "${repo_root}/${target}" -N -s -C "$proj" 2>/dev/null
 }
 
 line_has() { # line_has <haystack> <exact-line>
