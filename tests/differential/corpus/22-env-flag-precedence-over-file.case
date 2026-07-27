@@ -1,0 +1,10 @@
+CASE_DESCRIPTION="-e wins over the same key in the project env file"
+
+case_setup() {
+  mkdir -p "$1/.claude-contained"
+  printf 'FOO=from-file\nBAR=only-file\n' > "$1/.claude-contained/env"
+}
+
+case_args() {
+  CASE_ARGS_OUT=(-N -s -C "$1" -e FOO=from-flag)
+}

@@ -1,0 +1,18 @@
+CASE_DESCRIPTION="bare -a with multiple running containers prompts a picker (scripted stdin choice)"
+
+case_setup() {
+  local home="$2" listfile
+
+  listfile="${home}/.diff-stub-list"
+  printf 'aic-alpha\naic-beta\n' > "$listfile"
+  export DIFF_LIST_OUTPUT="$listfile"
+}
+
+case_args() {
+  CASE_ARGS_OUT=(-a)
+}
+
+case_stdin() {
+  CASE_STDIN_OUT="2
+"
+}

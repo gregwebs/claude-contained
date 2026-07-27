@@ -1,0 +1,6 @@
+CASE_DESCRIPTION="an always-reserved exact-name key (-e) is rejected before any runtime argument is built"
+CASE_EXPECT_RUNTIME_ARGS=0
+
+case_args() {
+  CASE_ARGS_OUT=(-N -s -C "$1" -e STAY_ROOT=1)
+}

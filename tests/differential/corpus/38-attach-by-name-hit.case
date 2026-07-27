@@ -1,0 +1,13 @@
+CASE_DESCRIPTION="-a NAME attaches directly when a matching container is running"
+
+case_setup() {
+  local home="$2" listfile
+
+  listfile="${home}/.diff-stub-list"
+  printf 'aic-myproject\n' > "$listfile"
+  export DIFF_LIST_OUTPUT="$listfile"
+}
+
+case_args() {
+  CASE_ARGS_OUT=(-a myproject)
+}

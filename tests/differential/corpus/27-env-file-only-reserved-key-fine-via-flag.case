@@ -1,0 +1,5 @@
+CASE_DESCRIPTION="LD_PRELOAD is only reserved from the project env file; -e LD_PRELOAD=... is accepted"
+
+case_args() {
+  CASE_ARGS_OUT=(-N -s -C "$1" -e LD_PRELOAD=/tmp/lib.so)
+}

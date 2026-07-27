@@ -1,0 +1,6 @@
+CASE_DESCRIPTION="a :ro suffix on the project directory itself is rejected before any runtime argument is built"
+CASE_EXPECT_RUNTIME_ARGS=0
+
+case_args() {
+  CASE_ARGS_OUT=(-N -s -C "$1:ro")
+}

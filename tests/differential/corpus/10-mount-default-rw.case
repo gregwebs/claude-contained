@@ -1,0 +1,9 @@
+CASE_DESCRIPTION="-m DIR mounts read-write by default"
+
+case_setup() {
+  mkdir -p "$1/extra"
+}
+
+case_args() {
+  CASE_ARGS_OUT=(-N -s -C "$1" -m "$1/extra")
+}

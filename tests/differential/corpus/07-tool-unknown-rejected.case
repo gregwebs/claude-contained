@@ -1,0 +1,6 @@
+CASE_DESCRIPTION="unknown tool is rejected before any runtime argument is built"
+CASE_EXPECT_RUNTIME_ARGS=0
+
+case_args() {
+  CASE_ARGS_OUT=(-N -C "$1" -t nonexistent-tool)
+}

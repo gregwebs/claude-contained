@@ -1,0 +1,5 @@
+CASE_DESCRIPTION="--share-host-claude mounts host ~/.claude directly instead of the contained profile"
+
+case_args() {
+  CASE_ARGS_OUT=(-N -s -C "$1" --share-host-claude)
+}

@@ -1,0 +1,5 @@
+CASE_DESCRIPTION="-p HOST:CONTAINER publishes a container port to the host"
+
+case_args() {
+  CASE_ARGS_OUT=(-N -s -C "$1" -p 8080:8080)
+}

@@ -1,0 +1,5 @@
+CASE_DESCRIPTION="-H PORT forwards a host port into the container's localhost"
+
+case_args() {
+  CASE_ARGS_OUT=(-N -s -C "$1" -H 3845)
+}

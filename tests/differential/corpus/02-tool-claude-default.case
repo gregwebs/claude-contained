@@ -1,0 +1,5 @@
+CASE_DESCRIPTION="default tool selection (claude, no -t)"
+
+case_args() {
+  CASE_ARGS_OUT=(-N -C "$1")
+}

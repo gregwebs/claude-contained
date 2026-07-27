@@ -1,0 +1,5 @@
+CASE_DESCRIPTION="tool selection: codex"
+
+case_args() {
+  CASE_ARGS_OUT=(-N -C "$1" -t codex)
+}
