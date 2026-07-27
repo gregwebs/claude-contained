@@ -456,7 +456,7 @@ load_live_zellij_records() {
   zellij_session_names=()
   while IFS= read -r name; do
     [[ -z "$name" ]] && continue
-    session="$(container_zellij_session "$name")"
+    session="$(container_zellij_session "$name" || true)"
     if [[ -n "$session" ]]; then
       zellij_container_names+=("$name")
       zellij_session_names+=("$session")

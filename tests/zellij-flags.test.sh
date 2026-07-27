@@ -171,6 +171,11 @@ suite() {
   [[ $rc -eq 2 ]] && file_has "$err" "use --session=NAME"
   _check "--new-session=NAME is rejected in favor of --session" $?
 
+  ZELLIJ_STUB_MODE=normal launcher_run "$target" "$out" "$err" --zellij -N -s -C "$proj"
+  rc=$?
+  [[ $rc -eq 0 ]] && line_has "$out" "zellij-run" && file_missing "$err" "already running"
+  _check "plain --zellij ignores non-Zellij containers" $?
+
   ZELLIJ_STUB_MODE=one launcher_run "$target" "$out" "$err" --zellij -N -s -C "$proj"
   rc=$?
   [[ $rc -eq 1 ]] && file_has "$err" "already running" && file_has "$err" "--zellij --attach"
@@ -190,6 +195,11 @@ suite() {
   rc=$?
   [[ $rc -eq 1 ]] && file_has "$err" "No live Zellij session named alpha" && file_missing "$out" "run"
   _check "--zellij --attach --session NAME never falls back to container creation" $?
+
+  ZELLIJ_STUB_MODE=normal launcher_run "$target" "$out" "$err" --zellij --attach
+  rc=$?
+  [[ $rc -eq 0 ]] && file_has "$out" "No live Zellij sessions" && file_missing "$out" "/usr/local/bin/zellij-attach"
+  _check "--zellij --attach ignores non-Zellij containers" $?
 
   # Under --zellij the session is named only by --session; -a must refuse a name.
   ZELLIJ_STUB_MODE=one launcher_run "$target" "$out" "$err" --zellij --attach alpha
