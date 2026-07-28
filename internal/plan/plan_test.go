@@ -2,6 +2,7 @@ package plan
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -175,6 +176,239 @@ func TestBuildReplaysAnIdenticalPrefix(t *testing.T) {
 	}
 	if !reflect.DeepEqual(first.Steps, second.Steps[:len(first.Steps)]) {
 		t.Errorf("prefix diverged\nfirst:  %#v\nsecond: %#v", first.Steps, second.Steps[:len(first.Steps)])
+	}
+}
+
+// --- Ticket 06: the worktree auto-lock offer ----------------------------
+
+func findWorktreeAutoLock(steps []Step) *WorktreeAutoLock {
+	for _, s := range steps {
+		if w, ok := s.(WorktreeAutoLock); ok {
+			return &w
+		}
+	}
+	return nil
+}
+
+func printTexts(steps []Step) []string {
+	var out []string
+	for _, s := range steps {
+		if p, ok := s.(Print); ok {
+			out = append(out, p.Text)
+		}
+	}
+	return out
+}
+
+func containsString(list []string, want string) bool {
+	for _, v := range list {
+		if v == want {
+			return true
+		}
+	}
+	return false
+}
+
+// The offer is a Print step (the prune-risk count Build can compute) plus a
+// prompt, and only accepting produces the WorktreeAutoLock step -- the
+// "Auto-locked N" count is an I/O result the applier owns, not Build.
+func TestBuildOffersWorktreeAutoLock(t *testing.T) {
+	cfg := cli.Config{Tool: "claude", ShellMode: true, ContainedNodeModules: true}
+	facts := Facts{
+		ProjectDir: "/w/app",
+		WorktreeLocks: WorktreeLockCandidates{
+			Repo:   "/w/app",
+			Hidden: []string{"/other/hidden-wt"},
+		},
+	}
+	h := testHost()
+
+	first, err := Build(cfg, h, facts, appleProfile(), Answers{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if first.Pending == nil || first.Pending.ID != PromptWorktreeLocks {
+		t.Fatalf("expected the worktree-lock prompt, got %+v", first.Pending)
+	}
+	if !first.Pending.Default {
+		t.Error("the worktree-lock prompt defaults to yes")
+	}
+	if !containsString(printTexts(first.Steps), "1 linked worktree(s) under /w/app hidden from container (prune risk).") {
+		t.Errorf("steps = %#v, want the prune-risk Print", first.Steps)
+	}
+	if findWorktreeAutoLock(first.Steps) != nil {
+		t.Error("WorktreeAutoLock must not appear before the prompt is answered")
+	}
+
+	accepted, err := Build(cfg, h, facts, appleProfile(), Answers{PromptWorktreeLocks: true})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	lock := findWorktreeAutoLock(accepted.Steps)
+	if lock == nil {
+		t.Fatal("expected a WorktreeAutoLock step after accepting")
+	}
+	if lock.Repo != "/w/app" || !reflect.DeepEqual(lock.Worktrees, []string{"/other/hidden-wt"}) {
+		t.Errorf("WorktreeAutoLock = %+v, want Repo=/w/app Worktrees=[/other/hidden-wt]", *lock)
+	}
+	if lock.Owner == "" {
+		t.Error("WorktreeAutoLock.Owner must carry the deduplicated container name")
+	}
+}
+
+// A declined offer must emit the prune-risk Print and nothing else: no
+// WorktreeAutoLock step at all.
+func TestBuildDeclinedOfferEmitsPrintOnly(t *testing.T) {
+	cfg := cli.Config{Tool: "claude", ShellMode: true, ContainedNodeModules: true}
+	facts := Facts{
+		ProjectDir: "/w/app",
+		WorktreeLocks: WorktreeLockCandidates{
+			Repo:   "/w/app",
+			Hidden: []string{"/other/hidden-wt"},
+		},
+	}
+	h := testHost()
+
+	declined, err := Build(cfg, h, facts, appleProfile(), Answers{PromptWorktreeLocks: false})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if !containsString(printTexts(declined.Steps), "1 linked worktree(s) under /w/app hidden from container (prune risk).") {
+		t.Error("declining should still emit the prune-risk Print")
+	}
+	if findWorktreeAutoLock(declined.Steps) != nil {
+		t.Error("declining must not produce a WorktreeAutoLock step")
+	}
+	if declined.Pending != nil {
+		t.Fatalf("unexpected pending prompt: %+v", declined.Pending)
+	}
+	if declined.Run == nil {
+		t.Fatal("Run must be set once the prompt is answered")
+	}
+}
+
+// -W/--lock-worktrees (cfg.LockWorktrees) skips the prompt entirely and locks
+// unconditionally.
+func TestBuildLockWorktreesFlagSkipsPrompt(t *testing.T) {
+	cfg := cli.Config{Tool: "claude", ShellMode: true, ContainedNodeModules: true, LockWorktrees: true}
+	facts := Facts{
+		ProjectDir: "/w/app",
+		WorktreeLocks: WorktreeLockCandidates{
+			Repo:   "/w/app",
+			Hidden: []string{"/other/hidden-wt"},
+		},
+	}
+
+	program, err := Build(cfg, testHost(), facts, appleProfile(), Answers{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if program.Pending != nil {
+		t.Fatalf("-W must skip the prompt, got pending %+v", program.Pending)
+	}
+	if findWorktreeAutoLock(program.Steps) == nil {
+		t.Error("-W must produce a WorktreeAutoLock step without asking")
+	}
+}
+
+// No hidden worktrees at all: neither the Print nor a prompt nor a step.
+func TestBuildNoHiddenWorktreesIsSilent(t *testing.T) {
+	cfg := cli.Config{Tool: "claude", ShellMode: true, ContainedNodeModules: true}
+	facts := Facts{ProjectDir: "/w/app"}
+
+	program, err := Build(cfg, testHost(), facts, appleProfile(), Answers{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if program.Pending != nil {
+		t.Fatalf("unexpected pending prompt: %+v", program.Pending)
+	}
+	for _, txt := range printTexts(program.Steps) {
+		if strings.Contains(txt, "hidden from container") {
+			t.Errorf("unexpected prune-risk Print: %q", txt)
+		}
+	}
+}
+
+// Accepting the PromptWorktreeGit question changes both which repository is
+// scanned and which worktrees count as hidden (mounting the main repo's .git
+// makes it visible, which can hide worktrees that were hidden without it) --
+// so the two candidate sets are genuinely independent inputs, not derivable
+// from one another.
+func TestBuildWorktreeGitAnswerSelectsLockCandidateSet(t *testing.T) {
+	cfg := cli.Config{Tool: "claude", ShellMode: true, ContainedNodeModules: true}
+	facts := Facts{
+		ProjectDir:       "/w/app",
+		WorktreeMainRepo: "/w/main",
+		WorktreeLocks: WorktreeLockCandidates{
+			Repo:   "/w/main",
+			Hidden: []string{"/w/declined-hidden"},
+		},
+		WorktreeLocksWithGitMount: WorktreeLockCandidates{
+			Repo:   "/w/main",
+			Hidden: []string{"/w/accepted-hidden"},
+		},
+	}
+	h := testHost()
+
+	// Decline the .git mount, then accept the lock offer: must see the
+	// "declined" candidate set.
+	declinedGit, err := Build(cfg, h, facts, appleProfile(),
+		Answers{PromptWorktreeGit: false, PromptWorktreeLocks: true})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	lock := findWorktreeAutoLock(declinedGit.Steps)
+	if lock == nil || !reflect.DeepEqual(lock.Worktrees, []string{"/w/declined-hidden"}) {
+		t.Fatalf("declined-.git run: WorktreeAutoLock = %+v, want Worktrees=[/w/declined-hidden]", lock)
+	}
+
+	// Accept the .git mount, then accept the lock offer: must see the
+	// "accepted" candidate set.
+	acceptedGit, err := Build(cfg, h, facts, appleProfile(),
+		Answers{PromptWorktreeGit: true, PromptWorktreeLocks: true})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	lock = findWorktreeAutoLock(acceptedGit.Steps)
+	if lock == nil || !reflect.DeepEqual(lock.Worktrees, []string{"/w/accepted-hidden"}) {
+		t.Fatalf("accepted-.git run: WorktreeAutoLock = %+v, want Worktrees=[/w/accepted-hidden]", lock)
+	}
+}
+
+// The replay-prefix guarantee has to survive a second prompt: a driver
+// answering the worktree-git question first, then the worktree-lock question,
+// must see the first call's steps as an exact prefix of the second's.
+func TestBuildReplaysPrefixAcrossTwoPrompts(t *testing.T) {
+	cfg := cli.Config{Tool: "claude", ShellMode: true, ContainedNodeModules: true}
+	facts := Facts{
+		ProjectDir:       "/w/app",
+		WorktreeMainRepo: "/w/main",
+		WorktreeLocksWithGitMount: WorktreeLockCandidates{
+			Repo:   "/w/main",
+			Hidden: []string{"/w/hidden"},
+		},
+	}
+	h := testHost()
+
+	first, _ := Build(cfg, h, facts, appleProfile(), Answers{})
+	second, _ := Build(cfg, h, facts, appleProfile(), Answers{PromptWorktreeGit: true})
+	third, _ := Build(cfg, h, facts, appleProfile(), Answers{PromptWorktreeGit: true, PromptWorktreeLocks: true})
+
+	if len(second.Steps) < len(first.Steps) {
+		t.Fatalf("second call produced fewer steps (%d) than the first (%d)", len(second.Steps), len(first.Steps))
+	}
+	if !reflect.DeepEqual(first.Steps, second.Steps[:len(first.Steps)]) {
+		t.Errorf("prefix diverged between round 1 and round 2\nfirst:  %#v\nsecond: %#v", first.Steps, second.Steps[:len(first.Steps)])
+	}
+	if len(third.Steps) < len(second.Steps) {
+		t.Fatalf("third call produced fewer steps (%d) than the second (%d)", len(third.Steps), len(second.Steps))
+	}
+	if !reflect.DeepEqual(second.Steps, third.Steps[:len(second.Steps)]) {
+		t.Errorf("prefix diverged between round 2 and round 3\nsecond: %#v\nthird:  %#v", second.Steps, third.Steps[:len(second.Steps)])
+	}
+	if third.Pending != nil {
+		t.Fatalf("third round should be fully answered, got pending %+v", third.Pending)
 	}
 }
 

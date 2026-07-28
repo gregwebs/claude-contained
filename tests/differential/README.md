@@ -73,9 +73,12 @@ harness does not need to drive a pty:
   reproduces exactly that abort-with-no-output behavior for any prompt they
   happen to hit.
 - Corpus entries that exist specifically to exercise a prompt (the Zellij
-  attach picker, the bare `-a` attach picker) set `CASE_STDIN_OUT` to a
-  scripted answer via `case_stdin()`, the same technique
-  `tests/worktree-offer.test.sh` already uses for the worktree-lock prompt.
+  attach picker, the bare `-a` attach picker, and 52/53's worktree-lock
+  offer accepted/declined) set `CASE_STDIN_OUT` to a scripted answer via
+  `case_stdin()`. `tests/worktree-offer.test.sh` covers the same prompt as a
+  black-box suite outside this harness (it runs against the Go binary too,
+  via `CLAUDE_CONTAINED_TEST_TARGETS`) and scripts its answer the same way,
+  just piped directly rather than through `case_stdin()`.
 
 This is an explicit choice, not an oversight: driving a real pty would let
 the harness observe the *rendered* prompt text, but nothing in this corpus

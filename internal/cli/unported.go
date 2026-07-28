@@ -51,14 +51,13 @@ func CheckUnportedEarly(cfg Config, stderr io.Writer) error {
 
 // CheckUnportedLate refuses the paths bash reaches only *after* the project env
 // file has had its say (claude-contained:1416). `--zellij` is handled at :1423
-// and worktree locking at :1563 — both downstream — so a project env file that
-// bash rejects with exit 2 must still do so here.
+// — downstream — so a project env file that bash rejects with exit 2 must
+// still do so here. Worktree auto-locking (`-W/--lock-worktrees`) is ported
+// (ticket 06) and no longer refused here.
 func CheckUnportedLate(cfg Config, stderr io.Writer) error {
 	switch {
 	case cfg.ZellijMode:
 		return unported(stderr, "--zellij")
-	case cfg.LockWorktrees:
-		return unported(stderr, "-W/--lock-worktrees")
 	}
 	return nil
 }

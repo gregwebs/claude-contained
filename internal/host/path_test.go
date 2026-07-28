@@ -120,6 +120,45 @@ func TestResolvePathSymlinkLoopTerminates(t *testing.T) {
 	_ = ResolvePath(a)
 }
 
+// ResolvePathIn resolves a relative path against an explicit base directory
+// rather than the process cwd, mirroring `cd "$wt_path" && resolve_path
+// "$git_dir"`. The cwd itself may differ from base -- that is the property
+// under test.
+func TestResolvePathInUsesGivenBaseNotCwd(t *testing.T) {
+	base := realTempDir(t)
+	if err := os.MkdirAll(filepath.Join(base, "wt", "sub"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	elsewhere := filepath.Join(base, "elsewhere")
+	if err := os.Mkdir(elsewhere, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	restore := chdir(t, elsewhere)
+	defer restore()
+
+	got := ResolvePathIn(filepath.Join(base, "wt"), "sub")
+	want := filepath.Join(base, "wt", "sub")
+	if got != want {
+		t.Errorf("ResolvePathIn(base, %q) = %q, want %q", "sub", got, want)
+	}
+}
+
+// An absolute path is unaffected by the base, matching bash: resolve_path
+// never consults $PWD once the input is already absolute.
+func TestResolvePathInAbsolutePathIgnoresBase(t *testing.T) {
+	base := realTempDir(t)
+	target := filepath.Join(base, "target")
+	if err := os.Mkdir(target, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	got := ResolvePathIn(filepath.Join(base, "unrelated"), target)
+	if got != target {
+		t.Errorf("ResolvePathIn with absolute path = %q, want %q", got, target)
+	}
+}
+
 func TestPathHash8(t *testing.T) {
 	// sha256("/tmp/project") begins with these eight hex characters; the
 	// differential harness recomputes the same value to neutralize it, so the

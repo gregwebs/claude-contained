@@ -1,0 +1,253 @@
+package main
+
+import (
+	"bytes"
+	"context"
+	"io"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"syscall"
+	"testing"
+	"time"
+
+	"claude-contained/internal/host"
+)
+
+// --- fixtures -------------------------------------------------------------
+
+// writeStubContainer puts a fake `container` binary on a fresh PATH entry so
+// runtime.Apple's EnsureUp ("container system status") and List ("container
+// list --quiet") succeed without a real Apple Containers install. The actual
+// container *run* never reaches this stub: the tests inject their own
+// `runner` in place of execRuntime.
+func writeStubContainer(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	script := "#!/bin/sh\ncase \"$1\" in\n  system) exit 0 ;;\n  list) exit 0 ;;\n  *) exit 0 ;;\nesac\n"
+	if err := os.WriteFile(filepath.Join(dir, "container"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func runGitTest(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+	}
+	return string(out)
+}
+
+// hiddenWorktreeFixture builds a real main repo (the project directory) with
+// one linked worktree outside it and outside any mounted root -- the prune
+// hazard the auto-lock offer exists to protect.
+func hiddenWorktreeFixture(t *testing.T) (project, wt string) {
+	t.Helper()
+	base := host.ResolvePath(t.TempDir())
+	project = filepath.Join(base, "project")
+	if err := os.Mkdir(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, project, "init", "-q")
+	runGitTest(t, project, "-c", "user.email=t@example.com", "-c", "user.name=test", "commit", "-q", "--allow-empty", "-m", "init")
+
+	wt = filepath.Join(base, "hidden-wt")
+	runGitTest(t, project, "worktree", "add", "-q", "--detach", wt)
+	return project, host.ResolvePath(wt)
+}
+
+// lockInfo reports a worktree's lock reason and whether it is locked at all,
+// reading git's own porcelain output rather than the lock file directly.
+func lockInfo(t *testing.T, main, wt string) (reason string, locked bool) {
+	t.Helper()
+	out := runGitTest(t, main, "worktree", "list", "--porcelain")
+	var cur string
+	for _, line := range strings.Split(out, "\n") {
+		switch {
+		case strings.HasPrefix(line, "worktree "):
+			cur = strings.TrimPrefix(line, "worktree ")
+		case strings.HasPrefix(line, "locked") && cur == wt:
+			locked = true
+			reason = strings.TrimPrefix(strings.TrimPrefix(line, "locked"), " ")
+		}
+	}
+	return reason, locked
+}
+
+func worktreeIsLocked(t *testing.T, main, wt string) bool {
+	t.Helper()
+	_, locked := lockInfo(t, main, wt)
+	return locked
+}
+
+// launcherArgv drives the launcher through the auto-lock offer with no
+// interaction required: -W locks unconditionally, -N and -s skip the
+// node-modules and tool-selection prompts respectively.
+func launcherArgv(project string) []string {
+	return []string{"claude-contained", "-s", "-N", "-W", "-C", project}
+}
+
+// withStubbedHostAndPath points HOME at a scratch directory and prepends the
+// stub `container` binary to PATH, both restored by testing.T's cleanup.
+func withStubbedHostAndPath(t *testing.T) {
+	t.Helper()
+	home := t.TempDir()
+	stubDir := writeStubContainer(t)
+	t.Setenv("HOME", home)
+	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+}
+
+func boolStr(b bool) string {
+	if b {
+		return "true"
+	}
+	return "false"
+}
+
+// --- Step 9: ordering tests ------------------------------------------------
+
+// The property under test is the *sequence*, not just the end state: the
+// worktree must be observably locked while the container is up, and unlocked
+// only once runWith has returned.
+func TestLocksReleasedOnlyAfterContainerExit(t *testing.T) {
+	project, wt := hiddenWorktreeFixture(t)
+	withStubbedHostAndPath(t)
+
+	var events []string
+	fake := func(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
+		events = append(events, "container-start")
+		events = append(events, "locked="+boolStr(worktreeIsLocked(t, project, wt)))
+		events = append(events, "container-exit")
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runWith(fake, launcherArgv(project), strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("runWith exit = %d, want 0\nstderr:\n%s", code, stderr.String())
+	}
+
+	want := []string{"container-start", "locked=true", "container-exit"}
+	if !reflect.DeepEqual(events, want) {
+		t.Errorf("events = %v, want %v\nstderr:\n%s", events, want, stderr.String())
+	}
+	if worktreeIsLocked(t, project, wt) {
+		t.Error("worktree should be unlocked once runWith returns")
+	}
+}
+
+// A signal caught mid-run must not release the locks until the container's
+// own runner returns, and the exit status must match bash's trap handlers.
+func TestSignalDuringRunReleasesAfterExit(t *testing.T) {
+	cases := []struct {
+		name string
+		sig  syscall.Signal
+		want int
+	}{
+		{"SIGINT", syscall.SIGINT, 130},
+		{"SIGTERM", syscall.SIGTERM, 143},
+		{"SIGHUP", syscall.SIGHUP, 129},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			project, wt := hiddenWorktreeFixture(t)
+			withStubbedHostAndPath(t)
+
+			var lockedDuringRun bool
+			fake := func(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
+				if err := syscall.Kill(os.Getpid(), tc.sig); err != nil {
+					t.Errorf("kill: %v", err)
+				}
+				// Give the signal handler time to land before the runner
+				// returns -- the whole point is observing the lock still
+				// held *during* the run, not just afterward.
+				time.Sleep(50 * time.Millisecond)
+				lockedDuringRun = worktreeIsLocked(t, project, wt)
+				return 0
+			}
+
+			var stdout, stderr bytes.Buffer
+			code := runWith(fake, launcherArgv(project), strings.NewReader(""), &stdout, &stderr)
+
+			if !lockedDuringRun {
+				t.Error("lock should still be held while the container is up, mid-signal")
+			}
+			if code != tc.want {
+				t.Errorf("exit code = %d, want %d\nstderr:\n%s", code, tc.want, stderr.String())
+			}
+			if worktreeIsLocked(t, project, wt) {
+				t.Error("worktree should be unlocked once runWith returns")
+			}
+		})
+	}
+}
+
+// A lock the user set by hand must survive the run untouched, even while a
+// different, truly-hidden worktree in the same repository is auto-locked and
+// released normally.
+func TestUserLockSurvivesAcrossRun(t *testing.T) {
+	base := host.ResolvePath(t.TempDir())
+	project := filepath.Join(base, "project")
+	if err := os.Mkdir(project, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	runGitTest(t, project, "init", "-q")
+	runGitTest(t, project, "-c", "user.email=t@example.com", "-c", "user.name=test", "commit", "-q", "--allow-empty", "-m", "init")
+
+	userWT := filepath.Join(base, "user-wt")
+	runGitTest(t, project, "worktree", "add", "-q", "--detach", userWT)
+	userWT = host.ResolvePath(userWT)
+	runGitTest(t, project, "worktree", "lock", "--reason", "mine", userWT)
+
+	hiddenWT := filepath.Join(base, "hidden-wt")
+	runGitTest(t, project, "worktree", "add", "-q", "--detach", hiddenWT)
+	hiddenWT = host.ResolvePath(hiddenWT)
+
+	withStubbedHostAndPath(t)
+
+	fake := func(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) int { return 0 }
+	var stdout, stderr bytes.Buffer
+	code := runWith(fake, launcherArgv(project), strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("runWith exit = %d, want 0\nstderr:\n%s", code, stderr.String())
+	}
+
+	reason, locked := lockInfo(t, project, userWT)
+	if !locked || reason != "mine" {
+		t.Fatalf("user lock = %q locked=%v, want unchanged \"mine\"", reason, locked)
+	}
+	if worktreeIsLocked(t, project, hiddenWT) {
+		t.Error("the truly-hidden worktree should be unlocked again after the run")
+	}
+}
+
+// A lock this run shares with another still-running container's owner token
+// must keep that owner after our release -- only the last owner leaving
+// actually unlocks.
+func TestOtherOwnerSurvivesAcrossRun(t *testing.T) {
+	project, wt := hiddenWorktreeFixture(t)
+	runGitTest(t, project, "worktree", "lock", "--reason", "cc-autolocked-by: aic-other-1111", wt)
+
+	withStubbedHostAndPath(t)
+
+	fake := func(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) int { return 0 }
+	var stdout, stderr bytes.Buffer
+	code := runWith(fake, launcherArgv(project), strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("runWith exit = %d, want 0\nstderr:\n%s", code, stderr.String())
+	}
+
+	reason, locked := lockInfo(t, project, wt)
+	if !locked {
+		t.Fatal("worktree should still be locked: aic-other-1111 remains an owner")
+	}
+	if !strings.Contains(reason, "aic-other-1111") {
+		t.Fatalf("lock reason = %q, want it to still contain aic-other-1111", reason)
+	}
+}

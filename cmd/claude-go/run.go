@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"claude-contained/internal/cli"
 	"claude-contained/internal/env"
@@ -20,8 +21,17 @@ import (
 	"claude-contained/internal/runtime"
 )
 
+// runner executes the container in the foreground. It is a seam so a test can
+// observe launcher state *while the container is up*: release ordering is the
+// property that matters and the end state cannot show it.
+type runner func(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) int
+
 // run is the single point every exit path returns through.
 func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	return runWith(execRuntime, argv, stdin, stdout, stderr)
+}
+
+func runWith(exec runner, argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	rt := runtime.Select(argv[0], "", "")
 	prof := rt.Profile()
 
@@ -125,63 +135,153 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	mountedRoots := append([]string{mainHost}, extraMounts...)
 	host.CleanupPlaceholderFiles(mountedRoots...)
 
-	facts, err := probeFacts(ctx, rt, h, cfg, mainHost, extraMounts, extraModes, shareSkillsDir)
+	facts, err := probeFacts(ctx, rt, h, cfg, mainHost, extraMounts, extraModes, shareSkillsDir, mountedRoots)
 	facts.Env = envStore.Pairs()
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return cli.ExitFailure
 	}
 
-	// Worktree auto-locking is ticket 06, and it is reached with no flag at
-	// all -- so it needs an explicit guard here rather than a flag-keyed one,
-	// or a repository with hidden linked worktrees would silently lose the
-	// prune protection the bash launcher offers.
-	//
-	// Which repository bash ends up checking depends on the worktree prompt:
-	// accepting mounts the main repository's .git, which is what makes its
-	// worktrees prunable from inside the container, and only then is that
-	// repository the lock target. Since the guard has to run before any
-	// mutation -- and therefore before the prompt -- it tests both candidates
-	// and refuses if either would have triggered the offer. Erring toward
-	// refusing is right for an unported path; erring the other way is a silent
-	// divergence in exactly the case the protection exists for.
-	if worktreeGitWouldBeMounted(facts.WorktreeMainRepo, mountedRoots) ||
-		len(host.HiddenWorktrees(host.MainWorktreeRepoRoot(mainHost), mountedRoots)) > 0 {
-		fmt.Fprintln(stderr, "error: worktree auto-locking is not yet supported by the Go launcher")
-		return cli.ExitUnported
-	}
+	// interrupts is installed here, immediately before the worktree-lock offer
+	// and the mutations that follow it, mirroring bash's trap installation at
+	// claude-contained:1560-1562 (which sits right before
+	// maybe_offer_worktree_locks at :1563). signal.Notify, never
+	// signal.Ignore: see the interrupts doc comment.
+	ints := catchInterrupts()
+	defer ints.stop()
 
-	program, code := buildAndApply(cfg, h, facts, prof, prompter, stdout, stderr)
+	e := &executor{stdout: stdout, stderr: stderr}
+	// cleanup_on_exit (claude-contained:1551-1554): locks first, then
+	// placeholders. This also runs on every early return below -- including
+	// the unknown-tool and --share-skills-conflict paths -- closing a gap the
+	// previous version had: bash's EXIT trap sweeps placeholders on every
+	// exit after :1555, but the inline call below only ran after a completed
+	// container run.
+	defer func() {
+		e.releaseLocks()
+		host.CleanupPlaceholderFiles(mountedRoots...)
+	}()
+
+	program, code := buildAndApply(e, cfg, h, facts, prof, prompter, ints)
 	if code != 0 {
 		return code
 	}
 
-	// Bash routes INT/TERM/HUP through `exit` so its EXIT trap always runs, and
-	// relies on bash deferring a trapped signal until the foreground container
-	// run returns -- so cleanup never fires while the container could still be
-	// pruning worktrees. Notify gives the same deferral for free: the container
-	// shares this process group and receives the signal directly, so we simply
-	// stop the handler from killing us and let the wait below finish first.
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
-	defer signal.Stop(signals)
-
-	argvRun := rt.RenderRun(*program.Run)
-	containerExit := execRuntime(ctx, argvRun, stdin, stdout, stderr)
-
-	// Cleanup mirrors the bash EXIT trap.
-	host.CleanupPlaceholderFiles(mountedRoots...)
-
-	// A signal that arrived during the run wins over the container's own
-	// status, matching bash's 130/143/129, and skips the update check.
-	select {
-	case sig := <-signals:
+	// A signal caught while building/applying the plan (e.g. at the
+	// worktree-lock or node-modules prompt) wins over launching the container
+	// at all, and skips the update check -- matching bash, where the trapped
+	// signal would have already run `exit N` before the container line.
+	if sig, ok := ints.pending(); ok {
 		return signalExitCode(sig)
-	default:
 	}
 
+	argvRun := rt.RenderRun(*program.Run)
+	containerExit := exec(ctx, argvRun, stdin, stdout, stderr)
+
+	// A signal that arrived during the run wins over the container's own
+	// status, matching bash's 130/143/129, and skips the update check. Bash
+	// defers the trapped signal until the foreground `container run` returns,
+	// which is exactly what happens here too: the container shares this
+	// process group and receives the signal directly, so the handler above
+	// only has to stop *this* process from dying before the wait finishes.
+	if sig, ok := awaitPendingSignal(ints, containerExit); ok {
+		return signalExitCode(sig)
+	}
+
+	// check_for_updates runs before bash's `exit`, i.e. before the EXIT trap
+	// releases the locks (claude-contained:1962-1966) -- the launcher holds
+	// the worktree locks across its `git fetch`. The deferred cleanup above
+	// preserves that ordering: it only runs once this function returns.
 	checkForUpdates(argv[0], stdout)
 	return containerExit
+}
+
+// executor applies plan steps. It holds the one piece of state that outlives
+// the plan: the worktree locks, which cleanup must release after the
+// container exits.
+type executor struct {
+	stdout, stderr      io.Writer
+	lockRepo, lockOwner string
+	locked              []string
+}
+
+// releaseLocks releases this run's worktree auto-locks, if any were taken. A
+// no-op when nothing was locked, mirroring cleanup_auto_worktree_locks'
+// `[[ -n "$auto_worktree_lock_repo" && ${#auto_locked_worktrees[@]} -gt 0 ]]`
+// guard.
+func (e *executor) releaseLocks() {
+	if e.lockRepo == "" || len(e.locked) == 0 {
+		return
+	}
+	host.ReleaseWorktreeLocks(e.lockRepo, e.locked, e.lockOwner, e.stderr)
+	e.locked = nil
+}
+
+// interrupts catches the termination signals bash traps
+// (claude-contained:1560-1562) so the launcher can finish the container run
+// and release its worktree locks before dying.
+//
+// signal.Notify, never signal.Ignore: an *ignored* disposition survives
+// execve and would be inherited by the container runtime child, which would
+// then not die on the signal at all -- the wait would never return and the
+// locks would leak permanently. A *caught* disposition is reset to the
+// default on exec, so the child dies normally. The handler deliberately does
+// nothing; catching is only ever used to defer, never to act.
+type interrupts struct {
+	ch chan os.Signal
+}
+
+func catchInterrupts() *interrupts {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM, syscall.SIGHUP)
+	return &interrupts{ch: ch}
+}
+
+func (i *interrupts) stop() {
+	signal.Stop(i.ch)
+}
+
+// pending performs a non-blocking check for a signal already caught.
+func (i *interrupts) pending() (os.Signal, bool) {
+	select {
+	case sig := <-i.ch:
+		return sig, true
+	default:
+		return nil, false
+	}
+}
+
+// c exposes the channel so a prompt read can select against it.
+func (i *interrupts) c() <-chan os.Signal {
+	return i.ch
+}
+
+// awaitPendingSignal is ints.pending() with one narrow allowance: `kill(2)`
+// to a process group delivers to every member independently, with no
+// ordering guarantee between them. When the container shares our process
+// group (the common case: a real terminal signals the whole foreground
+// group), the child can die from the very same signal we are catching before
+// the Go runtime has finished delivering it to our channel -- so an
+// immediate, non-blocking check can race and lose. exitCode == -1 is Go's
+// unambiguous marker that the child was killed by a signal rather than
+// exiting on its own (exec.ExitError.ExitCode's documented behavior), so only
+// that case gets a short bounded poll; an ordinary exit returns instantly, as
+// before.
+func awaitPendingSignal(ints *interrupts, exitCode int) (os.Signal, bool) {
+	if sig, ok := ints.pending(); ok {
+		return sig, true
+	}
+	if exitCode != -1 {
+		return nil, false
+	}
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		time.Sleep(2 * time.Millisecond)
+		if sig, ok := ints.pending(); ok {
+			return sig, true
+		}
+	}
+	return nil, false
 }
 
 // signalExitCode mirrors bash's `trap 'exit N'` handlers: 128 + the signal
@@ -251,24 +351,12 @@ func completeEnv(store *env.Store, h host.State, noProjectEnv bool, projectDir s
 	return 0
 }
 
-// worktreeGitWouldBeMounted reports whether accepting the worktree prompt would
-// expose hidden sibling worktrees to pruning. Accepting adds the main
-// repository's .git to the mounted roots, so the visibility check has to be
-// made against that enlarged set, not the current one.
-func worktreeGitWouldBeMounted(worktreeMainRepo string, mountedRoots []string) bool {
-	if worktreeMainRepo == "" {
-		return false
-	}
-	roots := append(append([]string{}, mountedRoots...), filepath.Join(worktreeMainRepo, ".git"))
-	return len(host.HiddenWorktrees(worktreeMainRepo, roots)) > 0
-}
-
 // buildAndApply drives the resumable planner: build, apply the steps that are
 // new since the last round, answer any pending prompt, repeat. Because Build is
 // deterministic, the re-emitted prefix is identical and is skipped by index.
 func buildAndApply(
-	cfg cli.Config, h host.State, facts plan.Facts, prof runtime.Profile,
-	prompter *prompter, stdout, stderr io.Writer,
+	e *executor, cfg cli.Config, h host.State, facts plan.Facts, prof runtime.Profile,
+	prompter *prompter, ints *interrupts,
 ) (plan.Program, int) {
 	answers := plan.Answers{}
 	appliedCount := 0
@@ -278,18 +366,18 @@ func buildAndApply(
 
 		// Steps are applied even when Build reported an error: bash discovers
 		// an unknown tool only after these mutations have happened.
-		n, applyErr := applySteps(program.Steps, appliedCount, stdout, stderr)
+		n, applyErr := e.apply(program.Steps, appliedCount)
 		appliedCount = n
 		if applyErr != nil {
-			fmt.Fprintf(stderr, "error: %v\n", applyErr)
+			fmt.Fprintf(e.stderr, "error: %v\n", applyErr)
 			return program, cli.ExitFailure
 		}
 
 		if err != nil {
 			var toolErr *plan.ToolError
 			if errors.As(err, &toolErr) {
-				fmt.Fprintf(stderr, "Unknown tool: %s\n", toolErr.Tool)
-				fmt.Fprintln(stderr, "Supported tools: claude, codex, copilot, gemini, vibe")
+				fmt.Fprintf(e.stderr, "Unknown tool: %s\n", toolErr.Tool)
+				fmt.Fprintln(e.stderr, "Supported tools: claude, codex, copilot, gemini, vibe")
 				return program, cli.ExitFailure
 			}
 			// --share-skills conflicts and a missing symlink target are both
@@ -300,11 +388,11 @@ func buildAndApply(
 			var shareErr *plan.ShareSkillsError
 			if errors.As(err, &shareErr) {
 				for _, line := range shareErr.Lines {
-					fmt.Fprintln(stderr, line)
+					fmt.Fprintln(e.stderr, line)
 				}
 				return program, cli.ExitUsage
 			}
-			fmt.Fprintf(stderr, "error: %v\n", err)
+			fmt.Fprintf(e.stderr, "error: %v\n", err)
 			return program, cli.ExitFailure
 		}
 
@@ -312,19 +400,21 @@ func buildAndApply(
 			return program, 0
 		}
 
-		answer, ok := prompter.ask(program.Pending.Text, program.Pending.Default)
+		answer, ok := prompter.ask(program.Pending.Text, program.Pending.Default, ints)
 		if !ok {
-			// EOF on a prompt: bash's `read` returns non-zero and `set -e`
-			// kills the script on that line, with no prompt text printed.
+			// Either EOF (bash's `read` returns non-zero and `set -e` kills the
+			// script on that line, with no prompt text printed) or a caught
+			// signal aborted the read -- the caller distinguishes the two via
+			// ints.pending().
 			return program, cli.ExitFailure
 		}
 		answers[program.Pending.ID] = answer
 	}
 }
 
-// applySteps performs the steps from index `from` onward and returns the new
+// apply performs the steps from index `from` onward and returns the new
 // applied count.
-func applySteps(steps []plan.Step, from int, stdout, stderr io.Writer) (int, error) {
+func (e *executor) apply(steps []plan.Step, from int) (int, error) {
 	for i := from; i < len(steps); i++ {
 		switch s := steps[i].(type) {
 		case plan.MkdirAll:
@@ -351,11 +441,15 @@ func applySteps(steps []plan.Step, from int, stdout, stderr io.Writer) (int, err
 				return i, err
 			}
 		case plan.Print:
-			w := stdout
+			w := e.stdout
 			if s.Stderr {
-				w = stderr
+				w = e.stderr
 			}
 			fmt.Fprintln(w, s.Text)
+		case plan.WorktreeAutoLock:
+			e.lockRepo = s.Repo
+			e.lockOwner = s.Owner
+			e.locked = host.LockWorktrees(s.Repo, s.Worktrees, s.Owner, e.stdout, e.stderr)
 		}
 	}
 	return len(steps), nil
@@ -488,12 +582,51 @@ func newPrompter(stdin io.Reader, stderr io.Writer) *prompter {
 }
 
 // ask returns the answer and whether one could be read at all. ok=false means
-// EOF, which bash turns into an immediate exit.
-func (p *prompter) ask(text string, def bool) (bool, bool) {
+// either EOF (bash turns that into an immediate exit) or, when ints is
+// non-nil, a caught signal aborting the read -- the caller distinguishes the
+// two via ints.pending().
+//
+// ints may be nil: the runtime-liveness confirm() call happens before the
+// launcher installs its signal handling at all (bash's own traps are not
+// installed that early either), so that read is a plain blocking one.
+func (p *prompter) ask(text string, def bool, ints *interrupts) (bool, bool) {
 	if p.isTTY {
 		fmt.Fprint(p.out, text)
 	}
-	line, err := p.reader.ReadString('\n')
+
+	if ints == nil {
+		line, err := p.reader.ReadString('\n')
+		return parseAnswer(line, err, def)
+	}
+
+	// The read runs in a goroutine so a caught signal can abort it: bash's
+	// `read -p` is itself interrupted by a trapped signal, and without this a
+	// signal.Notify'd Ctrl-C at a prompt would do nothing at all -- worse than
+	// bash, since Notify has already taken over the default disposition. The
+	// goroutine leaks only on the path where the process exits within
+	// milliseconds of the signal, which is harmless.
+	type result struct {
+		line string
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		line, err := p.reader.ReadString('\n')
+		ch <- result{line, err}
+	}()
+
+	select {
+	case r := <-ch:
+		return parseAnswer(r.line, r.err, def)
+	case <-ints.c():
+		return false, false
+	}
+}
+
+// parseAnswer mirrors bash's `read -p` result handling: an empty line (bare
+// Enter) takes the default, and only the first character is matched --
+// `yes`, `Y` and `yolo` all count as yes.
+func parseAnswer(line string, err error, def bool) (bool, bool) {
 	if err != nil && line == "" {
 		return false, false
 	}
@@ -501,11 +634,10 @@ func (p *prompter) ask(text string, def bool) (bool, bool) {
 	if answer == "" {
 		return def, true
 	}
-	// Bash matches a prefix: `yes`, `Y` and `yolo` all count as yes.
 	return answer[0] == 'y' || answer[0] == 'Y', true
 }
 
 func (p *prompter) confirm(text string) bool {
-	answer, ok := p.ask(text, true)
+	answer, ok := p.ask(text, true, nil)
 	return ok && answer
 }

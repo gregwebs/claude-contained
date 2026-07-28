@@ -27,17 +27,29 @@ const maxSymlinkHops = 40
 // rather than cleaned up front, because ".." has to mean "parent of what this
 // resolved to" and not "textually cancel the previous name".
 func ResolvePath(path string) string {
+	return resolvePathFrom(path, os.Getwd)
+}
+
+// ResolvePathIn resolves path the way `cd dir && resolve_path path` would: a
+// relative path is anchored to dir, not the process's cwd. It mirrors
+// get_worktree_lock_file's `git_dir="$(cd "$wt_path" && resolve_path
+// "$git_dir")"` (claude-contained:1108).
+func ResolvePathIn(dir, path string) string {
+	return resolvePathFrom(path, func() (string, error) { return dir, nil })
+}
+
+func resolvePathFrom(path string, getBase func() (string, error)) string {
 	if path == "" {
 		path = "."
 	}
 	if !filepath.IsAbs(path) {
-		if cwd, err := os.Getwd(); err == nil {
+		if base, err := getBase(); err == nil {
 			// Concatenated, not filepath.Join: Join calls Clean, which cancels
 			// ".." against the preceding name textually. That is precisely what
 			// the component walk below exists to avoid -- for "link/.." where
 			// link points elsewhere, ".." must mean the parent of the resolved
 			// target, not the directory holding the link.
-			path = cwd + string(os.PathSeparator) + path
+			path = base + string(os.PathSeparator) + path
 		}
 	}
 

@@ -70,6 +70,32 @@ type Facts struct {
 	// is empty when the flag was not given, in which case Build does nothing
 	// with it at all.
 	SharedSkills SharedSkills
+
+	// WorktreeLocks is the auto-lock offer's candidate set for the case where
+	// the PromptWorktreeGit question was declined or never asked (or there was
+	// no worktree question at all). WorktreeLocksWithGitMount is the candidate
+	// set for the case where it was accepted, or -w/--worktree-mode was given.
+	//
+	// The two are not derivable from one another: accepting the prompt both
+	// changes which repository is at risk (worktree_lock_repo falls back to
+	// get_main_worktree_repo_root only when there is no worktree repo at all)
+	// and enlarges the mounted roots the hidden-worktree scan runs against (the
+	// main repository's .git becomes visible), so Build cannot compute one from
+	// the other -- both must be probed up front.
+	WorktreeLocks             WorktreeLockCandidates
+	WorktreeLocksWithGitMount WorktreeLockCandidates
+}
+
+// WorktreeLockCandidates is the auto-lock offer's input for one of the two
+// possible answers to PromptWorktreeGit (or for the no-prompt case, where
+// both fields carry the same value).
+type WorktreeLockCandidates struct {
+	// Repo is the repository whose linked worktrees are at risk, "" when
+	// there is nothing to protect.
+	Repo string
+	// Hidden are its linked worktrees the container cannot see, in git's
+	// order.
+	Hidden []string
 }
 
 // SharedSkillLink is one symlink processed by the --share-skills scan, in

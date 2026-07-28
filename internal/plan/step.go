@@ -36,14 +36,27 @@ type (
 		Text   string
 		Stderr bool
 	}
+
+	// WorktreeAutoLock locks the launcher's own auto-locks for the run. It is
+	// the one step whose output is not fully determined by the plan: the
+	// "Auto-locked N" line counts successes, which is an I/O result, so the
+	// applier emits it and returns the list the driver must release. The step
+	// itself stays an inert value -- Repo, Worktrees and Owner are exactly
+	// what the applier needs and nothing it has to derive.
+	WorktreeAutoLock struct {
+		Repo      string
+		Worktrees []string
+		Owner     string // the deduplicated container name
+	}
 )
 
-func (MkdirAll) isStep()   {}
-func (CopyFile) isStep()   {}
-func (MoveFile) isStep()   {}
-func (Symlink) isStep()    {}
-func (RemoveFile) isStep() {}
-func (Print) isStep()      {}
+func (MkdirAll) isStep()         {}
+func (CopyFile) isStep()         {}
+func (MoveFile) isStep()         {}
+func (Symlink) isStep()          {}
+func (RemoveFile) isStep()       {}
+func (Print) isStep()            {}
+func (WorktreeAutoLock) isStep() {}
 
 // PromptID identifies a question. IDs are stable so an answer recorded on one
 // Build call is still recognized on the next.
@@ -56,8 +69,9 @@ const (
 	PromptWorktreeGit PromptID = "worktree-git"
 	// PromptNodeModules asks whether to use a container-specific node_modules.
 	PromptNodeModules PromptID = "node-modules"
-	// PromptWorktreeLocks is ticket 06's auto-lock offer. Reserved here so the
-	// ID space is stable, but never reached by this ticket.
+	// PromptWorktreeLocks is the auto-lock offer for linked worktrees the
+	// container cannot see: "N linked worktree(s) ... hidden ... (prune
+	// risk)." followed by "Auto-lock them while this container runs? [Y/n] ".
 	PromptWorktreeLocks PromptID = "worktree-locks"
 )
 

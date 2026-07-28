@@ -17,15 +17,25 @@ import (
 // keeps Build pure and therefore safely replayable across prompt rounds.
 func probeFacts(
 	ctx context.Context, r rt.Runtime, h host.State, cfg cli.Config,
-	mainHost string, extraMounts, extraModes []string, shareSkillsDir string,
+	mainHost string, extraMounts, extraModes []string, shareSkillsDir string, mountedRoots []string,
 ) (plan.Facts, error) {
+	worktreeMainRepo := host.WorktreeMainRepo(mainHost)
+
 	facts := plan.Facts{
 		ProjectDir:             mainHost,
 		ExtraMounts:            extraMounts,
 		ExtraModes:             extraModes,
-		WorktreeMainRepo:       host.WorktreeMainRepo(mainHost),
+		WorktreeMainRepo:       worktreeMainRepo,
 		NodeOverlayTargetEmpty: map[string]bool{},
 		SharedSkills:           scanSharedSkills(h.Home, shareSkillsDir),
+		WorktreeLocks:          worktreeLockCandidates(mainHost, "", mountedRoots),
+	}
+	// The two candidate sets are identical by construction when the project
+	// directory is not itself a linked worktree -- copy rather than reprobe.
+	if worktreeMainRepo == "" {
+		facts.WorktreeLocksWithGitMount = facts.WorktreeLocks
+	} else {
+		facts.WorktreeLocksWithGitMount = worktreeLockCandidates(mainHost, worktreeMainRepo, mountedRoots)
 	}
 
 	home := h.Home
@@ -88,6 +98,35 @@ func probeFacts(
 	facts.RunningContainers = names
 
 	return facts, nil
+}
+
+// worktreeLockCandidates mirrors the worktree_lock_repo fallback
+// (claude-contained:1547-1550) and maybe_offer_worktree_locks' hidden-worktree
+// scan (:1313-1357) for one value of worktree_main_repo.
+//
+// worktreeRepo is the PromptWorktreeGit answer's effect: "" when the .git
+// mount is not (or not yet) in play, in which case the repository falls back
+// to host.MainWorktreeRepoRoot. When non-empty, the main repository's .git is
+// added to the mounted-root set before the hidden-worktree scan runs, since
+// that mount is what makes those worktrees visible to an in-container prune.
+func worktreeLockCandidates(mainHost, worktreeRepo string, mountedRoots []string) plan.WorktreeLockCandidates {
+	repo := worktreeRepo
+	if repo == "" {
+		repo = host.MainWorktreeRepoRoot(mainHost)
+	}
+	if repo == "" {
+		return plan.WorktreeLockCandidates{}
+	}
+
+	roots := mountedRoots
+	if worktreeRepo != "" {
+		roots = append(append([]string{}, mountedRoots...), filepath.Join(worktreeRepo, ".git"))
+	}
+
+	return plan.WorktreeLockCandidates{
+		Repo:   repo,
+		Hidden: host.HiddenWorktrees(repo, roots),
+	}
 }
 
 // dirWillBeEmpty reports whether the overlay directory is empty, evaluated

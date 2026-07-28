@@ -29,14 +29,16 @@ fmt:
 # entry whose flags are implemented: tools, mounts, ports, DNS, sandbox flags,
 # SSH, the tool-process environment, --share-skills, the host mutations
 # (account-state relocation, the node_modules overlay, placeholder cleanup),
+# worktree auto-locking (including the interactive offer and the mutex),
 # and the error paths.
-# Cases 31 and 33-41 are excluded because they exercise flags that still
-# refuse with exit 3 (--zellij, -a/--attach, worktree locking).
+# Cases 33-40 are excluded because they exercise flags that still refuse with
+# exit 3 (--zellij, -a/--attach). 41 and 52-56 (worktree locking) are ported
+# and included.
 # Ranges are deliberately bounded rather than open-ended, so a corpus entry
 # added by a later ticket is not silently pulled in before its code exists.
 # Widen this list as each later ticket lands rather than editing the corpus.
 DIFF_CASES := --case '0*' --case '1*' --case '2*' --case '30-*' --case '32-*' \
-              --case '4[2-9]-*' --case '5[0-1]-*'
+              --case '41-*' --case '4[2-9]-*' --case '5[0-6]-*'
 
 difftest: build
 	tests/differential/harness.sh \

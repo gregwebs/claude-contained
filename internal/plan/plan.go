@@ -123,6 +123,45 @@ func Build(cfg cli.Config, h host.State, f Facts, prof runtime.Profile, ans Answ
 	}
 	containerName = deduplicateName(containerName, f.RunningContainers)
 
+	// --- The worktree auto-lock offer ---------------------------------------
+	// claude-contained:1541 (worktree_lock_repo fallback) through :1563
+	// (maybe_offer_worktree_locks). Which candidate set applies depends on the
+	// PromptWorktreeGit answer above: accepting it changes both the repository
+	// at risk and the mounted-root set the hidden-worktree scan runs against,
+	// so the two sets are probed independently rather than derived from one
+	// another (see Facts.WorktreeLocks).
+	lockCandidates := f.WorktreeLocks
+	if worktreeRepo != "" {
+		lockCandidates = f.WorktreeLocksWithGitMount
+	}
+	if lockCandidates.Repo != "" && len(lockCandidates.Hidden) > 0 {
+		p.Steps = append(p.Steps, Print{
+			Text: fmt.Sprintf("%d linked worktree(s) under %s hidden from container (prune risk).",
+				len(lockCandidates.Hidden), lockCandidates.Repo),
+		})
+
+		lockThem := cfg.LockWorktrees
+		if !lockThem {
+			answer, asked := ans[PromptWorktreeLocks]
+			if !asked {
+				p.Pending = &Prompt{
+					ID:      PromptWorktreeLocks,
+					Text:    "Auto-lock them while this container runs? [Y/n] ",
+					Default: true,
+				}
+				return p, nil
+			}
+			lockThem = answer
+		}
+		if lockThem {
+			p.Steps = append(p.Steps, WorktreeAutoLock{
+				Repo:      lockCandidates.Repo,
+				Worktrees: lockCandidates.Hidden,
+				Owner:     containerName,
+			})
+		}
+	}
+
 	// --- The run itself, assembled in the order bash emits it --------------
 	var args []runtime.Arg
 	add := func(a ...runtime.Arg) { args = append(args, a...) }

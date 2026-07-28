@@ -7,9 +7,9 @@ import (
 	"strings"
 )
 
-// autoLockPrefix is the owner token the launcher writes into lock reasons it
+// AutoLockPrefix is the owner token the launcher writes into lock reasons it
 // created itself, so a user's own lock is never disturbed.
-const autoLockPrefix = "cc-autolocked-by:"
+const AutoLockPrefix = "cc-autolocked-by:"
 
 // PathIsAtOrUnder mirrors path_is_at_or_under (claude-contained:1077-1082).
 func PathIsAtOrUnder(path, parent string) bool {
@@ -68,7 +68,7 @@ func HiddenWorktrees(repoRoot string, mountedRoots []string) []string {
 		if PathVisibleInContainer(path, mountedRoots) {
 			return
 		}
-		if locked && !strings.HasPrefix(lockReason, autoLockPrefix) {
+		if locked && !strings.HasPrefix(lockReason, AutoLockPrefix) {
 			return
 		}
 		hidden = append(hidden, path)
