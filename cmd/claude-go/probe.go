@@ -29,7 +29,11 @@ func probeFacts(
 	}
 
 	home := h.Home
-	if _, err := os.Stat(filepath.Join(home, ".gitconfig")); err == nil {
+	// bash's `-f`: exists, follows symlinks, and is a regular file. A bare
+	// os.Stat check is only `-e`, and a directory (or fifo) at this path would
+	// then reach copyFile, whose ReadFile fails outright (or blocks forever)
+	// where bash simply skips the copy. Same test as completeEnv's below.
+	if info, err := os.Stat(filepath.Join(home, ".gitconfig")); err == nil && info.Mode().IsRegular() {
 		facts.GitConfigExists = true
 	}
 
@@ -65,7 +69,10 @@ func probeFacts(
 			candidates = append(candidates, dir)
 		}
 		for _, dir := range candidates {
-			if _, err := os.Stat(filepath.Join(dir, "package.json")); err != nil {
+			// `-f` again, not `-e`: a directory named package.json is not a
+			// Node project, and treating it as one creates an overlay directory
+			// and prints a notice bash never prints.
+			if info, err := os.Stat(filepath.Join(dir, "package.json")); err != nil || !info.Mode().IsRegular() {
 				continue
 			}
 			facts.NodeOverlayDirs = append(facts.NodeOverlayDirs, dir)

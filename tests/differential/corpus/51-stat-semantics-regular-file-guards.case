@@ -1,0 +1,18 @@
+CASE_DESCRIPTION="a directory named ~/.gitconfig or package.json is not a regular file, so neither the git-config copy nor the node_modules overlay fires"
+
+# Both bash tests are `-f`, false for a directory (claude-contained:1823 and
+# :1908). Translating either as a bare os.Stat error check is only `-e`. The
+# .gitconfig half is the loud one -- copying a directory fails outright, so the
+# launcher exits 1 where bash runs normally -- and the package.json half
+# silently creates an overlay directory and announces it on stderr. Exit
+# status, stderr and the filesystem manifest all catch it.
+case_setup() {
+  local proj="$1" home="$2"
+
+  mkdir -p "${home}/.gitconfig"
+  mkdir -p "${proj}/package.json"
+}
+
+case_args() {
+  CASE_ARGS_OUT=(-N -s -C "$1")
+}

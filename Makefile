@@ -27,11 +27,16 @@ fmt:
 
 # Cross-compare the Go launcher against both bash launchers over every corpus
 # entry whose flags are implemented: tools, mounts, ports, DNS, sandbox flags,
-# SSH, the tool-process environment, --share-skills, and the error paths.
+# SSH, the tool-process environment, --share-skills, the host mutations
+# (account-state relocation, the node_modules overlay, placeholder cleanup),
+# and the error paths.
 # Cases 31 and 33-41 are excluded because they exercise flags that still
 # refuse with exit 3 (--zellij, -a/--attach, worktree locking).
+# Ranges are deliberately bounded rather than open-ended, so a corpus entry
+# added by a later ticket is not silently pulled in before its code exists.
 # Widen this list as each later ticket lands rather than editing the corpus.
-DIFF_CASES := --case '0*' --case '1*' --case '2*' --case '30-*' --case '32-*' --case '4[2-5]-*'
+DIFF_CASES := --case '0*' --case '1*' --case '2*' --case '30-*' --case '32-*' \
+              --case '4[2-9]-*' --case '5[0-1]-*'
 
 difftest: build
 	tests/differential/harness.sh \
