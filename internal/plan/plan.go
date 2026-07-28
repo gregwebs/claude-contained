@@ -137,10 +137,10 @@ func Build(cfg cli.Config, h host.State, f Facts, prof runtime.Profile, ans Answ
 		runtime.MountArg{Src: f.ProjectDir, Dst: f.ProjectDir},
 	)
 
-	// The tool process environment. Only the two built-ins are ported here;
-	// -e/--env and the project env file are refused earlier with exit 3.
-	for _, e := range builtinEnv(h) {
-		add(e)
+	// The tool process environment, already resolved: command line, then the
+	// project env file, then the launcher's built-ins, each key exactly once.
+	for _, e := range f.Env {
+		add(runtime.EnvArg{Key: e.Key, Value: e.Value})
 	}
 
 	// Claude extension resources are mounted individually so the contained
@@ -264,20 +264,6 @@ func Build(cfg cli.Config, h host.State, f Facts, prof runtime.Profile, ans Answ
 // claudeExtensionResources are the shared Claude file resources, in the order
 // bash iterates them.
 var claudeExtensionResources = []string{"skills", "agents", "commands", "plugins"}
-
-// builtinEnv is the launcher's own contribution to the tool environment. Both
-// entries are emitted with no flag involved, so they are on the basic path even
-// though -e/--env is not ported yet.
-func builtinEnv(h host.State) []runtime.EnvArg {
-	var out []runtime.EnvArg
-	if h.Timezone != "" {
-		out = append(out, runtime.EnvArg{Key: "TZ", Value: h.Timezone})
-	}
-	if h.GHToken != "" {
-		out = append(out, runtime.EnvArg{Key: "GH_TOKEN", Value: h.GHToken})
-	}
-	return out
-}
 
 // resolveDNS mirrors the CLAUDE_DNS handling. The distinction between "unset"
 // and "set but empty" is the whole point: unset takes the runtime's default

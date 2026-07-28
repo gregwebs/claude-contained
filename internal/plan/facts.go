@@ -1,5 +1,7 @@
 package plan
 
+import "claude-contained/internal/env"
+
 // AccountStateFacts mirrors, one predicate per field, the exact stat tests the
 // bash migration performs (claude-contained:1827-1841).
 //
@@ -57,4 +59,10 @@ type Facts struct {
 	// RunningContainers are the names the runtime currently reports, used to
 	// deduplicate the generated container name.
 	RunningContainers []string
+
+	// Env is the finished tool-process environment, in emission order, with
+	// every key already deduplicated and validated. Precedence between the
+	// command line, the project env file and the launcher's built-ins is
+	// settled before planning, so Build only has to emit this list.
+	Env []env.Pair
 }

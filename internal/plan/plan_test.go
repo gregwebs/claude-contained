@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"claude-contained/internal/cli"
+	"claude-contained/internal/env"
 	"claude-contained/internal/host"
 	"claude-contained/internal/runtime"
 )
@@ -33,7 +34,12 @@ func appleProfile() runtime.Profile {
 // with no process started and no filesystem touched.
 func TestBuildProducesCompleteProgramInOneCall(t *testing.T) {
 	cfg := cli.Config{Tool: "claude", ShellMode: true, ContainedNodeModules: true}
-	facts := Facts{ProjectDir: "/home/dev/work/app"}
+	// The environment arrives already resolved: Build emits it verbatim and
+	// derives nothing itself, which is what keeps it pure.
+	facts := Facts{
+		ProjectDir: "/home/dev/work/app",
+		Env:        []env.Pair{{Key: "TZ", Value: "Europe/Helsinki"}},
+	}
 
 	program, err := Build(cfg, testHost(), facts, appleProfile(), Answers{})
 	if err != nil {

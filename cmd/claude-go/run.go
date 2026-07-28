@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	"claude-contained/internal/cli"
+	"claude-contained/internal/env"
 	"claude-contained/internal/host"
 	"claude-contained/internal/plan"
 	"claude-contained/internal/runtime"
@@ -35,6 +36,17 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return cli.ExitOK
 	}
 
+	// The tool process environment. Command-line variables are validated here,
+	// before the runtime-liveness prompt below, so a bad -e fails without first
+	// offering to start the container runtime.
+	envStore := env.New()
+	for _, assignment := range cfg.EnvFlagArgs {
+		if err := envStore.Set(assignment, "--env", env.Flag); err != nil {
+			fmt.Fprintln(stderr, err.Error())
+			return cli.ExitUsage
+		}
+	}
+
 	ctx := context.Background()
 	prompter := newPrompter(stdin, stderr)
 
@@ -46,6 +58,12 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			return cli.ExitFailure
 		}
 		return cli.ExitFailure
+	}
+
+	// Bash rebuilds or execs into an attach before it ever looks at the project
+	// directory, so these are refused first.
+	if err := cli.CheckUnportedEarly(cfg, stderr); err != nil {
+		return exitCode(err)
 	}
 
 	projectDir := cfg.ProjectDir
@@ -72,16 +90,31 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 
 	mainHost := host.ResolvePath(projectDir)
 
-	// Refuse unported paths before any mutation, so nothing is half-applied.
-	if err := cli.CheckUnported(cfg, mainHost, stderr); err != nil {
+	// Order here is bash's, and it is observable: the placeholder sweep of the
+	// project directory happens at claude-contained:1410, *before* the env file
+	// is read at :1416. Reading the file first would leave those stale files on
+	// disk when a bad file aborts the run, which the differential harness sees
+	// as a filesystem-manifest divergence.
+	host.CleanupPlaceholderFiles(mainHost)
+
+	// The project env file and the built-ins complete the environment. This runs
+	// before the worktree handling below, so a rejected file fails without first
+	// asking the user about locks and taking them -- there is nothing to unwind.
+	if code := completeEnv(envStore, h, cfg.NoProjectEnv, mainHost, stderr); code != 0 {
+		return code
+	}
+
+	// Only now the flags bash handles downstream of the env file. Refusing these
+	// any earlier would mask an exit 2 that a bad env file would have produced.
+	if err := cli.CheckUnportedLate(cfg, stderr); err != nil {
 		return exitCode(err)
 	}
 
-	host.CleanupPlaceholderFiles(mainHost)
 	mountedRoots := append([]string{mainHost}, extraMounts...)
 	host.CleanupPlaceholderFiles(mountedRoots...)
 
 	facts, err := probeFacts(ctx, rt, h, cfg, mainHost, extraMounts, extraModes)
+	facts.Env = envStore.Pairs()
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return cli.ExitFailure
@@ -146,6 +179,64 @@ func signalExitCode(sig os.Signal) int {
 		return 128 + int(s)
 	}
 	return cli.ExitFailure
+}
+
+// completeEnv adds the project env file and the launcher's built-ins to the
+// store, then reports which variables are being passed in.
+//
+// The file is read here and handed to the store as bytes: it is writable from
+// inside the container, so it is parsed literally and never evaluated. An absent
+// file is a silent success, matching bash's `[[ -f "$file" ]] || return 0`.
+func completeEnv(store *env.Store, h host.State, noProjectEnv bool, projectDir string, stderr io.Writer) int {
+	if !noProjectEnv {
+		path := filepath.Join(projectDir, env.FileName)
+
+		// bash gates on `[[ -f "$file" ]]`, which is false for anything that is
+		// not a regular file. A directory -- or a fifo, which would otherwise
+		// block us forever in ReadFile -- is therefore a silent success, not an
+		// error. Stat follows symlinks, as `-f` does.
+		if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
+			content, err := os.ReadFile(path)
+			if err != nil {
+				// Regular but unreadable. bash's `done < "$file"` redirection
+				// fails, the function returns non-zero, and its caller's
+				// `|| exit 2` turns that into status 2 -- which we match.
+				//
+				// The *message* deliberately differs: bash emits its own
+				// redirection diagnostic, which embeds the script's path and a
+				// literal source line number ("claude-contained: line 274:").
+				// Reproducing that would hardcode a line number in a file this
+				// rewrite exists to delete.
+				fmt.Fprintf(stderr, "error: cannot read %s: %v\n", env.FileName, err)
+				return cli.ExitUsage
+			}
+			if err := store.LoadFile(content); err != nil {
+				fmt.Fprintln(stderr, err.Error())
+				return cli.ExitUsage
+			}
+		}
+	}
+
+	// Built-ins only fill gaps, so a user-supplied TZ replaces this one rather
+	// than being emitted alongside it.
+	if h.Timezone != "" {
+		if err := store.Default("TZ="+h.Timezone, "host timezone", env.Builtin); err != nil {
+			fmt.Fprintln(stderr, err.Error())
+			return cli.ExitUsage
+		}
+	}
+	if h.GHToken != "" {
+		if err := store.Default("GH_TOKEN="+h.GHToken, "AI_GH_TOKEN", env.Builtin); err != nil {
+			fmt.Fprintln(stderr, err.Error())
+			return cli.ExitUsage
+		}
+	}
+
+	// Names only -- values routinely hold tokens and this lands in scrollback.
+	if summary := store.Summary(); summary != "" {
+		fmt.Fprintln(stderr, summary)
+	}
+	return 0
 }
 
 // worktreeGitWouldBeMounted reports whether accepting the worktree prompt would

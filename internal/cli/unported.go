@@ -3,8 +3,6 @@ package cli
 import (
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"regexp"
 )
 
@@ -27,42 +25,47 @@ func ValidateZellijSessionName(name string, stderr io.Writer) error {
 
 // CheckUnported refuses the code paths this ticket has not ported yet.
 //
-// It runs *after* the full bash validation, so a command line that bash rejects
-// with exit 2 still exits 2 rather than being masked by exit 3, and *before*
-// any host mutation, so nothing is left half-applied.
+// The guards are split into two phases because *where* bash leaves the script
+// decides which of its own errors can still fire first. Refusing too early
+// would mask an exit 2 that bash would have produced; refusing too late would
+// let an unported path run.
 //
-// Two of these guards are not keyed to a flag, which is the point: those paths
-// are reached with no flag at all, so a flag-keyed check would let them diverge
-// silently instead of failing loudly.
-func CheckUnported(cfg Config, projectDir string, stderr io.Writer) error {
-	unported := func(what string) error {
-		fmt.Fprintf(stderr, unportedIntro, what)
-		return exitWith(ExitUnported)
-	}
+// Every guard here is keyed to a flag. Paths reachable with *no* flag need
+// their own guards at the point they would be taken -- see the worktree
+// auto-locking check in the driver -- because a flag-keyed check would let them
+// diverge silently instead of failing loudly.
 
+// CheckUnportedEarly refuses the paths bash takes *before* it resolves the
+// project directory: `-R/--rebuild` rebuilds and exits at claude-contained:890,
+// and the attach paths exec at :945-:1010. Neither ever reads the project env
+// file, so refusing here cannot hide an error bash would have reported.
+func CheckUnportedEarly(cfg Config, stderr io.Writer) error {
 	switch {
 	case cfg.AttachMode:
-		return unported("-a/--attach")
-	case cfg.ZellijMode:
-		return unported("--zellij")
+		return unported(stderr, "-a/--attach")
 	case cfg.RebuildMode != "none":
-		return unported("-R/--rebuild")
-	case cfg.ShareSkillsDir != "":
-		return unported("--share-skills")
-	case len(cfg.EnvFlagArgs) > 0:
-		return unported("-e/--env")
-	case cfg.LockWorktrees:
-		return unported("-W/--lock-worktrees")
+		return unported(stderr, "-R/--rebuild")
 	}
-
-	// Reached with no flag: the project env file is loaded unless
-	// --no-project-env was given, so its mere presence is an unported path.
-	if !cfg.NoProjectEnv {
-		envFile := filepath.Join(projectDir, ".claude-contained", "env")
-		if info, err := os.Stat(envFile); err == nil && !info.IsDir() {
-			return unported("the project env file")
-		}
-	}
-
 	return nil
+}
+
+// CheckUnportedLate refuses the paths bash reaches only *after* the project env
+// file has had its say (claude-contained:1416). `--zellij` is handled at :1423,
+// `--share-skills` at :1889 and worktree locking at :1563 — all downstream — so
+// a project env file that bash rejects with exit 2 must still do so here.
+func CheckUnportedLate(cfg Config, stderr io.Writer) error {
+	switch {
+	case cfg.ZellijMode:
+		return unported(stderr, "--zellij")
+	case cfg.ShareSkillsDir != "":
+		return unported(stderr, "--share-skills")
+	case cfg.LockWorktrees:
+		return unported(stderr, "-W/--lock-worktrees")
+	}
+	return nil
+}
+
+func unported(stderr io.Writer, what string) error {
+	fmt.Fprintf(stderr, unportedIntro, what)
+	return exitWith(ExitUnported)
 }
