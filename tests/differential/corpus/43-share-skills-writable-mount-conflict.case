@@ -1,0 +1,11 @@
+CASE_DESCRIPTION="--share-skills conflicts with an overlapping writable extra mount"
+CASE_EXPECT_RUNTIME_ARGS=0
+
+case_setup() {
+  mkdir -p "$1/skills-src"
+  echo "skill" > "$1/skills-src/example.md"
+}
+
+case_args() {
+  CASE_ARGS_OUT=(-N -s -C "$1" -m "$1/skills-src:rw" --share-skills "$1/skills-src")
+}

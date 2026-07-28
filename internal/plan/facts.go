@@ -65,4 +65,47 @@ type Facts struct {
 	// command line, the project env file and the launcher's built-ins is
 	// settled before planning, so Build only has to emit this list.
 	Env []env.Pair
+
+	// SharedSkills is the result of the --share-skills symlink scan. Its Dir
+	// is empty when the flag was not given, in which case Build does nothing
+	// with it at all.
+	SharedSkills SharedSkills
+}
+
+// SharedSkillLink is one symlink processed by the --share-skills scan, in
+// exactly the order scan_shared_skill_symlink_tree (claude-contained:1716-1743)
+// would visit it -- including its recursion into directory targets, which is
+// filesystem I/O and therefore already flattened here by the probe rather than
+// performed by Build.
+type SharedSkillLink struct {
+	// Path is the symlink itself, as the find-order scan reports it.
+	Path string
+	// Resolved is the realpath of Path's target.
+	Resolved string
+	// Missing means Resolved does not exist. Bash exits 2 at exactly this
+	// point, after everything gathered before it has already been mutated;
+	// the replay matches that by stopping here too.
+	Missing bool
+	// IsDir is meaningful only when !Missing: Resolved is a directory, so the
+	// mount targets Resolved itself, and the Links produced by recursing into
+	// it follow immediately afterward in the same slice.
+	IsDir bool
+	// ParentDir is Resolved's resolved dirname, used as the mount when !IsDir.
+	ParentDir string
+}
+
+// SharedSkills is everything --share-skills needs that requires filesystem
+// access, probed once so Build stays pure.
+type SharedSkills struct {
+	// Dir is the resolved --share-skills directory, or "" when the flag was
+	// not given.
+	Dir string
+	// CodexSystemDir reports whether <codex dir>/skills/.system is a
+	// directory -- the one case where a tool's built-in skills stay visible
+	// underneath the shared mount (claude-contained:1754-1757).
+	CodexSystemDir bool
+	// Links is the flattened, ordered result of scanning .system (if present)
+	// and then Dir, sharing one seen-directories set across both -- matching
+	// bash's single global array.
+	Links []SharedSkillLink
 }

@@ -47,6 +47,18 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 	}
 
+	// --share-skills is validated here too (claude-contained:872-878): the
+	// directory must exist before the runtime-liveness prompt, and once
+	// resolved this is the value every downstream mount uses.
+	shareSkillsDir := cfg.ShareSkillsDir
+	if shareSkillsDir != "" {
+		if info, err := os.Stat(shareSkillsDir); err != nil || !info.IsDir() {
+			fmt.Fprintf(stderr, "error: --share-skills directory does not exist: %s\n", shareSkillsDir)
+			return cli.ExitUsage
+		}
+		shareSkillsDir = host.ResolvePath(shareSkillsDir)
+	}
+
 	ctx := context.Background()
 	prompter := newPrompter(stdin, stderr)
 
@@ -113,7 +125,7 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	mountedRoots := append([]string{mainHost}, extraMounts...)
 	host.CleanupPlaceholderFiles(mountedRoots...)
 
-	facts, err := probeFacts(ctx, rt, h, cfg, mainHost, extraMounts, extraModes)
+	facts, err := probeFacts(ctx, rt, h, cfg, mainHost, extraMounts, extraModes, shareSkillsDir)
 	facts.Env = envStore.Pairs()
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
@@ -279,6 +291,18 @@ func buildAndApply(
 				fmt.Fprintf(stderr, "Unknown tool: %s\n", toolErr.Tool)
 				fmt.Fprintln(stderr, "Supported tools: claude, codex, copilot, gemini, vibe")
 				return program, cli.ExitFailure
+			}
+			// --share-skills conflicts and a missing symlink target are both
+			// `exit 2` in bash, with a message that is already fully formatted
+			// (claude-contained:1666-1685, :1729-1732) -- printed verbatim
+			// rather than through the generic "error: %v" wrapper below, which
+			// would double the "error: " prefix on the first line.
+			var shareErr *plan.ShareSkillsError
+			if errors.As(err, &shareErr) {
+				for _, line := range shareErr.Lines {
+					fmt.Fprintln(stderr, line)
+				}
+				return program, cli.ExitUsage
 			}
 			fmt.Fprintf(stderr, "error: %v\n", err)
 			return program, cli.ExitFailure

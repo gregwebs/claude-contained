@@ -17,7 +17,7 @@ import (
 // keeps Build pure and therefore safely replayable across prompt rounds.
 func probeFacts(
 	ctx context.Context, r rt.Runtime, h host.State, cfg cli.Config,
-	mainHost string, extraMounts, extraModes []string,
+	mainHost string, extraMounts, extraModes []string, shareSkillsDir string,
 ) (plan.Facts, error) {
 	facts := plan.Facts{
 		ProjectDir:             mainHost,
@@ -25,6 +25,7 @@ func probeFacts(
 		ExtraModes:             extraModes,
 		WorktreeMainRepo:       host.WorktreeMainRepo(mainHost),
 		NodeOverlayTargetEmpty: map[string]bool{},
+		SharedSkills:           scanSharedSkills(h.Home, shareSkillsDir),
 	}
 
 	home := h.Home
@@ -89,4 +90,97 @@ func dirWillBeEmpty(path string) bool {
 		return true
 	}
 	return host.DirIsEmpty(path)
+}
+
+// scanSharedSkills builds the --share-skills facts, replicating
+// add_shared_skills_mounts' traversal (claude-contained:1745-1760) so
+// plan.Build can replay it without touching the filesystem.
+//
+// dir is the already-resolved --share-skills directory; empty means the flag
+// was not given.
+func scanSharedSkills(home, dir string) plan.SharedSkills {
+	ss := plan.SharedSkills{Dir: dir}
+	if dir == "" {
+		return ss
+	}
+
+	systemDir := filepath.Join(home, ".codex", "skills", ".system")
+	if info, err := os.Stat(systemDir); err == nil && info.IsDir() {
+		ss.CodexSystemDir = true
+	}
+
+	// One seen-set shared across both scans, matching bash's single global
+	// shared_skill_seen_scan_dirs array.
+	seen := map[string]bool{}
+
+	if ss.CodexSystemDir {
+		links := scanSkillSymlinkTree(systemDir, seen)
+		ss.Links = append(ss.Links, links...)
+		// Bash's `exit 2` on a missing target ends the whole script, so the
+		// second scan (of dir) never runs at all -- match that rather than
+		// gathering Links plan.Build could never reach anyway.
+		if anyMissing(links) {
+			return ss
+		}
+	}
+	ss.Links = append(ss.Links, scanSkillSymlinkTree(dir, seen)...)
+	return ss
+}
+
+func anyMissing(links []plan.SharedSkillLink) bool {
+	for _, l := range links {
+		if l.Missing {
+			return true
+		}
+	}
+	return false
+}
+
+// scanSkillSymlinkTree mirrors scan_shared_skill_symlink_tree
+// (claude-contained:1716-1743): resolve scanDir, bail out silently if it is
+// not a directory or has already been scanned, then walk its symlinks in find
+// order, recursing into every directory target immediately -- before moving
+// on to the next symlink at the current level, matching bash's self-recursive
+// for loop rather than gathering a level at a time.
+func scanSkillSymlinkTree(scanDir string, seen map[string]bool) []plan.SharedSkillLink {
+	resolved := host.ResolvePath(scanDir)
+	if info, err := os.Stat(resolved); err != nil || !info.IsDir() {
+		return nil
+	}
+	if seen[resolved] {
+		return nil
+	}
+	seen[resolved] = true
+
+	links, err := host.ScanSymlinks(resolved)
+	if err != nil {
+		return nil
+	}
+
+	var out []plan.SharedSkillLink
+	for _, link := range links {
+		target := host.ResolvePath(link)
+		info, err := os.Stat(target)
+		if err != nil {
+			out = append(out, plan.SharedSkillLink{Path: link, Resolved: target, Missing: true})
+			return out
+		}
+		if info.IsDir() {
+			out = append(out, plan.SharedSkillLink{Path: link, Resolved: target, IsDir: true})
+			// A Missing entry from this recursive call is not specially
+			// propagated -- this frame keeps scanning its own remaining
+			// siblings after it. That is safe only because the consumer
+			// (sharedSkillsMounts) processes Links strictly in order and stops
+			// at the first Missing entry: anything appended after one, at any
+			// depth, is inert. Bash's `exit 2` inside the recursive call would
+			// terminate the whole script instead, but the two are
+			// observationally identical since neither ever looks past the
+			// first Missing entry.
+			out = append(out, scanSkillSymlinkTree(target, seen)...)
+			continue
+		}
+		parent := host.ResolvePath(filepath.Dir(target))
+		out = append(out, plan.SharedSkillLink{Path: link, Resolved: target, ParentDir: parent})
+	}
+	return out
 }

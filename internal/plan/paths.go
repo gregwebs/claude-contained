@@ -28,9 +28,13 @@ type hostPaths struct {
 	VibeDir            string
 	M2Dir              string
 	VaadinDir          string
-	GitConfig          string
-	ClaudeJSON         string
-	SharedClaudeJSON   string
+	// AgentsDir is ~/.agents. Unlike the other tool directories it is created
+	// only as a side effect of --share-skills (claude-contained:1748) -- there
+	// is no other reason to mount or persist it.
+	AgentsDir        string
+	GitConfig        string
+	ClaudeJSON       string
+	SharedClaudeJSON string
 }
 
 func newHostPaths(h host.State, shareHostClaude bool) hostPaths {
@@ -57,6 +61,7 @@ func newHostPaths(h host.State, shareHostClaude bool) hostPaths {
 		VibeDir:            filepath.Join(home, ".vibe"),
 		M2Dir:              filepath.Join(home, ".m2"),
 		VaadinDir:          filepath.Join(home, ".vaadin"),
+		AgentsDir:          filepath.Join(home, ".agents"),
 		GitConfig:          filepath.Join(home, ".gitconfig"),
 		ClaudeJSON:         filepath.Join(home, ".claude.json"),
 		SharedClaudeJSON:   filepath.Join(claudeContained, ".claude.json"),

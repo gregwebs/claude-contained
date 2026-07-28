@@ -84,6 +84,13 @@ func Build(cfg cli.Config, h host.State, f Facts, prof runtime.Profile, ans Answ
 	// --- Host paths, and the persistent directory set ----------------------
 	paths := newHostPaths(h, cfg.ShareHostClaude)
 
+	// reg is bookkeeping only, mirroring bash's user_mount_* /
+	// shared_skill_readonly_mount_* arrays (claude-contained:1580-1586) so
+	// --share-skills mounts can be checked against every mount registered
+	// before them. It has no bearing on args other than through
+	// sharedSkillsMounts below.
+	reg := newMountRegistry(f.ProjectDir)
+
 	p.Steps = append(p.Steps,
 		MkdirAll{paths.ClaudeDir},
 		MkdirAll{paths.ClaudeContained},
@@ -210,11 +217,24 @@ func Build(cfg cli.Config, h host.State, f Facts, prof runtime.Profile, ans Answ
 
 	// --- Extra mounts ------------------------------------------------------
 	for i, src := range f.ExtraMounts {
-		readonly := f.ExtraModes[i] == "ro"
-		add(runtime.MountArg{Src: src, Dst: src, ReadOnly: readonly})
+		mode := f.ExtraModes[i]
+		add(runtime.MountArg{Src: src, Dst: src, ReadOnly: mode == "ro"})
+		reg.addUser(src, src, mode)
 		// Only claude and codex understand --add-dir.
 		if cfg.Tool == "claude" || cfg.Tool == "codex" {
 			toolArgv = append(toolArgv, "--add-dir", src)
+		}
+	}
+
+	// --- Shared skills -------------------------------------------------------
+	// claude-contained:1889-1891, run immediately after the extra-mount loop
+	// and before the node_modules block below.
+	if f.SharedSkills.Dir != "" {
+		steps, sharedArgs, err := sharedSkillsMounts(reg, paths, f.SharedSkills)
+		p.Steps = append(p.Steps, steps...)
+		add(sharedArgs...)
+		if err != nil {
+			return p, err
 		}
 	}
 
