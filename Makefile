@@ -6,11 +6,66 @@
 # selects its container runtime, so the same build serves both.
 
 GO ?= go
+GOFMT ?= gofmt
+SHELLCHECK ?= shellcheck
+GOLANGCI_LINT ?= golangci-lint
+
+SHELLCHECK_REQUIRED_VERSION := 0.11.0
+GOLANGCI_LINT_REQUIRED_VERSION := 2.12.2
+
+GO_SOURCES := $(shell git ls-files -- '*.go')
+SHELL_SOURCES := $(shell git ls-files -- '*.sh') claude-contained claude-docked
 BIN_DIR := bin
 BIN := $(BIN_DIR)/claude-go
 BIN_DOCKED := $(BIN_DIR)/claude-go-docked
 
-.PHONY: build test vet fmt difftest clean
+.PHONY: build test vet fmt difftest clean quality fmt-check lint-go lint-shell check-tools \
+	check-shellcheck-version check-golangci-lint-version
+
+quality: check-tools fmt-check vet test lint-go lint-shell
+
+check-tools: check-shellcheck-version check-golangci-lint-version
+
+check-shellcheck-version:
+	@command -v $(SHELLCHECK) >/dev/null 2>&1 || { \
+		echo "ShellCheck $(SHELLCHECK_REQUIRED_VERSION) is required; $(SHELLCHECK) was not found." >&2; \
+		echo "See README.md: Development quality checks." >&2; \
+		exit 1; \
+	}
+	@found_version="$$($(SHELLCHECK) --version 2>/dev/null | sed -n 's/^version: //p')"; \
+	if [ "$$found_version" != "$(SHELLCHECK_REQUIRED_VERSION)" ]; then \
+		echo "ShellCheck $(SHELLCHECK_REQUIRED_VERSION) is required; found $${found_version:-unknown}." >&2; \
+		echo "See README.md: Development quality checks." >&2; \
+		exit 1; \
+	fi
+
+check-golangci-lint-version:
+	@command -v $(GOLANGCI_LINT) >/dev/null 2>&1 || { \
+		echo "golangci-lint $(GOLANGCI_LINT_REQUIRED_VERSION) is required; $(GOLANGCI_LINT) was not found." >&2; \
+		echo "Install with: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v$(GOLANGCI_LINT_REQUIRED_VERSION)" >&2; \
+		echo "See README.md: Development quality checks." >&2; \
+		exit 1; \
+	}
+	@found_version="$$($(GOLANGCI_LINT) version 2>/dev/null | sed -n 's/^golangci-lint has version v\{0,1\}\([^ ]*\).*/\1/p')"; \
+	if [ "$$found_version" != "$(GOLANGCI_LINT_REQUIRED_VERSION)" ]; then \
+		echo "golangci-lint $(GOLANGCI_LINT_REQUIRED_VERSION) is required; found $${found_version:-unknown}." >&2; \
+		echo "Install with: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v$(GOLANGCI_LINT_REQUIRED_VERSION)" >&2; \
+		echo "See README.md: Development quality checks." >&2; \
+		exit 1; \
+	fi
+
+fmt-check:
+	@unformatted="$$($(GOFMT) -l $(GO_SOURCES))"; \
+	if [ -n "$$unformatted" ]; then \
+		echo "$$unformatted"; \
+		exit 1; \
+	fi
+
+lint-go: check-golangci-lint-version
+	$(GOLANGCI_LINT) run
+
+lint-shell: check-shellcheck-version
+	$(SHELLCHECK) --severity=warning $(SHELL_SOURCES)
 
 build:
 	$(GO) build -o $(BIN) ./cmd/claude-go

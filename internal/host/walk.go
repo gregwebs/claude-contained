@@ -32,8 +32,11 @@ func scanSymlinksDir(dir string, out *[]string) error {
 		return err
 	}
 	names, err := f.Readdirnames(-1)
-	f.Close()
 	if err != nil {
+		_ = f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
 		return err
 	}
 

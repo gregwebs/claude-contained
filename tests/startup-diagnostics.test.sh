@@ -77,12 +77,12 @@ for target in "${targets[@]}"; do
   : > "${project}/.bashrc"
   printf '{}\n' > "${project}/.ripgreprc"
   launcher_run "$target" "$home" "$project"
-  [[ ! -e "${project}/.mcp.json" && ! -e "${project}/.bashrc" && -s "${project}/.ripgreprc" ]]
-  _check "${target}: removes pre-existing zero-byte srt placeholders only" $?
+  if [[ ! -e "${project}/.mcp.json" && ! -e "${project}/.bashrc" && -s "${project}/.ripgreprc" ]]; then check_rc=0; else check_rc=1; fi
+  _check "${target}: removes pre-existing zero-byte srt placeholders only" "$check_rc"
 
   SRT_STUB_PLACEHOLDER_ROOTS="$project" launcher_run "$target" "$home" "$project"
-  [[ ! -e "${project}/.mcp.json" ]]
-  _check "${target}: removes zero-byte srt placeholders created during run" $?
+  if [[ ! -e "${project}/.mcp.json" ]]; then check_rc=0; else check_rc=1; fi
+  _check "${target}: removes zero-byte srt placeholders created during run" "$check_rc"
 
   rm -rf "$stub_dir" "$home" "$project"
 done
@@ -100,8 +100,8 @@ chmod +x "$fake_claude"
 CLAUDE_CONTAINED_CLAUDE_BIN="$fake_claude" "${repo_root}/image/claude-native-link.sh" "$link_home"
 bin_target="$(readlink "${link_home}/.local/bin/claude")"
 version_target="$(readlink "${link_home}/.local/share/claude/versions/1.2.3")"
-[[ "$bin_target" == "${link_home}/.local/share/claude/versions/1.2.3" && "$version_target" == "$fake_claude" ]]
-_check "creates a native-shaped Claude versions symlink" $?
+if [[ "$bin_target" == "${link_home}/.local/share/claude/versions/1.2.3" && "$version_target" == "$fake_claude" ]]; then check_rc=0; else check_rc=1; fi
+_check "creates a native-shaped Claude versions symlink" "$check_rc"
 
 preserve_home="$(mktemp -d)"
 mkdir -p "${preserve_home}/.local/bin"

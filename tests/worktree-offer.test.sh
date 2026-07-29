@@ -119,16 +119,17 @@ for target in "${targets[@]}"; do
   lock_file="$(git -C "$wt" rev-parse --absolute-git-dir)/locked"
 
   WT_SNAPSHOT_PATHS="$lock_file" launcher_run "$target" "$home" "$main" "" -W
-  [[ -e "${lock_file}.snapshot" ]]
-  _check "${target}: -W locks the hidden worktree while the container runs" $?
+  if [[ -e "${lock_file}.snapshot" ]]; then check_rc=0; else check_rc=1; fi
+  _check "${target}: -W locks the hidden worktree while the container runs" "$check_rc"
   if [[ -e "${lock_file}.snapshot" ]]; then
     grep -q '^cc-autolocked-by:' "${lock_file}.snapshot"
     _check "${target}: -W lock reason carries the owner token" $?
   else
     _check "${target}: -W lock reason carries the owner token" 1
   fi
-  worktree_is_locked "$main" "$wt"; rc=$?; [[ $rc -ne 0 ]]
-  _check "${target}: -W releases the lock once the run completes" $?
+  worktree_is_locked "$main" "$wt"; rc=$?
+  if [[ $rc -ne 0 ]]; then check_rc=0; else check_rc=1; fi
+  _check "${target}: -W releases the lock once the run completes" "$check_rc"
   rm -rf "$stub_dir" "$home" "$root" "$lr_stdout" "$lr_stderr"
 
   # --- Scenario B: interactive "Y" locks; released on exit ---
@@ -139,14 +140,15 @@ for target in "${targets[@]}"; do
 
   WT_SNAPSHOT_PATHS="$lock_file" launcher_run "$target" "$home" "$main" "Y
 "
-  [[ -e "${lock_file}.snapshot" ]]
-  _check "${target}: accepting the interactive offer locks the hidden worktree" $?
+  if [[ -e "${lock_file}.snapshot" ]]; then check_rc=0; else check_rc=1; fi
+  _check "${target}: accepting the interactive offer locks the hidden worktree" "$check_rc"
   grep -q "hidden from container (prune risk)" "$lr_stdout"
   _check "${target}: prune-risk line appears on stdout" $?
   grep -qE '^Auto-locked 1 worktree\(s\)\.$' "$lr_stdout"
   _check "${target}: Auto-locked summary appears on stdout" $?
-  worktree_is_locked "$main" "$wt"; rc=$?; [[ $rc -ne 0 ]]
-  _check "${target}: interactive accept releases the lock on exit" $?
+  worktree_is_locked "$main" "$wt"; rc=$?
+  if [[ $rc -ne 0 ]]; then check_rc=0; else check_rc=1; fi
+  _check "${target}: interactive accept releases the lock on exit" "$check_rc"
   rm -rf "$stub_dir" "$home" "$root" "$lr_stdout" "$lr_stderr"
 
   # --- Scenario C: interactive "n" declines; no lock file is ever written ---
@@ -157,8 +159,8 @@ for target in "${targets[@]}"; do
 
   WT_SNAPSHOT_PATHS="$lock_file" launcher_run "$target" "$home" "$main" "n
 "
-  [[ ! -e "${lock_file}.snapshot" && ! -e "$lock_file" ]]
-  _check "${target}: declining never writes a lock file" $?
+  if [[ ! -e "${lock_file}.snapshot" && ! -e "$lock_file" ]]; then check_rc=0; else check_rc=1; fi
+  _check "${target}: declining never writes a lock file" "$check_rc"
   grep -q "hidden from container (prune risk)" "$lr_stdout"
   _check "${target}: prune-risk line still appears even when declined" $?
   ! grep -q "Auto-locked" "$lr_stdout"
@@ -174,8 +176,8 @@ for target in "${targets[@]}"; do
 
   launcher_run "$target" "$home" "$main" "" -W
   after="$(lock_reason "$main" "$wt")"
-  [[ "$before" == "mine" && "$after" == "mine" ]]
-  _check "${target}: a user lock is byte-identical after the run" $?
+  if [[ "$before" == "mine" && "$after" == "mine" ]]; then check_rc=0; else check_rc=1; fi
+  _check "${target}: a user lock is byte-identical after the run" "$check_rc"
   rm -rf "$stub_dir" "$home" "$root" "$lr_stdout" "$lr_stderr"
 
   # --- Scenario E: a pre-seeded second owner survives our release ---

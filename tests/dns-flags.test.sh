@@ -58,8 +58,8 @@ out="$(
   export CLAUDE_DNS=system
   launcher_argv "$apple_target"
 )"
-[[ "$(line_count "$out" "--dns")" -eq 0 ]]
-_check "CLAUDE_DNS=system opts ${apple_target} back into runtime DNS" $?
+if [[ "$(line_count "$out" "--dns")" -eq 0 ]]; then check_rc=0; else check_rc=1; fi
+_check "CLAUDE_DNS=system opts ${apple_target} back into runtime DNS" "$check_rc"
 
 out="$(
   export CLAUDE_DNS=9.9.9.9,8.8.8.8
@@ -94,8 +94,8 @@ out="$(
   unset CLAUDE_DNS
   launcher_argv "$docker_target"
 )"
-[[ "$(line_count "$out" "--dns")" -eq 0 ]]
-_check "Docker keeps runtime DNS by default" $?
+if [[ "$(line_count "$out" "--dns")" -eq 0 ]]; then check_rc=0; else check_rc=1; fi
+_check "Docker keeps runtime DNS by default" "$check_rc"
 
 out="$(
   export CLAUDE_DNS=9.9.9.9,8.8.8.8
@@ -108,8 +108,8 @@ out="$(
   export CLAUDE_DNS=system
   launcher_argv "$docker_target"
 )"
-[[ "$(line_count "$out" "--dns")" -eq 0 ]]
-_check "CLAUDE_DNS=system keeps Docker runtime DNS" $?
+if [[ "$(line_count "$out" "--dns")" -eq 0 ]]; then check_rc=0; else check_rc=1; fi
+_check "CLAUDE_DNS=system keeps Docker runtime DNS" "$check_rc"
 
 out="$(
   export CLAUDE_DNS=9.9.9.9

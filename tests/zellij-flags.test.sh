@@ -353,8 +353,8 @@ EOF
     CLAUDE_CONTAINED_ZELLIJ_WAIT_SECONDS=0 \
     "${repo_root}/image/zellij-run.sh" "$session" -- echo "hello world" >/dev/null 2>&1
   _check "zellij-run starts a fresh session when none is listed" $?
-  [[ ! -e "$saved_state" ]]
-  _check "zellij-run removes saved cache state before fresh startup" $?
+  if [[ ! -e "$saved_state" ]]; then check_rc=0; else check_rc=1; fi
+  _check "zellij-run removes saved cache state before fresh startup" "$check_rc"
 
   grep -Fq -- "--config /etc/claude-contained/zellij/config.kdl --data-dir ${zhome}/.claude-contained/zellij/data attach --forget --create ${session} options --default-layout ${session}" "$zlog"
   _check "zellij-run forgets stale saved state and uses named layout startup" $?

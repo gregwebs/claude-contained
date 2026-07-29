@@ -102,6 +102,8 @@ suite() {
 
     tool="claude"; yolo_mode=0; srt_disable=0
     build_attach_cmd
+    # Defined by the sourced launcher before this assertion.
+    # shellcheck disable=SC2154
     [[ "${attach_cmd[0]}" == "srt-run" && "${attach_cmd[1]}" == "/opt/claude/claude" ]]
   )
   _check "attach tool command is prefixed with srt-run" $?
@@ -145,7 +147,15 @@ suite() {
     # shellcheck disable=SC1090
     source "${repo_root}/${target}" -C . >/dev/null 2>&1
 
-    tool="claude"; yolo_mode=1; srt_disable=0
+    # Consumed by the sourced builder function.
+    # shellcheck disable=SC2034
+    tool="claude"
+    # Consumed by the sourced builder function.
+    # shellcheck disable=SC2034
+    yolo_mode=1
+    # Consumed by the sourced builder function.
+    # shellcheck disable=SC2034
+    srt_disable=0
     build_attach_cmd
     [[ "${attach_cmd[*]}" == "srt-run /opt/claude/claude --dangerously-skip-permissions" ]]
   )

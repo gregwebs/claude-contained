@@ -193,6 +193,7 @@ func validate(assignment, source string, origin Origin) error {
 		return fmt.Errorf("error: %s: %s is reserved by claude-contained and cannot be set", source, key)
 	}
 	if origin == File && reservedInFile[key] {
+		//nolint:staticcheck // The trailing period preserves shell-launcher compatibility.
 		return fmt.Errorf("error: %s: %s cannot be set from a project env file\n"+
 			"       It is read by the sandbox wrapper itself; pass -e %s=... if you mean it.",
 			source, key, key)

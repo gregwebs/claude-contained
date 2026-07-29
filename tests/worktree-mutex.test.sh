@@ -126,16 +126,17 @@ for target in "${targets[@]}"; do
   WT_SNAPSHOT_PATHS="$lock_file" launcher_run "$target" "$home" "$main" "" -W
   elapsed=$((SECONDS - start))
 
-  [[ -e "${lock_file}.snapshot" ]]
-  _check "${target}: dead-PID mutex is reclaimed and the worktree is locked" $?
-  [[ ! -e "$mutex_dir" ]]
-  _check "${target}: reclaimed mutex directory is gone afterward" $?
+  if [[ -e "${lock_file}.snapshot" ]]; then check_rc=0; else check_rc=1; fi
+  _check "${target}: dead-PID mutex is reclaimed and the worktree is locked" "$check_rc"
+  if [[ ! -e "$mutex_dir" ]]; then check_rc=0; else check_rc=1; fi
+  _check "${target}: reclaimed mutex directory is gone afterward" "$check_rc"
   grep -q "reclaiming stale worktree auto-lock mutex" "$lr_stderr"
   _check "${target}: stderr carries the reclaim note" $?
-  [[ $elapsed -le 3 ]]
-  _check "${target}: reclaim is prompt, not the timeout path (${elapsed}s)" $?
-  worktree_is_locked "$main" "$wt"; rc=$?; [[ $rc -ne 0 ]]
-  _check "${target}: worktree is unlocked once the run completes" $?
+  if [[ $elapsed -le 3 ]]; then check_rc=0; else check_rc=1; fi
+  _check "${target}: reclaim is prompt, not the timeout path (${elapsed}s)" "$check_rc"
+  worktree_is_locked "$main" "$wt"; rc=$?
+  if [[ $rc -ne 0 ]]; then check_rc=0; else check_rc=1; fi
+  _check "${target}: worktree is unlocked once the run completes" "$check_rc"
   rm -rf "$stub_dir" "$home" "$root" "$lr_stdout" "$lr_stderr"
 
   # --- Scenario B: an aged live-PID mutex is likewise reclaimed (guards PID
@@ -152,16 +153,17 @@ for target in "${targets[@]}"; do
   WT_SNAPSHOT_PATHS="$lock_file" launcher_run "$target" "$home" "$main" "" -W
   elapsed=$((SECONDS - start))
 
-  [[ -e "${lock_file}.snapshot" ]]
-  _check "${target}: aged live-PID mutex is reclaimed and the worktree is locked" $?
-  [[ ! -e "$mutex_dir" ]]
-  _check "${target}: reclaimed mutex directory is gone afterward (aged case)" $?
+  if [[ -e "${lock_file}.snapshot" ]]; then check_rc=0; else check_rc=1; fi
+  _check "${target}: aged live-PID mutex is reclaimed and the worktree is locked" "$check_rc"
+  if [[ ! -e "$mutex_dir" ]]; then check_rc=0; else check_rc=1; fi
+  _check "${target}: reclaimed mutex directory is gone afterward (aged case)" "$check_rc"
   grep -q "reclaiming stale worktree auto-lock mutex" "$lr_stderr"
   _check "${target}: stderr carries the reclaim note (aged case)" $?
-  [[ $elapsed -le 3 ]]
-  _check "${target}: aged reclaim is prompt, not the timeout path (${elapsed}s)" $?
-  worktree_is_locked "$main" "$wt"; rc=$?; [[ $rc -ne 0 ]]
-  _check "${target}: worktree is unlocked once the run completes (aged case)" $?
+  if [[ $elapsed -le 3 ]]; then check_rc=0; else check_rc=1; fi
+  _check "${target}: aged reclaim is prompt, not the timeout path (${elapsed}s)" "$check_rc"
+  worktree_is_locked "$main" "$wt"; rc=$?
+  if [[ $rc -ne 0 ]]; then check_rc=0; else check_rc=1; fi
+  _check "${target}: worktree is unlocked once the run completes (aged case)" "$check_rc"
   rm -rf "$stub_dir" "$home" "$root" "$lr_stdout" "$lr_stderr"
 
   # --- Scenario C: a live, fresh holder is not reclaimed -- the launcher

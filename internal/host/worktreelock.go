@@ -38,14 +38,14 @@ func acquireMutex(repoRoot string, stderr io.Writer) (m *mutex, ok bool) {
 			break
 		}
 		if waited >= mutexStaleGrace && mutexHolderIsStale(lockDir) {
-			fmt.Fprintln(stderr, "Note: reclaiming stale worktree auto-lock mutex from a defunct launcher")
+			_, _ = fmt.Fprintln(stderr, "Note: reclaiming stale worktree auto-lock mutex from a defunct launcher")
 			_ = os.Remove(filepath.Join(lockDir, "owner"))
 			_ = os.Remove(lockDir)
 			waited = 0
 			continue
 		}
 		if waited >= mutexMaxWaits {
-			fmt.Fprintln(stderr, "Warning: timed out waiting for worktree auto-lock mutex")
+			_, _ = fmt.Fprintln(stderr, "Warning: timed out waiting for worktree auto-lock mutex")
 			return nil, false
 		}
 		time.Sleep(mutexPollInterval)
@@ -55,7 +55,7 @@ func acquireMutex(repoRoot string, stderr io.Writer) (m *mutex, ok bool) {
 	// Record holder identity + time so a later run can detect a stale hold.
 	// Best-effort, matching bash's `|| true` on the write.
 	if f, err := os.Create(filepath.Join(lockDir, "owner")); err == nil {
-		fmt.Fprintf(f, "%d %d\n", os.Getpid(), time.Now().Unix())
+		_, _ = fmt.Fprintf(f, "%d %d\n", os.Getpid(), time.Now().Unix())
 		_ = f.Close()
 	}
 
@@ -260,15 +260,15 @@ func removeAutoLockOwner(repoRoot, wtPath, owner string) {
 func LockWorktrees(repo string, worktrees []string, owner string, stdout, stderr io.Writer) []string {
 	m, ok := acquireMutex(repo, stderr)
 	if !ok {
-		fmt.Fprintln(stderr, "Warning: proceeding to auto-lock without the serialization mutex;")
-		fmt.Fprintln(stderr, "         a concurrent launcher on this repo could race on lock bookkeeping.")
+		_, _ = fmt.Fprintln(stderr, "Warning: proceeding to auto-lock without the serialization mutex;")
+		_, _ = fmt.Fprintln(stderr, "         a concurrent launcher on this repo could race on lock bookkeeping.")
 	}
 
 	var locked []string
 	seen := make(map[string]bool, len(worktrees))
 	for _, wt := range worktrees {
 		if err := addAutoLockOwner(repo, wt, owner); err != nil {
-			fmt.Fprintf(stderr, "Warning: could not auto-lock %s; leaving it unchanged\n", wt)
+			_, _ = fmt.Fprintf(stderr, "Warning: could not auto-lock %s; leaving it unchanged\n", wt)
 			continue
 		}
 		if !seen[wt] {
@@ -279,7 +279,7 @@ func LockWorktrees(repo string, worktrees []string, owner string, stdout, stderr
 
 	m.release() // no-op when ok was false: m is nil
 
-	fmt.Fprintf(stdout, "Auto-locked %d worktree(s).\n", len(locked))
+	_, _ = fmt.Fprintf(stdout, "Auto-locked %d worktree(s).\n", len(locked))
 	return locked
 }
 
@@ -295,8 +295,8 @@ func ReleaseWorktreeLocks(repo string, worktrees []string, owner string, stderr 
 
 	m, ok := acquireMutex(repo, stderr)
 	if !ok {
-		fmt.Fprintln(stderr, "Warning: could not acquire worktree auto-lock mutex during cleanup;")
-		fmt.Fprintf(stderr, "         leaving auto-locks in place (release with 'git -C \"%s\" worktree unlock <path>').\n", repo)
+		_, _ = fmt.Fprintln(stderr, "Warning: could not acquire worktree auto-lock mutex during cleanup;")
+		_, _ = fmt.Fprintf(stderr, "         leaving auto-locks in place (release with 'git -C \"%s\" worktree unlock <path>').\n", repo)
 		return
 	}
 

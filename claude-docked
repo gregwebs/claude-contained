@@ -930,6 +930,9 @@ if [[ $zellij_mode -eq 1 && $attach_mode -eq 1 ]]; then
   fi
 
   build_zellij_attach_cmd "$attach_name"
+  # exec_env_args deliberately emits separate `-e KEY=VALUE` words for the
+  # runtime CLI; word splitting is the function's established contract.
+  # shellcheck disable=SC2046
   exec docker exec -it -u dev $(exec_env_args) "$attach_container" "${attach_cmd[@]}"
 fi
 
@@ -972,9 +975,15 @@ if [[ $attach_mode -eq 1 && $zellij_mode -eq 0 ]]; then
     attach_name="${containers[$((choice-1))]}"
     if [[ $shell_mode -eq 1 ]]; then
       build_attach_shell_cmd
+      # exec_env_args deliberately emits separate `-e KEY=VALUE` words for the
+      # runtime CLI; word splitting is the function's established contract.
+      # shellcheck disable=SC2046
       exec docker exec -it -u dev $(exec_env_args) "${user_env_args[@]+"${user_env_args[@]}"}" "$attach_name" "${attach_cmd[@]}"
     else
       build_attach_cmd
+      # exec_env_args deliberately emits separate `-e KEY=VALUE` words for the
+      # runtime CLI; word splitting is the function's established contract.
+      # shellcheck disable=SC2046
       exec docker exec -it -u dev $(exec_env_args) "${user_env_args[@]+"${user_env_args[@]}"}" "$attach_name" "${attach_cmd[@]}"
     fi
   else
@@ -992,9 +1001,15 @@ if [[ $attach_mode -eq 1 && $zellij_mode -eq 0 ]]; then
     else
       if [[ $shell_mode -eq 1 ]]; then
         build_attach_shell_cmd
+        # exec_env_args deliberately emits separate `-e KEY=VALUE` words for the
+        # runtime CLI; word splitting is the function's established contract.
+        # shellcheck disable=SC2046
         exec docker exec -it -u dev $(exec_env_args) "${user_env_args[@]+"${user_env_args[@]}"}" "$attach_name" "${attach_cmd[@]}"
       else
         build_attach_cmd
+        # exec_env_args deliberately emits separate `-e KEY=VALUE` words for the
+        # runtime CLI; word splitting is the function's established contract.
+        # shellcheck disable=SC2046
         exec docker exec -it -u dev $(exec_env_args) "${user_env_args[@]+"${user_env_args[@]}"}" "$attach_name" "${attach_cmd[@]}"
       fi
     fi

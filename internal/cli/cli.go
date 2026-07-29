@@ -93,7 +93,7 @@ func Parse(args []string, progName string, shareHostClaudeEnv bool, stderr io.Wr
 			if what == "" {
 				what = "a value"
 			}
-			fmt.Fprintf(stderr, "error: %s requires %s\n", flag, what)
+			_, _ = fmt.Fprintf(stderr, "error: %s requires %s\n", flag, what)
 			return exitWith(ExitUsage)
 		}
 		return nil
@@ -102,7 +102,7 @@ func Parse(args []string, progName string, shareHostClaudeEnv bool, stderr io.Wr
 	// requireInline covers the `--flag=` forms that carry their own empty check.
 	requireInline := func(flag, value, what string) error {
 		if value == "" {
-			fmt.Fprintf(stderr, "error: %s requires %s\n", flag, what)
+			_, _ = fmt.Fprintf(stderr, "error: %s requires %s\n", flag, what)
 			return exitWith(ExitUsage)
 		}
 		return nil
@@ -295,7 +295,7 @@ func Parse(args []string, progName string, shareHostClaudeEnv bool, stderr io.Wr
 			// Force flag only: --session NAME carries the name.
 			cfg.ZellijNewSession = true
 		case strings.HasPrefix(arg, "--new-session="):
-			fmt.Fprintln(stderr, "error: --new-session no longer takes a name; use --session=NAME")
+			_, _ = fmt.Fprintln(stderr, "error: --new-session no longer takes a name; use --session=NAME")
 			return cfg, exitWith(ExitUsage)
 
 		case arg == "-a" || arg == "--attach":
@@ -308,15 +308,15 @@ func Parse(args []string, progName string, shareHostClaudeEnv bool, stderr io.Wr
 			}
 
 		case strings.HasPrefix(arg, "-"):
-			fmt.Fprintf(stderr, "error: unknown flag: %s\n", arg)
-			fmt.Fprintf(stderr, "       run '%s --help' for the supported flags\n", progName)
+			_, _ = fmt.Fprintf(stderr, "error: unknown flag: %s\n", arg)
+			_, _ = fmt.Fprintf(stderr, "       run '%s --help' for the supported flags\n", progName)
 			return cfg, exitWith(ExitUsage)
 
 		default:
-			fmt.Fprintf(stderr, "error: positional arguments are no longer accepted: %s\n", arg)
-			fmt.Fprintf(stderr, "       use -C/--dir for the project directory:  %s -C %s\n", progName, arg)
-			fmt.Fprintf(stderr, "       use -m/--mount for extra directories:    %s -m %s\n", progName, arg)
-			fmt.Fprintf(stderr, "       (bare '%s' uses the current directory)\n", progName)
+			_, _ = fmt.Fprintf(stderr, "error: positional arguments are no longer accepted: %s\n", arg)
+			_, _ = fmt.Fprintf(stderr, "       use -C/--dir for the project directory:  %s -C %s\n", progName, arg)
+			_, _ = fmt.Fprintf(stderr, "       use -m/--mount for extra directories:    %s -m %s\n", progName, arg)
+			_, _ = fmt.Fprintf(stderr, "       (bare '%s' uses the current directory)\n", progName)
 			return cfg, exitWith(ExitUsage)
 		}
 	}
@@ -332,26 +332,26 @@ func Parse(args []string, progName string, shareHostClaudeEnv bool, stderr io.Wr
 // rather than at use.
 func validate(cfg *Config, stderr io.Writer) error {
 	if cfg.ZellijNewSession && !cfg.ZellijMode {
-		fmt.Fprintln(stderr, "error: --new-session is valid only with --zellij")
+		_, _ = fmt.Fprintln(stderr, "error: --new-session is valid only with --zellij")
 		return exitWith(ExitUsage)
 	}
 	if cfg.ZellijSessionNameSet && !cfg.ZellijMode {
-		fmt.Fprintln(stderr, "error: --session is valid only with --zellij")
+		_, _ = fmt.Fprintln(stderr, "error: --session is valid only with --zellij")
 		return exitWith(ExitUsage)
 	}
 	if cfg.ZellijMode && cfg.AttachMode && cfg.ShellMode {
-		fmt.Fprintln(stderr, "error: --zellij --attach cannot be combined with --shell")
+		_, _ = fmt.Fprintln(stderr, "error: --zellij --attach cannot be combined with --shell")
 		return exitWith(ExitUsage)
 	}
 	// Under --zellij the target is a session, named only by --session.
 	// Accepting a name on -a as well would give one token two meanings again.
 	if cfg.ZellijMode && cfg.AttachName != "" {
-		fmt.Fprintln(stderr, "error: -a/--attach takes no name with --zellij; use --session=NAME")
+		_, _ = fmt.Fprintln(stderr, "error: -a/--attach takes no name with --zellij; use --session=NAME")
 		return exitWith(ExitUsage)
 	}
 	if cfg.AttachMode && cfg.CustomContainerName != "" {
-		fmt.Fprintln(stderr, "error: --name cannot be combined with -a/--attach")
-		fmt.Fprintln(stderr, "       --name names a new container; --attach reconnects to an existing one.")
+		_, _ = fmt.Fprintln(stderr, "error: --name cannot be combined with -a/--attach")
+		_, _ = fmt.Fprintln(stderr, "       --name names a new container; --attach reconnects to an existing one.")
 		return exitWith(ExitUsage)
 	}
 	if cfg.ZellijSessionNameSet {
@@ -365,10 +365,10 @@ func validate(cfg *Config, stderr io.Writer) error {
 		cfg.CustomContainerName = "aic-" + host.SanitizeFolderName(strings.TrimPrefix(cfg.CustomContainerName, "aic-"))
 	}
 	if cfg.ZellijMode && cfg.AttachMode && len(cfg.EnvFlagArgs) > 0 {
-		fmt.Fprintln(stderr, "error: --env cannot be combined with --zellij --attach")
-		fmt.Fprintln(stderr, "       Attaching starts a Zellij client; the pane keeps the environment it was")
-		fmt.Fprintln(stderr, "       created with, so the variable would silently never reach the tool.")
-		fmt.Fprintln(stderr, "       Set it when the session is created instead.")
+		_, _ = fmt.Fprintln(stderr, "error: --env cannot be combined with --zellij --attach")
+		_, _ = fmt.Fprintln(stderr, "       Attaching starts a Zellij client; the pane keeps the environment it was")
+		_, _ = fmt.Fprintln(stderr, "       created with, so the variable would silently never reach the tool.")
+		_, _ = fmt.Fprintln(stderr, "       Set it when the session is created instead.")
 		return exitWith(ExitUsage)
 	}
 	return nil

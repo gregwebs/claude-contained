@@ -284,9 +284,13 @@ unit_suite() {
       env_set "A=1" "--env" flag >/dev/null 2>&1 || exit 1
       env_set "B=2" "--env" flag >/dev/null 2>&1 || exit 1
       env_default "A=ignored" "file" file >/dev/null 2>&1 || exit 1
+      # Defined by the sourced launcher before this assertion.
+      # shellcheck disable=SC2154
       [[ "${#user_env[@]}" -eq 2 ]] || exit 1
       [[ "${user_env[0]}" == "A=1" ]] || exit 1
       build_user_env_args
+      # Defined by the sourced launcher before this assertion.
+      # shellcheck disable=SC2154
       [[ "${#user_env_args[@]}" -eq 4 && "${user_env_args[0]}" == "-e" ]] || exit 1
     )
     rc=$?

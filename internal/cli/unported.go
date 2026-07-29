@@ -12,12 +12,12 @@ var zellijSessionNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 // (claude-contained:375-388).
 func ValidateZellijSessionName(name string, stderr io.Writer) error {
 	if name == "" {
-		fmt.Fprintln(stderr, "error: Zellij session name cannot be empty")
+		_, _ = fmt.Fprintln(stderr, "error: Zellij session name cannot be empty")
 		return exitWith(ExitUsage)
 	}
 	if name[0] == '-' || !zellijSessionNamePattern.MatchString(name) {
-		fmt.Fprintf(stderr, "error: invalid Zellij session name: %s\n", name)
-		fmt.Fprintln(stderr, "       Use only letters, numbers, '_', '.', and '-'; do not start with '-'.")
+		_, _ = fmt.Fprintf(stderr, "error: invalid Zellij session name: %s\n", name)
+		_, _ = fmt.Fprintln(stderr, "       Use only letters, numbers, '_', '.', and '-'; do not start with '-'.")
 		return exitWith(ExitUsage)
 	}
 	return nil
@@ -63,6 +63,6 @@ func CheckUnportedLate(cfg Config, stderr io.Writer) error {
 }
 
 func unported(stderr io.Writer, what string) error {
-	fmt.Fprintf(stderr, unportedIntro, what)
+	_, _ = fmt.Fprintf(stderr, unportedIntro, what)
 	return exitWith(ExitUnported)
 }

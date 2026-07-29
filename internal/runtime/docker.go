@@ -130,7 +130,7 @@ func (d *Docker) EnsureUp(ctx context.Context, out io.Writer, confirm func(strin
 	// Unlike Apple Containers' single start command, Docker Desktop is an
 	// application: open it and wait for the daemon to answer.
 	_ = exec.CommandContext(ctx, "open", "-a", "Docker").Run()
-	fmt.Fprintln(out, "Waiting for Docker to start...")
+	_, _ = fmt.Fprintln(out, "Waiting for Docker to start...")
 	for {
 		if exec.CommandContext(ctx, d.Bin(), "info").Run() == nil {
 			return nil

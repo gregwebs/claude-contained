@@ -170,12 +170,13 @@ for target in "${targets[@]}"; do
     elapsed=$((SECONDS - start))
 
     rc="$(cat "$launcher_rc_file" 2>/dev/null || echo -1)"
-    [[ "$rc" == "$want_code" ]]
-    _check "${target} ${sig} (group): exit status is ${want_code} (got ${rc})" $?
-    [[ $elapsed -lt $((STUB_SLEEP - 1)) ]]
-    _check "${target} ${sig} (group): child died promptly, not after the full sleep (${elapsed}s)" $?
-    worktree_is_locked "$main" "$wt"; rc2=$?; [[ $rc2 -ne 0 ]]
-    _check "${target} ${sig} (group): worktree is unlocked once the launcher exits" $?
+    if [[ "$rc" == "$want_code" ]]; then check_rc=0; else check_rc=1; fi
+    _check "${target} ${sig} (group): exit status is ${want_code} (got ${rc})" "$check_rc"
+    if [[ $elapsed -lt $((STUB_SLEEP - 1)) ]]; then check_rc=0; else check_rc=1; fi
+    _check "${target} ${sig} (group): child died promptly, not after the full sleep (${elapsed}s)" "$check_rc"
+    worktree_is_locked "$main" "$wt"; rc2=$?
+    if [[ $rc2 -ne 0 ]]; then check_rc=0; else check_rc=1; fi
+    _check "${target} ${sig} (group): worktree is unlocked once the launcher exits" "$check_rc"
 
     rm -rf "$stub_dir" "$home" "$root" "$launcher_pid_file" "$launcher_rc_file"
     rm -f "$marker"

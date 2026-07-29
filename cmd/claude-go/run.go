@@ -42,7 +42,7 @@ func runWith(exec runner, argv []string, stdin io.Reader, stdout, stderr io.Writ
 		return exitCode(err)
 	}
 	if cfg.HelpRequested {
-		fmt.Fprint(stdout, prof.Help)
+		_, _ = fmt.Fprint(stdout, prof.Help)
 		return cli.ExitOK
 	}
 
@@ -52,7 +52,7 @@ func runWith(exec runner, argv []string, stdin io.Reader, stdout, stderr io.Writ
 	envStore := env.New()
 	for _, assignment := range cfg.EnvFlagArgs {
 		if err := envStore.Set(assignment, "--env", env.Flag); err != nil {
-			fmt.Fprintln(stderr, err.Error())
+			_, _ = fmt.Fprintln(stderr, err.Error())
 			return cli.ExitUsage
 		}
 	}
@@ -63,7 +63,7 @@ func runWith(exec runner, argv []string, stdin io.Reader, stdout, stderr io.Writ
 	shareSkillsDir := cfg.ShareSkillsDir
 	if shareSkillsDir != "" {
 		if info, err := os.Stat(shareSkillsDir); err != nil || !info.IsDir() {
-			fmt.Fprintf(stderr, "error: --share-skills directory does not exist: %s\n", shareSkillsDir)
+			_, _ = fmt.Fprintf(stderr, "error: --share-skills directory does not exist: %s\n", shareSkillsDir)
 			return cli.ExitUsage
 		}
 		shareSkillsDir = host.ResolvePath(shareSkillsDir)
@@ -76,7 +76,7 @@ func runWith(exec runner, argv []string, stdin io.Reader, stdout, stderr io.Writ
 	// matching bash. Declining is an abort, not a failure.
 	if err := rt.EnsureUp(ctx, stdout, prompter.confirm); err != nil {
 		if errors.Is(err, runtime.ErrAborted) {
-			fmt.Fprintln(stdout, "Aborted.")
+			_, _ = fmt.Fprintln(stdout, "Aborted.")
 			return cli.ExitFailure
 		}
 		return cli.ExitFailure
@@ -138,7 +138,7 @@ func runWith(exec runner, argv []string, stdin io.Reader, stdout, stderr io.Writ
 	facts, err := probeFacts(ctx, rt, h, cfg, mainHost, extraMounts, extraModes, shareSkillsDir, mountedRoots)
 	facts.Env = envStore.Pairs()
 	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
+		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
 		return cli.ExitFailure
 	}
 
@@ -319,11 +319,11 @@ func completeEnv(store *env.Store, h host.State, noProjectEnv bool, projectDir s
 				// literal source line number ("claude-contained: line 274:").
 				// Reproducing that would hardcode a line number in a file this
 				// rewrite exists to delete.
-				fmt.Fprintf(stderr, "error: cannot read %s: %v\n", env.FileName, err)
+				_, _ = fmt.Fprintf(stderr, "error: cannot read %s: %v\n", env.FileName, err)
 				return cli.ExitUsage
 			}
 			if err := store.LoadFile(content); err != nil {
-				fmt.Fprintln(stderr, err.Error())
+				_, _ = fmt.Fprintln(stderr, err.Error())
 				return cli.ExitUsage
 			}
 		}
@@ -333,20 +333,20 @@ func completeEnv(store *env.Store, h host.State, noProjectEnv bool, projectDir s
 	// than being emitted alongside it.
 	if h.Timezone != "" {
 		if err := store.Default("TZ="+h.Timezone, "host timezone", env.Builtin); err != nil {
-			fmt.Fprintln(stderr, err.Error())
+			_, _ = fmt.Fprintln(stderr, err.Error())
 			return cli.ExitUsage
 		}
 	}
 	if h.GHToken != "" {
 		if err := store.Default("GH_TOKEN="+h.GHToken, "AI_GH_TOKEN", env.Builtin); err != nil {
-			fmt.Fprintln(stderr, err.Error())
+			_, _ = fmt.Fprintln(stderr, err.Error())
 			return cli.ExitUsage
 		}
 	}
 
 	// Names only -- values routinely hold tokens and this lands in scrollback.
 	if summary := store.Summary(); summary != "" {
-		fmt.Fprintln(stderr, summary)
+		_, _ = fmt.Fprintln(stderr, summary)
 	}
 	return 0
 }
@@ -369,15 +369,15 @@ func buildAndApply(
 		n, applyErr := e.apply(program.Steps, appliedCount)
 		appliedCount = n
 		if applyErr != nil {
-			fmt.Fprintf(e.stderr, "error: %v\n", applyErr)
+			_, _ = fmt.Fprintf(e.stderr, "error: %v\n", applyErr)
 			return program, cli.ExitFailure
 		}
 
 		if err != nil {
 			var toolErr *plan.ToolError
 			if errors.As(err, &toolErr) {
-				fmt.Fprintf(e.stderr, "Unknown tool: %s\n", toolErr.Tool)
-				fmt.Fprintln(e.stderr, "Supported tools: claude, codex, copilot, gemini, vibe")
+				_, _ = fmt.Fprintf(e.stderr, "Unknown tool: %s\n", toolErr.Tool)
+				_, _ = fmt.Fprintln(e.stderr, "Supported tools: claude, codex, copilot, gemini, vibe")
 				return program, cli.ExitFailure
 			}
 			// --share-skills conflicts and a missing symlink target are both
@@ -388,11 +388,11 @@ func buildAndApply(
 			var shareErr *plan.ShareSkillsError
 			if errors.As(err, &shareErr) {
 				for _, line := range shareErr.Lines {
-					fmt.Fprintln(e.stderr, line)
+					_, _ = fmt.Fprintln(e.stderr, line)
 				}
 				return program, cli.ExitUsage
 			}
-			fmt.Fprintf(e.stderr, "error: %v\n", err)
+			_, _ = fmt.Fprintf(e.stderr, "error: %v\n", err)
 			return program, cli.ExitFailure
 		}
 
@@ -445,7 +445,7 @@ func (e *executor) apply(steps []plan.Step, from int) (int, error) {
 			if s.Stderr {
 				w = e.stderr
 			}
-			fmt.Fprintln(w, s.Text)
+			_, _ = fmt.Fprintln(w, s.Text)
 		case plan.WorktreeAutoLock:
 			e.lockRepo = s.Repo
 			e.lockOwner = s.Owner
@@ -480,7 +480,7 @@ func splitMountMode(spec string, isProject, readonlyDefault bool, stderr io.Writ
 
 	if isProject {
 		if mode == "ro" {
-			fmt.Fprintln(stderr, "error: project directory cannot be read-only")
+			_, _ = fmt.Fprintln(stderr, "error: project directory cannot be read-only")
 			return "", "", &cli.ExitError{Code: cli.ExitUsage}
 		}
 		return path, "rw", nil
@@ -535,8 +535,8 @@ func checkForUpdates(argv0 string, stdout io.Writer) {
 		return
 	}
 	if local != upstream {
-		fmt.Fprintln(stdout, "")
-		fmt.Fprintf(stdout, "Update available for claude-contained! Run 'git -C %s pull' to update.\n", repoRoot)
+		_, _ = fmt.Fprintln(stdout, "")
+		_, _ = fmt.Fprintf(stdout, "Update available for claude-contained! Run 'git -C %s pull' to update.\n", repoRoot)
 	}
 }
 
@@ -591,7 +591,7 @@ func newPrompter(stdin io.Reader, stderr io.Writer) *prompter {
 // installed that early either), so that read is a plain blocking one.
 func (p *prompter) ask(text string, def bool, ints *interrupts) (bool, bool) {
 	if p.isTTY {
-		fmt.Fprint(p.out, text)
+		_, _ = fmt.Fprint(p.out, text)
 	}
 
 	if ints == nil {

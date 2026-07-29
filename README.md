@@ -160,6 +160,60 @@ claude-contained -p 8080:8080                       # Expose port 8080
 claude-contained -H 3845                            # Forward host:3845 to container
 ```
 
+## Development quality checks
+
+The local quality gate requires ShellCheck `0.11.0` and golangci-lint `2.12.2`.
+Install ShellCheck from the versioned upstream release artifact. Install golangci-lint
+with:
+
+```bash
+go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+```
+
+Package-manager installations are fine only when their reported versions match exactly.
+Verify the tools and prerequisites with:
+
+```bash
+shellcheck --version
+golangci-lint version
+make check-tools
+```
+
+Run the fast aggregate gate with:
+
+```bash
+make quality
+```
+
+Its individual non-mutating checks are:
+
+```bash
+make fmt-check
+make vet
+make test
+make lint-go
+make lint-shell
+```
+
+The existing formatter rewrites Go files and remains separate from the gate:
+
+```bash
+make fmt
+```
+
+The slower runtime suites are deliberately excluded from the fast static/unit baseline:
+
+```bash
+make difftest
+for test in tests/*.test.sh; do "$test"; done
+```
+
+They exercise runtime behavior and remain available as separate checks.
+
+GitHub Actions runs the same `make quality` contract for every pull request and
+for pushes to `main`. After the workflow has run once, repository administrators
+can require its stable `quality` status check in branch protection.
+
 ## Rebuilding the Image
 
 Use the launcher when you want the image refreshed before starting a new session:
