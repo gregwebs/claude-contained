@@ -36,15 +36,23 @@ func ValidateZellijSessionName(name string, stderr io.Writer) error {
 // diverge silently instead of failing loudly.
 
 // CheckUnportedEarly refuses the paths bash takes *before* it resolves the
-// project directory: `-R/--rebuild` rebuilds and exits at claude-contained:890,
-// and the attach paths exec at :945-:1010. Neither ever reads the project env
-// file, so refusing here cannot hide an error bash would have reported.
+// project directory: `-R/--rebuild` rebuilds and exits at claude-contained:890.
+// Plain `-a/--attach` is ported (ticket 07) and is dispatched here, not
+// refused; only `--zellij --attach` still execs the unported Zellij session
+// picker (claude-contained:896-950) and is refused. Neither guard here ever
+// reads the project env file, so refusing cannot hide an error bash would
+// have reported.
 func CheckUnportedEarly(cfg Config, stderr io.Writer) error {
 	switch {
-	case cfg.AttachMode:
-		return unported(stderr, "-a/--attach")
 	case cfg.RebuildMode != "none":
 		return unported(stderr, "-R/--rebuild")
+	case cfg.ZellijMode && cfg.AttachMode:
+		// Ticket 08. Plain attach is ported; the Zellij session picker and
+		// zellij-attach command are not, and bash execs them here
+		// (claude-contained:896-950) -- before the project env file -- so the
+		// refusal has to stay at this point, not fall through to
+		// CheckUnportedLate.
+		return unported(stderr, "--zellij --attach")
 	}
 	return nil
 }

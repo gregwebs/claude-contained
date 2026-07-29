@@ -72,6 +72,39 @@ func TestMountRenderingIsShared(t *testing.T) {
 	}
 }
 
+// Exec rendering is shared too: both runtimes emit `-it -u dev -e K=V` in the
+// same order, differing only in the binary.
+func TestExecRenderingIsShared(t *testing.T) {
+	spec := ExecSpec{
+		Container: "aic-alpha",
+		User:      "dev",
+		TTY:       true,
+		Env: []EnvArg{
+			{Key: "HOME", Value: "/h"},
+			{Key: "FOO", Value: "bar"},
+		},
+		Command: []string{"srt-run", "/opt/claude/claude"},
+	}
+
+	apple := NewApple().RenderExec(spec)
+	docker := NewDocker().RenderExec(spec)
+
+	want := []string{
+		"exec", "-it", "-u", "dev",
+		"-e", "HOME=/h", "-e", "FOO=bar",
+		"aic-alpha", "srt-run", "/opt/claude/claude",
+	}
+	if !reflect.DeepEqual(apple[1:], want) {
+		t.Errorf("apple rendered %#v, want %#v", apple[1:], want)
+	}
+	if !reflect.DeepEqual(docker[1:], want) {
+		t.Errorf("docker rendered %#v, want %#v", docker[1:], want)
+	}
+	if apple[0] != "container" || docker[0] != "docker" {
+		t.Errorf("wrong binaries: %q / %q", apple[0], docker[0])
+	}
+}
+
 // The genuine divergences: Apple has a dedicated SSH flag and no labels, while
 // Docker records labels and needs a socket bind.
 func TestRuntimeSpecificRendering(t *testing.T) {

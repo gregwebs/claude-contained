@@ -88,6 +88,16 @@ func runWith(exec runner, argv []string, stdin io.Reader, stdout, stderr io.Writ
 		return exitCode(err)
 	}
 
+	// Attach reconnects to a running container and *replaces* this process,
+	// exactly where bash execs (claude-contained:952-1030). It sits here, not
+	// lower, because everything below acquires something: the project
+	// directory, the placeholder sweep, the env file, the worktree lock and
+	// mutex, the signal handlers and the deferred cleanup. Attach must stay
+	// ahead of all of it.
+	if cfg.AttachMode {
+		return attachAndExec(ctx, rt, cfg, h, envStore.Pairs(), prompter, stdout, stderr)
+	}
+
 	projectDir := cfg.ProjectDir
 	if projectDir == "" {
 		projectDir = "."
@@ -635,6 +645,23 @@ func parseAnswer(line string, err error, def bool) (bool, bool) {
 		return def, true
 	}
 	return answer[0] == 'y' || answer[0] == 'Y', true
+}
+
+// askLine reads one raw line, for prompts that are not yes/no. Like ask, the
+// prompt goes to stderr and only when stdin is a terminal (bash prints a
+// `read -p` prompt only when input comes from a terminal). Any read error --
+// including EOF after a partial line -- is ok=false: bash's `read` returns
+// non-zero on EOF regardless of what it managed to read, and `set -e` ends the
+// script there without using the value.
+func (p *prompter) askLine(text string) (string, bool) {
+	if p.isTTY {
+		_, _ = fmt.Fprint(p.out, text)
+	}
+	line, err := p.reader.ReadString('\n')
+	if err != nil {
+		return "", false
+	}
+	return line, true
 }
 
 func (p *prompter) confirm(text string) bool {

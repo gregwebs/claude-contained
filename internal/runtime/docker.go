@@ -85,6 +85,9 @@ func (d *Docker) RenderExec(spec ExecSpec) []string {
 	if spec.User != "" {
 		argv = append(argv, "-u", spec.User)
 	}
+	for _, e := range spec.Env {
+		argv = append(argv, "-e", e.Key+"="+e.Value)
+	}
 	argv = append(argv, spec.Container)
 	return append(argv, spec.Command...)
 }

@@ -23,10 +23,18 @@ import (
 // list --quiet") succeed without a real Apple Containers install. The actual
 // container *run* never reaches this stub: the tests inject their own
 // `runner` in place of execRuntime.
+//
+// `list` echoes $STUB_LIST, one name per line, when set -- letting attach
+// tests report a running container. Unset (the common case), it stays silent,
+// so every pre-existing caller of this fixture is unaffected.
 func writeStubContainer(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	script := "#!/bin/sh\ncase \"$1\" in\n  system) exit 0 ;;\n  list) exit 0 ;;\n  *) exit 0 ;;\nesac\n"
+	script := "#!/bin/sh\ncase \"$1\" in\n" +
+		"  system) exit 0 ;;\n" +
+		"  list) [ -n \"$STUB_LIST\" ] && printf '%s\\n' \"$STUB_LIST\"; exit 0 ;;\n" +
+		"  *) exit 0 ;;\n" +
+		"esac\n"
 	if err := os.WriteFile(filepath.Join(dir, "container"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}

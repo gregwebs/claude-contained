@@ -77,7 +77,11 @@ type ExecSpec struct {
 	Container string
 	User      string
 	TTY       bool
-	Command   []string
+	// Env is the environment for the exec'd process, emitted as `-e K=V` in
+	// order. `exec` bypasses the entrypoint, so nothing else sets HOME/PATH
+	// for the attached process (claude-contained:175-178).
+	Env     []EnvArg
+	Command []string
 }
 
 // BuildSpec is the shape of an image build (ticket 10).
