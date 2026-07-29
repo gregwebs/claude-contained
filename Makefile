@@ -85,15 +85,17 @@ fmt:
 # SSH, the tool-process environment, --share-skills, the host mutations
 # (account-state relocation, the node_modules overlay, placeholder cleanup),
 # worktree auto-locking (including the interactive offer and the mutex),
-# and the error paths.
-# Cases 33-37 are excluded because they exercise --zellij, which still refuses
-# with exit 3 (ticket 08). 38-40 (plain attach) are ported and included. 41 and
-# 52-56 (worktree locking) are also ported and included.
+# the Zellij session store (launch gate, generated and explicit session names,
+# attach, the force flag), and the error paths.
+# The whole 30-39 range is ported and included, alongside 40 (plain attach),
+# 41 and 52-56 (worktree locking). Newly admitted by ticket 08: 33-37 (the
+# Zellij store) and 31 (Zellij session-name validation), which passed before
+# this ticket -- its refusal happens during parsing -- but sat outside the
+# bounded ranges.
 # Ranges are deliberately bounded rather than open-ended, so a corpus entry
 # added by a later ticket is not silently pulled in before its code exists.
 # Widen this list as each later ticket lands rather than editing the corpus.
-DIFF_CASES := --case '0*' --case '1*' --case '2*' --case '30-*' --case '32-*' \
-              --case '3[89]-*' --case '40-*' \
+DIFF_CASES := --case '0*' --case '1*' --case '2*' --case '3[0-9]-*' --case '40-*' \
               --case '41-*' --case '4[2-9]-*' --case '5[0-6]-*'
 
 difftest: build

@@ -18,6 +18,7 @@ import (
 	"claude-contained/internal/cli"
 	"claude-contained/internal/host"
 	"claude-contained/internal/runtime"
+	"claude-contained/internal/zellij"
 )
 
 // Image is the tag the launcher runs. It is the *product* name, identical for
@@ -102,6 +103,19 @@ func Build(cfg cli.Config, h host.State, f Facts, prof runtime.Profile, ans Answ
 		MkdirAll{paths.M2Dir},
 		MkdirAll{paths.VaadinDir},
 	)
+
+	// The Zellij session store persists across container lifetimes; the runtime
+	// socket tree does not, and is pinned inside the container by zellij-run's
+	// XDG_RUNTIME_DIR (image/zellij-run.sh:61,79). Creating these on the host is
+	// what makes a session survive its container (claude-contained:1522-1524).
+	if f.ZellijSession != "" {
+		zellijRoot := filepath.Join(paths.ClaudeContained, "zellij")
+		p.Steps = append(p.Steps,
+			MkdirAll{filepath.Join(zellijRoot, "data")},
+			MkdirAll{filepath.Join(zellijRoot, "cache")},
+		)
+	}
+
 	if !cfg.ShareHostClaude {
 		for _, resource := range claudeExtensionResources {
 			p.Steps = append(p.Steps,
@@ -233,6 +247,20 @@ func Build(cfg cli.Config, h host.State, f Facts, prof runtime.Profile, ans Answ
 	if len(cfg.SrtAllowHosts) > 0 {
 		add(runtime.EnvArg{Key: "SRT_ALLOW_HOSTS", Value: strings.Join(cfg.SrtAllowHosts, ",")})
 	}
+	// Both markers, always together: image/srt-settings.sh:96,155 and
+	// image/entrypoint.sh:105 each gate on marker==1 AND a non-empty session, so
+	// emitting one without the other yields a sandbox policy that blocks Zellij's
+	// own socket. The labels are Docker-only (Apple Containers drops LabelArg)
+	// and are deliberately never read back: discovery uses the environment,
+	// which both runtimes expose (ADR-0002).
+	if f.ZellijSession != "" {
+		add(
+			runtime.EnvArg{Key: zellij.MarkerEnv, Value: "1"},
+			runtime.EnvArg{Key: zellij.SessionEnv, Value: f.ZellijSession},
+			runtime.LabelArg{Key: zellij.LabelMarker, Value: "1"},
+			runtime.LabelArg{Key: zellij.LabelSession, Value: f.ZellijSession},
+		)
+	}
 	if cfg.SSHMode {
 		add(runtime.SSHArg{})
 	}
@@ -313,7 +341,17 @@ func Build(cfg cli.Config, h host.State, f Facts, prof runtime.Profile, ans Answ
 
 	command := toolArgv
 	if cfg.ShellMode {
-		command = []string{shellPath}
+		// Under Zellij the debug shell is plain bash: shell-run exists to give
+		// bash a controlling terminal after the sandbox/runtime handoff, which
+		// Zellij's own pane already provides (claude-contained:1957-1961).
+		if f.ZellijSession != "" {
+			command = []string{zellij.ShellCommand}
+		} else {
+			command = []string{shellPath}
+		}
+	}
+	if f.ZellijSession != "" {
+		command = zellij.RunCommand(f.ZellijSession, prof.Name, command)
 	}
 
 	p.Run = &runtime.RunSpec{Args: args, Image: Image, Command: command}

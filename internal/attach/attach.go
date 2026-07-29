@@ -65,7 +65,7 @@ type Decision struct {
 // Resolve implements the plain attach block (claude-contained:952-1030): by
 // name, or interactively when no name is given.
 func Resolve(req Request) Decision {
-	containers := filterRunning(req.Running)
+	containers := FilterRunning(req.Running)
 
 	if req.Name == "" {
 		name, code, ok := selectFrom(req, containers)
@@ -81,15 +81,15 @@ func Resolve(req Request) Decision {
 		// so a typo started a second container instead of reporting the
 		// mistake (claude-contained:1008-1013).
 		_, _ = fmt.Fprintf(req.Stderr, "error: no running container named %s\n", name)
-		_, _ = fmt.Fprintf(req.Stderr, "       use --name %s to create a new one\n", displayName(name))
+		_, _ = fmt.Fprintf(req.Stderr, "       use --name %s to create a new one\n", DisplayName(name))
 		return Decision{Code: 1}
 	}
 	return Decision{Spec: buildSpec(req, name)}
 }
 
-// filterRunning keeps only conventionally-prefixed, non-empty names
+// FilterRunning keeps only conventionally-prefixed, non-empty names
 // (claude-contained:957-959).
-func filterRunning(names []string) []string {
+func FilterRunning(names []string) []string {
 	var out []string
 	for _, n := range names {
 		if n == "" {
@@ -111,9 +111,9 @@ func normalizeName(name string) string {
 	return Prefix + name
 }
 
-// displayName strips Prefix once, for the picker and error text
+// DisplayName strips Prefix once, for the picker and error text
 // (claude-contained:967, :1012).
-func displayName(name string) string {
+func DisplayName(name string) string {
 	return strings.TrimPrefix(name, Prefix)
 }
 
@@ -136,7 +136,7 @@ func selectFrom(req Request, containers []string) (name string, code int, ok boo
 
 	_, _ = fmt.Fprintln(req.Stdout, "Running containers:")
 	for i, c := range containers {
-		_, _ = fmt.Fprintf(req.Stdout, "  %d) %s\n", i+1, displayName(c))
+		_, _ = fmt.Fprintf(req.Stdout, "  %d) %s\n", i+1, DisplayName(c))
 	}
 	_, _ = fmt.Fprintln(req.Stdout, "")
 
@@ -149,7 +149,7 @@ func selectFrom(req Request, containers []string) (name string, code int, ok boo
 		return "", 1, false
 	}
 
-	idx, quit, valid := parseSelection(line, len(containers))
+	idx, quit, valid := ParseSelection(line, len(containers))
 	if quit {
 		return "", 0, false
 	}
@@ -160,11 +160,11 @@ func selectFrom(req Request, containers []string) (name string, code int, ok boo
 	return containers[idx-1], 0, true
 }
 
-// parseSelection mirrors bash's `read choice` handling: only leading/trailing
+// ParseSelection mirrors bash's `read choice` handling: only leading/trailing
 // IFS whitespace (space, tab, newline) is stripped, so a trailing '\r'
 // survives and makes the value invalid, matching bash's regex match against
 // the raw string.
-func parseSelection(line string, count int) (idx int, quit, valid bool) {
+func ParseSelection(line string, count int) (idx int, quit, valid bool) {
 	trimmed := strings.Trim(line, " \t\n")
 	if trimmed == "" || trimmed == "q" || trimmed == "Q" {
 		return 0, true, false
@@ -185,7 +185,7 @@ func buildSpec(req Request, name string) *runtime.ExecSpec {
 		Container: name,
 		User:      "dev",
 		TTY:       true,
-		Env:       execEnv(req.Home, req.Env),
+		Env:       ExecEnv(req.Home, req.Env),
 		Command:   Command(req),
 	}
 }
@@ -231,9 +231,9 @@ func toolPath(tool string) string {
 	return tool
 }
 
-// execEnv mirrors exec_env_args (claude-contained:175-178): HOME, JAVA_HOME,
+// ExecEnv mirrors exec_env_args (claude-contained:175-178): HOME, JAVA_HOME,
 // PATH, then the user's --env pairs in order.
-func execEnv(home string, pairs []env.Pair) []runtime.EnvArg {
+func ExecEnv(home string, pairs []env.Pair) []runtime.EnvArg {
 	out := []runtime.EnvArg{
 		{Key: "HOME", Value: home},
 		{Key: "JAVA_HOME", Value: javaHome},

@@ -27,12 +27,17 @@ import (
 // `list` echoes $STUB_LIST, one name per line, when set -- letting attach
 // tests report a running container. Unset (the common case), it stays silent,
 // so every pre-existing caller of this fixture is unaffected.
+//
+// `inspect` echoes $STUB_INSPECT verbatim -- the Apple JSON shape
+// runtime.Apple.InspectEnv parses -- letting Zellij driver tests present a
+// marked container. Unset, it stays silent, same as `list`.
 func writeStubContainer(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	script := "#!/bin/sh\ncase \"$1\" in\n" +
 		"  system) exit 0 ;;\n" +
 		"  list) [ -n \"$STUB_LIST\" ] && printf '%s\\n' \"$STUB_LIST\"; exit 0 ;;\n" +
+		"  inspect) [ -n \"$STUB_INSPECT\" ] && printf '%s' \"$STUB_INSPECT\"; exit 0 ;;\n" +
 		"  *) exit 0 ;;\n" +
 		"esac\n"
 	if err := os.WriteFile(filepath.Join(dir, "container"), []byte(script), 0o755); err != nil {

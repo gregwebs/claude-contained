@@ -23,49 +23,18 @@ func ValidateZellijSessionName(name string, stderr io.Writer) error {
 	return nil
 }
 
-// CheckUnported refuses the code paths this ticket has not ported yet.
-//
-// The guards are split into two phases because *where* bash leaves the script
-// decides which of its own errors can still fire first. Refusing too early
-// would mask an exit 2 that bash would have produced; refusing too late would
-// let an unported path run.
-//
-// Every guard here is keyed to a flag. Paths reachable with *no* flag need
-// their own guards at the point they would be taken -- see the worktree
-// auto-locking check in the driver -- because a flag-keyed check would let them
-// diverge silently instead of failing loudly.
-
 // CheckUnportedEarly refuses the paths bash takes *before* it resolves the
 // project directory: `-R/--rebuild` rebuilds and exits at claude-contained:890.
-// Plain `-a/--attach` is ported (ticket 07) and is dispatched here, not
-// refused; only `--zellij --attach` still execs the unported Zellij session
-// picker (claude-contained:896-950) and is refused. Neither guard here ever
-// reads the project env file, so refusing cannot hide an error bash would
-// have reported.
+// This guard never reads the project env file, so refusing cannot hide an
+// error bash would have reported.
+//
+// This guard is keyed to a flag. Paths reachable with *no* flag need their own
+// guards at the point they would be taken -- see the worktree auto-locking
+// check in the driver -- because a flag-keyed check would let them diverge
+// silently instead of failing loudly.
 func CheckUnportedEarly(cfg Config, stderr io.Writer) error {
-	switch {
-	case cfg.RebuildMode != "none":
+	if cfg.RebuildMode != "none" {
 		return unported(stderr, "-R/--rebuild")
-	case cfg.ZellijMode && cfg.AttachMode:
-		// Ticket 08. Plain attach is ported; the Zellij session picker and
-		// zellij-attach command are not, and bash execs them here
-		// (claude-contained:896-950) -- before the project env file -- so the
-		// refusal has to stay at this point, not fall through to
-		// CheckUnportedLate.
-		return unported(stderr, "--zellij --attach")
-	}
-	return nil
-}
-
-// CheckUnportedLate refuses the paths bash reaches only *after* the project env
-// file has had its say (claude-contained:1416). `--zellij` is handled at :1423
-// — downstream — so a project env file that bash rejects with exit 2 must
-// still do so here. Worktree auto-locking (`-W/--lock-worktrees`) is ported
-// (ticket 06) and no longer refused here.
-func CheckUnportedLate(cfg Config, stderr io.Writer) error {
-	switch {
-	case cfg.ZellijMode:
-		return unported(stderr, "--zellij")
 	}
 	return nil
 }

@@ -72,6 +72,40 @@ func TestMountRenderingIsShared(t *testing.T) {
 	}
 }
 
+// TestZellijLabelsAreDockerOnly mirrors TestMountRenderingIsShared, but for
+// the one arg that is *not* shared: the same RunSpec with a LabelArg renders
+// --label under Docker and nothing at all under Apple Containers, which has
+// no label concept. Discovery must never depend on this (ADR-0002) -- it is
+// emitted for external tooling only.
+func TestZellijLabelsAreDockerOnly(t *testing.T) {
+	spec := RunSpec{
+		Args: []Arg{
+			LabelArg{Key: "claude-contained.zellij", Value: "1"},
+			LabelArg{Key: "claude-contained.zellij.session", Value: "review"},
+		},
+		Image:   "img",
+		Command: []string{"sh"},
+	}
+
+	apple := NewApple().RenderRun(spec)
+	docker := NewDocker().RenderRun(spec)
+
+	wantApple := []string{"run", "--rm", "-it", "img", "sh"}
+	if !reflect.DeepEqual(apple[1:], wantApple) {
+		t.Errorf("apple rendered %#v, want %#v", apple[1:], wantApple)
+	}
+
+	wantDocker := []string{
+		"run", "--rm", "-it",
+		"--label", "claude-contained.zellij=1",
+		"--label", "claude-contained.zellij.session=review",
+		"img", "sh",
+	}
+	if !reflect.DeepEqual(docker[1:], wantDocker) {
+		t.Errorf("docker rendered %#v, want %#v", docker[1:], wantDocker)
+	}
+}
+
 // Exec rendering is shared too: both runtimes emit `-it -u dev -e K=V` in the
 // same order, differing only in the binary.
 func TestExecRenderingIsShared(t *testing.T) {

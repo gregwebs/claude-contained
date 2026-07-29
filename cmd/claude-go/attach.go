@@ -58,6 +58,13 @@ func attachAndExec(
 		Stderr:     stderr,
 		Prompt:     p.askLine,
 	})
+	return execDecision(rt, dec, stderr)
+}
+
+// execDecision carries out an attach decision: either it is a plain exit code,
+// or it replaces this process with the runtime's exec. Shared by the plain and
+// Zellij attach paths, which reach identical decisions by different routes.
+func execDecision(rt runtime.Runtime, dec attach.Decision, stderr io.Writer) int {
 	if dec.Spec == nil {
 		return dec.Code
 	}

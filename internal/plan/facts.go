@@ -84,6 +84,12 @@ type Facts struct {
 	// the other -- both must be probed up front.
 	WorktreeLocks             WorktreeLockCandidates
 	WorktreeLocksWithGitMount WorktreeLockCandidates
+
+	// ZellijSession is the resolved Zellij session name, or "" when --zellij was
+	// not given. Resolved (and validated, and gated against live sessions) by the
+	// driver before Build runs, because the gate needs the container runtime and
+	// Build must stay pure (claude-contained:1439-1471).
+	ZellijSession string
 }
 
 // WorktreeLockCandidates is the auto-lock offer's input for one of the two

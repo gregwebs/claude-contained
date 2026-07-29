@@ -8,6 +8,11 @@
 # never falls back to creation, and the top-level container command is the
 # repo-owned zellij-run wrapper.
 #
+# The launcher cases in suite() run against every target -- the bash oracles
+# and the Go binary alike, selected via CLAUDE_CONTAINED_TEST_TARGETS. The
+# xdg_suite/wrapper_suite blocks below are image-script tests and stay
+# independent of the target.
+#
 # Usage: tests/zellij-flags.test.sh
 set -uo pipefail
 
@@ -110,6 +115,17 @@ line_has() { # line_has <file> <exact-line>
   grep -Fqx -- "$2" "$1"
 }
 
+# The launcher's program name, as it appears in its own messages. Mirrors the
+# Go binary's runtime selection: a basename containing "dock" is the Docker
+# launcher. Lets the same assertions run against bin/claude-go{,-docked}.
+target_prog_name() { # target_prog_name <target>
+  case "$1" in *dock*) echo claude-docked ;; *) echo claude-contained ;; esac
+}
+
+target_is_docker() { # target_is_docker <target>
+  [[ "$1" == *dock* ]]
+}
+
 file_has() { # file_has <file> <fixed-string>
   grep -Fq -- "$2" "$1"
 }
@@ -142,9 +158,9 @@ suite() {
   _check "--session=NAME accepts valid names and emits env markers" $?
   line_has "$out" "zellij-run" && line_has "$out" "Good_1.2-3" && line_has "$out" "bash" && ! line_has "$out" "/usr/local/bin/shell-run"
   _check "--zellij --shell launches bash inside zellij-run" $?
-  file_has "$out" "missing Zellij support" && file_has "$out" "${target} --rebuild=full"
+  file_has "$out" "missing Zellij support" && file_has "$out" "$(target_prog_name "$target") --rebuild=full"
   _check "--zellij command includes stale-image rebuild hint" $?
-  if [[ "$target" == "claude-docked" ]]; then
+  if target_is_docker "$target"; then
     line_has "$out" "claude-contained.zellij=1" && line_has "$out" "claude-contained.zellij.session=Good_1.2-3"
     _check "Docker run emits Zellij labels" $?
   fi
@@ -190,6 +206,15 @@ suite() {
   rc=$?
   [[ $rc -eq 0 ]] && line_has "$out" "zellij-run"
   _check "bare --new-session allows another live Zellij container" $?
+
+  # --new-session forces past "another session is live", never past "this
+  # session is live": the target check (claude-contained:1457) runs first and
+  # does not consult the flag. Refusing here is what stops a second Zellij
+  # server from being started for a session that already has one.
+  ZELLIJ_STUB_MODE=one launcher_run "$target" "$out" "$err" --zellij --session=alpha --new-session -N -s -C "$proj"
+  rc=$?
+  [[ $rc -eq 1 ]] && file_has "$err" "already live" && file_missing "$out" "zellij-run"
+  _check "--new-session does not override a live target session" $?
 
   ZELLIJ_STUB_MODE=none launcher_run "$target" "$out" "$err" --zellij --attach --session alpha
   rc=$?

@@ -160,6 +160,18 @@ func TestResolvePathInAbsolutePathIgnoresBase(t *testing.T) {
 }
 
 func TestPathHash8(t *testing.T) {
+	// Golden value produced by running bash's path_hash_8 (claude-contained:358-368):
+	//   CLAUDE_CONTAINED_LIB_ONLY=1 bash -c 'set --; source ./claude-contained; path_hash_8 "/Users/me/code/My-App"'
+	// Zellij session names embed this (internal/zellij.SessionName), so a drift
+	// here orphans every session a user already has.
+	if got := PathHash8("/Users/me/code/My-App"); got != "a1e99d08" {
+		t.Errorf("PathHash8 = %q, want %q", got, "a1e99d08")
+	}
+	// bash uses `printf '%s'`, not `echo`, so no trailing newline is hashed.
+	if PathHash8("x") == PathHash8("x\n") {
+		t.Error("PathHash8 must not hash a trailing newline")
+	}
+
 	// sha256("/tmp/project") begins with these eight hex characters; the
 	// differential harness recomputes the same value to neutralize it, so the
 	// two have to agree exactly.

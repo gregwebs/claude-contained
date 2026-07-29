@@ -95,6 +95,12 @@ func runWith(exec runner, argv []string, stdin io.Reader, stdout, stderr io.Writ
 	// mutex, the signal handlers and the deferred cleanup. Attach must stay
 	// ahead of all of it.
 	if cfg.AttachMode {
+		// Bash execs the Zellij attach at claude-contained:896-950, before the
+		// plain attach block at :952. Both replace this process; neither ever
+		// creates a container.
+		if cfg.ZellijMode {
+			return zellijAttachAndExec(ctx, rt, cfg, h, prompter, stdout, stderr)
+		}
 		return attachAndExec(ctx, rt, cfg, h, envStore.Pairs(), prompter, stdout, stderr)
 	}
 
@@ -136,10 +142,17 @@ func runWith(exec runner, argv []string, stdin io.Reader, stdout, stderr io.Writ
 		return code
 	}
 
-	// Only now the flags bash handles downstream of the env file. Refusing these
-	// any earlier would mask an exit 2 that a bad env file would have produced.
-	if err := cli.CheckUnportedLate(cfg, stderr); err != nil {
-		return exitCode(err)
+	// The Zellij launch gate sits exactly where bash's does
+	// (claude-contained:1439-1471): after the project env file has had its say,
+	// so a rejected file still fails with exit 2 first, and before the second
+	// placeholder sweep, the worktree prompt and every mkdir, so a refusal
+	// leaves the host as it found it.
+	zellijSession := ""
+	if cfg.ZellijMode {
+		var code int
+		if zellijSession, code = zellijLaunchGate(ctx, rt, cfg, mainHost, stderr); code != 0 {
+			return code
+		}
 	}
 
 	mountedRoots := append([]string{mainHost}, extraMounts...)
@@ -147,6 +160,7 @@ func runWith(exec runner, argv []string, stdin io.Reader, stdout, stderr io.Writ
 
 	facts, err := probeFacts(ctx, rt, h, cfg, mainHost, extraMounts, extraModes, shareSkillsDir, mountedRoots)
 	facts.Env = envStore.Pairs()
+	facts.ZellijSession = zellijSession
 	if err != nil {
 		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
 		return cli.ExitFailure

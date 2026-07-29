@@ -10,6 +10,7 @@ import (
 	"claude-contained/internal/env"
 	"claude-contained/internal/host"
 	"claude-contained/internal/runtime"
+	"claude-contained/internal/zellij"
 )
 
 // testHost is a fully synthetic host. Nothing here is probed, which is the
@@ -539,6 +540,145 @@ func TestDeduplicateName(t *testing.T) {
 	}
 	if got := deduplicateName("aic-other-1423", running); got != "aic-other-1423" {
 		t.Errorf("deduplicateName = %q, want it unchanged", got)
+	}
+}
+
+// stepIndex returns the index of the first step deep-equal to want, or -1.
+func stepIndex(steps []Step, want Step) int {
+	for i, s := range steps {
+		if reflect.DeepEqual(s, want) {
+			return i
+		}
+	}
+	return -1
+}
+
+// argIndex returns the index of the first arg deep-equal to want, or -1.
+func argIndex(args []runtime.Arg, want runtime.Arg) int {
+	for i, a := range args {
+		if reflect.DeepEqual(a, want) {
+			return i
+		}
+	}
+	return -1
+}
+
+// TestZellijProgram covers ticket 08's plan.Build insertions (§5.4): the
+// session-store mkdirs, the env markers plus Docker labels, and the
+// container command wrapper -- all only when a session is set.
+func TestZellijProgram(t *testing.T) {
+	cfg := cli.Config{Tool: "claude"}
+	facts := Facts{ProjectDir: "/home/dev/work/app", ZellijSession: "review"}
+	prof := appleProfile()
+
+	program, err := Build(cfg, testHost(), facts, prof, Answers{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if program.Pending != nil {
+		t.Fatalf("unexpected prompt: %+v", program.Pending)
+	}
+	if program.Run == nil {
+		t.Fatal("Run is nil")
+	}
+
+	// (a) the mkdirs, positioned after VaadinDir and before the
+	// extension-resource mkdirs.
+	vaadinIdx := stepIndex(program.Steps, MkdirAll{"/home/dev/.vaadin"})
+	dataIdx := stepIndex(program.Steps, MkdirAll{"/home/dev/.claude-contained/zellij/data"})
+	cacheIdx := stepIndex(program.Steps, MkdirAll{"/home/dev/.claude-contained/zellij/cache"})
+	extIdx := stepIndex(program.Steps, MkdirAll{"/home/dev/.claude/skills"})
+	if vaadinIdx < 0 || dataIdx < 0 || cacheIdx < 0 || extIdx < 0 {
+		t.Fatalf("missing steps: vaadin=%d data=%d cache=%d ext=%d", vaadinIdx, dataIdx, cacheIdx, extIdx)
+	}
+	if vaadinIdx >= dataIdx || dataIdx >= cacheIdx || cacheIdx >= extIdx {
+		t.Errorf("mkdir order wrong: vaadin=%d data=%d cache=%d ext=%d", vaadinIdx, dataIdx, cacheIdx, extIdx)
+	}
+
+	// (b) the env markers, in order, after SRT_ALLOW_HOSTS (there is none in
+	// this fixture, so just before SSHArg -- which is absent too, so before
+	// HostGatewayArg) and (c) the label pair.
+	markerIdx := argIndex(program.Run.Args, runtime.EnvArg{Key: zellij.MarkerEnv, Value: "1"})
+	sessionIdx := argIndex(program.Run.Args, runtime.EnvArg{Key: zellij.SessionEnv, Value: "review"})
+	gatewayIdx := argIndex(program.Run.Args, runtime.HostGatewayArg{})
+	if markerIdx < 0 || sessionIdx < 0 || gatewayIdx < 0 {
+		t.Fatalf("missing args: marker=%d session=%d gateway=%d", markerIdx, sessionIdx, gatewayIdx)
+	}
+	if markerIdx >= sessionIdx || sessionIdx >= gatewayIdx {
+		t.Errorf("env marker order wrong: marker=%d session=%d gateway=%d", markerIdx, sessionIdx, gatewayIdx)
+	}
+
+	labelMarkerIdx := argIndex(program.Run.Args, runtime.LabelArg{Key: zellij.LabelMarker, Value: "1"})
+	labelSessionIdx := argIndex(program.Run.Args, runtime.LabelArg{Key: zellij.LabelSession, Value: "review"})
+	if labelMarkerIdx < 0 || labelSessionIdx < 0 {
+		t.Fatalf("missing label args: marker=%d session=%d", labelMarkerIdx, labelSessionIdx)
+	}
+	if labelMarkerIdx != sessionIdx+1 || labelSessionIdx != labelMarkerIdx+1 {
+		t.Errorf("labels not immediately after env markers: marker=%d session=%d labelMarker=%d labelSession=%d",
+			markerIdx, sessionIdx, labelMarkerIdx, labelSessionIdx)
+	}
+
+	// (d) the container command wrapper.
+	want := zellij.RunCommand("review", prof.Name, []string{"claude"})
+	if !reflect.DeepEqual(program.Run.Command, want) {
+		t.Errorf("Command = %#v, want %#v", program.Run.Command, want)
+	}
+}
+
+// TestZellijShellIsBashNotShellRun pins risk 13: under Zellij, --shell is
+// plain bash, never /usr/local/bin/shell-run.
+func TestZellijShellIsBashNotShellRun(t *testing.T) {
+	cfg := cli.Config{Tool: "claude", ShellMode: true}
+	facts := Facts{ProjectDir: "/home/dev/work/app", ZellijSession: "review"}
+
+	program, err := Build(cfg, testHost(), facts, appleProfile(), Answers{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	want := zellij.RunCommand("review", "claude-contained", []string{"bash"})
+	if !reflect.DeepEqual(program.Run.Command, want) {
+		t.Errorf("Command = %#v, want %#v", program.Run.Command, want)
+	}
+	for _, tok := range program.Run.Command {
+		if strings.Contains(tok, "/usr/local/bin/shell-run") {
+			t.Errorf("Command contains shell-run: %#v", program.Run.Command)
+		}
+	}
+}
+
+// TestNoZellijArgsWithoutSession guards against a nil-vs-empty mix-up: an
+// unset ZellijSession must produce no marker env, no labels, no zellij
+// mkdirs, and an unwrapped Run.Command.
+func TestNoZellijArgsWithoutSession(t *testing.T) {
+	cfg := cli.Config{Tool: "claude"}
+	facts := Facts{ProjectDir: "/home/dev/work/app"}
+
+	program, err := Build(cfg, testHost(), facts, appleProfile(), Answers{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	if stepIndex(program.Steps, MkdirAll{"/home/dev/.claude-contained/zellij/data"}) >= 0 {
+		t.Error("zellij data mkdir present without a session")
+	}
+	if stepIndex(program.Steps, MkdirAll{"/home/dev/.claude-contained/zellij/cache"}) >= 0 {
+		t.Error("zellij cache mkdir present without a session")
+	}
+	if envValue(program.Run.Args, zellij.MarkerEnv) != "" {
+		t.Error("Zellij marker env present without a session")
+	}
+	if envValue(program.Run.Args, zellij.SessionEnv) != "" {
+		t.Error("Zellij session env present without a session")
+	}
+	for _, a := range program.Run.Args {
+		if _, ok := a.(runtime.LabelArg); ok {
+			t.Errorf("unexpected LabelArg without a session: %#v", a)
+		}
+	}
+	want := []string{"claude"}
+	if !reflect.DeepEqual(program.Run.Command, want) {
+		t.Errorf("Command = %#v, want %#v (unwrapped)", program.Run.Command, want)
 	}
 }
 
