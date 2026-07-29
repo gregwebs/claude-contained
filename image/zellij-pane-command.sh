@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Restore the tool environment before executing a generated Zellij pane command.
 set -euo pipefail
 
 restore_pre_zellij_var() {

@@ -1,83 +1,29 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for coding agents working in this repository.
 
-## Project Overview
+## Start Here
 
-Claude Code Contained is a bash-based containerization wrapper that runs AI coding assistants (Claude, Codex, Copilot, Gemini, Vibe) inside an Apple Containers sandbox with persistent state. It enables isolated, repeatable sessions on macOS with support for multi-project workflows and host service access.
+- Read [README.md](README.md) for the project overview and container design.
+- Read [USAGE.md](USAGE.md) for the public CLI and runtime behavior.
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) before changing code.
+- Read [CONTEXT.md](CONTEXT.md) and the relevant decisions under [`docs/adr/`](docs/adr/) before changing domain behavior or architecture.
 
-Run `claude-contained --help` (or `claude-docked --help`) for build/run commands and flags.
+For repository workflow conventions, see:
 
-## Agent skills
+- [Issue tracker](docs/agents/issue-tracker.md)
+- [Triage labels](docs/agents/triage-labels.md)
+- [Domain documentation](docs/agents/domain.md)
 
-### Issue tracker
+Issues and specs live under `.scratch/<feature-slug>/`.
 
-Issues and specs live as local markdown under `.scratch/<feature-slug>/`. See `docs/agents/issue-tracker.md`.
+## Critical Invariants
 
-### Triage labels
+- Keep `claude-contained` and `claude-docked` behavior and flags in sync; they remain the differential oracle for the Go launcher.
+- In the Go launcher, container-runtime-specific commands belong only in `internal/runtime`.
+- The Dockerfile must stay below Apple Containers' 16k file limit. Put scripts and long configuration in `image/` and copy them into the image.
+- Preserve the privilege drop and fail-closed sandbox setup. The sandbox runtime must not run as root or use a policy writable by the contained agent.
+- Preserve worktree-lock cleanup and signal behavior. Use `signal.Notify`, not `signal.Ignore`, in the Go launcher.
+- Every production shell script should state its purpose at the top of the file.
 
-Use the default five canonical triage labels. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-Single-context layout: read root `CONTEXT.md` and relevant ADRs under `docs/adr/`. See `docs/agents/domain.md`.
-
-## Architecture
-
-### Key Files
-
-- **claude-contained** - Main bash entry point for Apple Containers. Handles argument parsing, path resolution (with Python3/realpath/readlink fallbacks), and container execution with full path parity.
-
-- **claude-docked** - Docker equivalent of claude-contained. **Must be kept in sync with claude-contained** to maintain feature parity. Both scripts share the same flag interface and behavior.
-
-- **Dockerfile** - Builds on Node 24 (Debian Bookworm). Installs AI CLI tools (Claude Code, OpenAI Codex, GitHub Copilot, Google Gemini CLI, Mistral Vibe), Zellij, ripgrep, Python 3. Optionally installs JetBrains Runtime 25, HotswapAgent, jdtls, Maven, and JBang, gated behind the `INCLUDE_JAVA_LAYER` build arg. **Must stay under 16k** — see "Dockerfile size limit" below.
-
-- **image/** - Files copied into the image, kept out of the Dockerfile so it stays under Apple Containers' 16k file limit:
-  - `image/entrypoint.sh` - Configures `host.local` for host service access, matches host UID/GID, sets up path parity, protects `.git/config`, starts Xvfb, and drops to the `dev` user.
-  - `image/hotswap-agent.properties` - HotswapAgent global config (Java layer only).
-  - `image/chrome-wrapper.sh` - Redirects `/opt/google/chrome/chrome` to the installed Playwright Chromium.
-  - `image/claude-native-link.sh` - Creates `~/.local/bin/claude` through a native-shaped `~/.local/share/claude/versions/<version>` symlink when no host launcher exists.
-  - `image/srt-settings.sh` - Generates the per-run srt sandbox policy (see "Sandboxing" below).
-  - `image/srt-run.sh` - Installed as `/usr/local/bin/srt-run`; wraps a command in the sandbox for `container exec`, which bypasses the entrypoint.
-  - `image/shell-run.sh` - Installed as `/usr/local/bin/shell-run`; starts debug shells through `script(1)` when a TTY is present so bash gets a controlling terminal after the sandbox/runtime handoff.
-  - `image/zellij/config.kdl` - Minimal Zellij config for contained workspaces.
-  - `image/zellij-run.sh` - Installed as `/usr/local/bin/zellij-run`; starts/attaches a session and keeps the container alive while it remains live.
-  - `image/zellij-attach.sh` - Installed as `/usr/local/bin/zellij-attach`; reconnects to an already-live session from `container exec`/`docker exec`.
-  - `image/zellij-pane-command.sh` - Restores non-Zellij XDG env before execing the initial pane command.
-
-- **.mcp.json** - MCP server configuration, notably enabling Figma Desktop MCP via `host.local:3845`.
-
-### Container Design
-
-- **HOME parity**: Container HOME matches host HOME for consistent behavior
-- **UID/GID matching**: Container user matches host user IDs for proper file permissions
-- Host services accessible via `host.local` hostname (resolved from container gateway IP)
-
-### Notable Patterns
-
-- Path resolution prioritizes Python3 for reliability, with multiple fallbacks
-- Entrypoint dynamically adjusts UID/GID to match host user (handles conflicts)
-- **Container naming**: Both scripts use the `aic-` prefix for container names. Auto-generated names follow the pattern `aic-{folder}-{HHMM}` (e.g., `aic-my-app-1423`). If a container with that name already exists, a numeric suffix is appended (`aic-my-app-1423-2`, `-3`, etc.). Custom names via `-a` also use the `aic-` prefix.
-- **Script parity**: `claude-contained` and `claude-docked` should always be updated together when adding/changing flags or behavior to maintain feature parity across both container runtimes
-- **DNS**: Apple Containers points both the builder and the container at the vmnet gateway (`192.168.64.1`) for DNS, which is frequently unreachable — builds fail at `apt-get update`, containers can't resolve anything, while the host is fine. This is not network isolation (`container network inspect default` reports `"mode": "nat"`, so routing works). `claude-contained` defaults runtime containers to `--dns 1.1.1.1`; explicit `--dns IP` (repeatable, also `--dns=IP`) wins, `CLAUDE_DNS` (comma-separated) supplies a per-user list, and `CLAUDE_DNS=system`/`none` opts back into the runtime default. `claude-docked` keeps Docker's runtime resolver by default but honors the same `--dns` and `CLAUDE_DNS` override rules. Builds are separate — the builder VM keeps its own resolver config, set via `container builder start --dns IP`, so a build fix does not carry over to `run` and vice versa. Tests: `tests/dns-flags.test.sh`.
-- **Sandboxing (srt)**: The tool process is wrapped in [`@anthropic-ai/sandbox-runtime`](https://github.com/anthropic-experimental/sandbox-runtime) for deny-by-default egress. `image/entrypoint.sh` runs `srt-settings.sh` as root, then uses `set --` to prepend `srt --settings ... --` to `"$@"` so srt ends up *inside* the existing `gosu dev`, runs as the unprivileged user, and does not consume child flags such as Claude's `--debug` — it must never run as root. Policy generation happens at runtime, not build time, for two reasons: the mounted directories vary per invocation, and **on Linux srt matches paths literally (no glob support)**, so every writable path must be spelled out. Inputs are `HOST_HOME` (tool config dirs and the contained Claude profile are at fixed paths under it) and the existing `GIT_PROTECT_DIRS` (project dirs); the node_modules overlay needs no special handling because it lands inside a project dir. Shared skill mounts and their resolved symlink targets are kernel read-only bind mounts, so srt does not need to list them as writable. The output at `/run/srt-settings.json` is root-owned mode 444 — an allowlist the sandboxed agent can rewrite is not a control. Generation failure is **fail-closed**: the entrypoint exits rather than run unsandboxed. `--no-sandbox` (`SRT_DISABLE=1`) is the deliberate escape hatch and is independent of `-s/--shell`, so a sandboxed debug shell is still possible while tuning an allowlist. Because `container exec` does not run ENTRYPOINT, both attach builders (`build_attach_cmd`, `build_attach_shell_cmd`) prepend `srt-run`. On Linux, srt protects dangerous project dotfiles by mounting `/dev/null` over them; bubblewrap can leave zero-byte host placeholders behind, so both launchers remove untracked zero-byte protected files before startup and after exit. Per the project's threat model a host user invoking `container` directly is out of scope, and with `enableWeakerNestedSandbox` (required inside a container) srt is a guardrail rather than containment for hostile code — the VM is the real boundary. Tests: `tests/srt-flags.test.sh`, `tests/srt-settings.test.sh`, `tests/srt-wrapper.test.sh`, `tests/claude-profile-mounts.test.sh`, `tests/startup-diagnostics.test.sh`.
-- **Tool process env (`--env`)**: `-e/--env KEY=VALUE` (repeatable) passes env vars to the tool. It works without any image change because the entrypoint's final `exec gosu dev env JAVA_HOME=… "$@"` preserves the inherited environment and srt is transparent to env — the pre-existing `TZ`/`GH_TOKEN` args already relied on that. Values are also read from the **project env file** `<project dir>/.claude-contained/env` (`KEY=VALUE` lines, `#` comments, CRLF tolerated, one pair of surrounding quotes stripped). That file is **parsed literally and never `source`d**: the contained agent can write it — `image/srt-settings.sh` puts the project dir in `filesystem.allowWrite` — so sourcing it would hand an agent arbitrary code execution on the next launch. `--no-project-env` skips it. Precedence is flags > file > built-ins (`TZ`, `GH_TOKEN`), resolved by **deduplicating on the key in the launcher** and emitting each key exactly once, because duplicate `-e` args are not documented to resolve last-wins in either runtime; this is why the old `${HOST_TZ:+-e …}` lines are gone. Reserved keys are refused fail-closed in two tiers: *always* (`HOST_*`, `SRT_*`, `CLAUDE_CONTAINED_*` by prefix, plus `STAY_ROOT`, `SSH_AUTH_SOCK`, `GIT_PROTECT_DIRS`, `HOME`, `PATH`, `JAVA_HOME`) and *from the file only* (`LD_PRELOAD`, `LD_LIBRARY_PATH`, `NODE_OPTIONS`). The first tier is load-bearing: `STAY_ROOT=1` makes the entrypoint skip the `gosu dev` drop so srt would run as root, and `SSH_AUTH_SOCK` is copied straight into the policy's `allowUnixSockets`. Validation runs right after `main_host` resolves — before the worktree-lock prompt and cleanup trap — so a rejected file never leaves locks to unwind. Loaded keys are echoed to stderr **by name only** (values hold tokens). `DISPLAY` is deliberately allowed: the entrypoint only defaults it when empty. `--env` is refused with `--zellij --attach`, where attaching starts a client and the pane keeps its creation env, so it would be a silent no-op; plain attach applies it through a separate quoted array rather than `exec_env_args()`, whose space-joined return value is deliberately word-split at the call sites. Tests: `tests/env-flags.test.sh`.
-- **Flag-only CLI**: there are no positional arguments. The project directory comes from `-C/--dir` (default: cwd) and extra mounts from repeatable `-m/--mount DIR[:ro|:rw]`; everything after the first `--` goes to the tool verbatim, including a second `--`. Positionals and unknown flags are hard errors — the old `*) break` arm silently turned both into `main_dir`. This removed the optional-value heuristics on `-a`, `-R` and `--new-session`, and split `-a`'s three former meanings into `-a/--attach` (attach only, errors on a miss), `--name NAME` (name a new container) and `--session NAME` (name a Zellij session; `--new-session` is now a valueless force flag). Value-taking flags go through `require_value`, which also fixes the `unbound variable` crash under `set -u` when such a flag came last. Done in bash deliberately before the planned Go port, so the port translates behavior rather than reimplementing disambiguation. See `docs/adr/0003-flag-only-cli.md`. Tests: `tests/arg-parsing.test.sh`.
-- **Zellij session store**: `--zellij` makes `/usr/local/bin/zellij-run` the top-level container command and passes the normal tool or shell command as the initial pane. The launchers mark these containers with `CLAUDE_CONTAINED_ZELLIJ=1` and `CLAUDE_CONTAINED_ZELLIJ_SESSION=<session>`; Docker also gets labels, but env inspection is the source of truth for Docker/Apple parity. Default sessions are `cc-{sanitized-basename}-{8-char-path-hash}`. Zellij cache/data persist under `~/.claude-contained/zellij/`, while `XDG_RUNTIME_DIR` pins Zellij's socket tree under `/tmp/claude-contained-zellij-runtime/` so runtime sockets stay container-local. New launches remove saved metadata for the target session before creating the generated layout, so stale panes cannot override the requested tool command. Marked Zellij runs set `allowAllUnixSockets` in the Linux srt policy because path-specific `allowUnixSockets` is macOS-only; the VM/container remains the outer boundary. Detach keeps the container alive because `zellij-run` waits until `zellij list-sessions --no-formatting` no longer reports the session as live; lines containing `(EXITED` are treated as not live. `--zellij --attach [NAME]` execs `/usr/local/bin/zellij-attach` through `srt-run` unless `--no-sandbox` is set, and never creates a replacement container. Tests: `tests/zellij-flags.test.sh`, `tests/srt-settings.test.sh`.
-- **Dockerfile size limit**: Apple Containers fails on files 16k or larger, so the Dockerfile must stay well under that. Anything long that would otherwise be embedded as a `RUN cat <<'EOF'` heredoc belongs in `image/` and gets pulled in with `COPY` instead. Do not inline scripts or config blobs back into the Dockerfile. This also improves layer caching: editing `image/entrypoint.sh` no longer invalidates the `COPY Dockerfile ... /tmp/` layer at the top of the build, which would otherwise force a full `apt-get` re-run on every Dockerfile edit.
-- **Worktree pruning protection**: When mounted Git metadata can see linked worktrees that are not mounted into the container, both scripts offer to auto-lock unlocked or already auto-locked linked worktrees while the container runs. Auto-lock reasons use `cc-autolocked-by:` owner tokens; non-matching user locks are never changed. Owner-list edits are serialized by a `mkdir`-based mutex at `.git/claude-contained-worktree-locks.lock` (portable to macOS, which lacks `flock`). The mutex records the holder PID + timestamp in an `owner` file and is **self-healing**: a directory left behind by a launcher that died mid-hold (crash, SIGKILL, kill during cleanup) is reclaimed by the next run via `kill -0` liveness plus an age fallback — otherwise one stale directory would permanently make every later run time out and silently skip locking. Acquisition is **fail-safe**: if the mutex genuinely can't be taken, the launch still applies the locks (never runs the container with worktrees unprotected); cleanup, by contrast, leaves locks in place if it can't take the mutex, since erring toward over-locking can never destroy data. `INT`/`TERM`/`HUP` are trapped (alongside `EXIT`) so cleanup runs on common kills; bash defers these traps until the foreground container run returns, so locks are never released while the container could still prune. Regression tests live in `tests/` (sourced with `CLAUDE_CONTAINED_LIB_ONLY=1`). The Go launcher ports this behavior in full (ticket 06): `internal/host/worktreelock.go` (the mutex and lock-file mechanics, unit-tested in `worktreelock_test.go`), the offer itself in `internal/plan` (a `Print` plus a `WorktreeAutoLock` step, unit-tested in `plan_test.go`), the driver's release ordering in `cmd/claude-go/run_test.go`, and the real-signal, real-child-process behavior in `tests/signal-handling.test.sh` (run against the bash oracle first, then the Go binary via `CLAUDE_CONTAINED_TEST_TARGETS`). `tests/worktree-mutex.test.sh` and `tests/worktree-offer.test.sh` are black-box suites (see below) that run unmodified against either.
-- **Go launcher**: an in-progress rewrite replacing both bash launchers with one binary. `cmd/claude-go` is the driver; `internal/cli` parses the whole flag surface, `internal/host` probes, `internal/plan` is a pure resumable `Build` (prompt answers are *inputs*, and the prompt/mutation interleaving is preserved rather than flattened), and `internal/runtime` is the container-runtime seam — **nothing above it may mention `container` or `docker`**. The runtime is picked by `argv[0]` basename (`dock` → Docker), not a flag, because a flag bash does not know would itself be a divergence in the unknown-flag path; hence `make build` emits `bin/claude-go` plus a `claude-go-docked` symlink, and never overwrites the tracked launchers, which are still the differential oracle. Unported paths exit **3**, unused by bash, so the harness reports them instead of passing them off as matching errors; the project env file needs an unkeyed guard because it is reached with no flag at all (worktree auto-locking is ported — ticket 06 — and no longer needs one). Two hazards: the folder sanitizer trims dashes *before* truncating (so truncation can leave a trailing dash), and path resolution must tolerate paths that do not exist — never `filepath.EvalSymlinks`. Signal handling is `signal.Notify`, **never** `signal.Ignore`: an ignored disposition is a kernel-level property of the process image that survives `execve` and is inherited by whatever the launcher execs next, so an ignored launcher would hand the container runtime child an ignored disposition too — the child would never die on the signal, the launcher's wait would never return, and its worktree locks would leak permanently. A caught disposition resets to default on exec, so the child dies normally; the handler itself does nothing, it only defers. See `docs/adr/0004-go-launcher-rewrite.md`. Tests: `go test ./...`, `tests/differential/harness.sh --compare REF:CANDIDATE`, and `CLAUDE_CONTAINED_TEST_TARGETS` to point the black-box suites at the binary.
-
-### Devcontainer Support
-
-See `devcontainer/CLAUDE.md` for devcontainer-specific design notes.
-
-## Known Caveats
-
-- Port forwarding not available for local MCPs (use `host.local` workaround)
-- Multiple simultaneous contained sessions share `~/.claude-contained/claude` state; contained and uncontained Claude also share account state and extension resources, so concurrent writes to those files may conflict.
-- `~/.claude.json` is relocated to `~/.claude-contained/.claude.json` (with symlink at original location) to work around Apple Containers' inability to bind-mount individual files. Deleting `~/.claude-contained/` will lose credentials.
-- Running `claude-contained` and regular `claude` simultaneously is not recommended when either may update shared account state or extension resources.
-- **node_modules overlay**: On macOS hosts, Node.js projects are prompted to create a `.claude-contained/node_modules-linux-<arch>/` directory that gets mounted over `node_modules` inside the container (since macOS native binaries don't work on Linux). You should manually add `.claude-contained/` to `.gitignore` if needed. Use `-N` to skip the prompt.
-- **Devcontainer limitation**: Don't run VS Code devcontainer and standalone scripts simultaneously against the same contained Claude profile.
-- **Claude Code clipboard / copy workaround**: The Dockerfile writes `/etc/claude-code/managed-settings.json` with `{ "tui": "default" }` to force Claude Code's classic inline renderer inside the container. The newer fullscreen ("no-flicker") renderer (default since ~2.1.168) routes copy-on-select only through OSC 52 and captures the mouse; in a containerized terminal there is no clipboard tool, OSC 52 is dropped (e.g. Terminal.app), and mouse capture breaks native shift/option-drag selection, so copying from Claude stops working (anthropics/claude-code#66192). Managed settings are container-scoped (highest precedence, Linux path) and never touch host `~/.claude/settings.json`. Remove this RUN once the upstream renderer regression is fixed.
+Run `make quality` for the standard contributor gate. See [CONTRIBUTING.md](CONTRIBUTING.md#quality-checks) for required tool versions and the broader test matrix.

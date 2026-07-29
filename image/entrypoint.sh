@@ -1,4 +1,5 @@
 #!/bin/bash
+# Prepare host parity, networking, and sandboxing before starting the tool as the dev user.
 set -e
 
 # JBR as primary Java (with HotswapAgent support)

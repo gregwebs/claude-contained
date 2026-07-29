@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Attach a runtime exec client to an already-live contained Zellij session.
 set -euo pipefail
 
 session="${1:-}"

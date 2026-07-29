@@ -29,13 +29,13 @@ check-tools: check-shellcheck-version check-golangci-lint-version
 check-shellcheck-version:
 	@command -v $(SHELLCHECK) >/dev/null 2>&1 || { \
 		echo "ShellCheck $(SHELLCHECK_REQUIRED_VERSION) is required; $(SHELLCHECK) was not found." >&2; \
-		echo "See README.md: Development quality checks." >&2; \
+		echo "See CONTRIBUTING.md: Development Setup." >&2; \
 		exit 1; \
 	}
 	@found_version="$$($(SHELLCHECK) --version 2>/dev/null | sed -n 's/^version: //p')"; \
 	if [ "$$found_version" != "$(SHELLCHECK_REQUIRED_VERSION)" ]; then \
 		echo "ShellCheck $(SHELLCHECK_REQUIRED_VERSION) is required; found $${found_version:-unknown}." >&2; \
-		echo "See README.md: Development quality checks." >&2; \
+		echo "See CONTRIBUTING.md: Development Setup." >&2; \
 		exit 1; \
 	fi
 
@@ -43,14 +43,14 @@ check-golangci-lint-version:
 	@command -v $(GOLANGCI_LINT) >/dev/null 2>&1 || { \
 		echo "golangci-lint $(GOLANGCI_LINT_REQUIRED_VERSION) is required; $(GOLANGCI_LINT) was not found." >&2; \
 		echo "Install with: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v$(GOLANGCI_LINT_REQUIRED_VERSION)" >&2; \
-		echo "See README.md: Development quality checks." >&2; \
+		echo "See CONTRIBUTING.md: Development Setup." >&2; \
 		exit 1; \
 	}
 	@found_version="$$($(GOLANGCI_LINT) version 2>/dev/null | sed -n 's/^golangci-lint has version v\{0,1\}\([^ ]*\).*/\1/p')"; \
 	if [ "$$found_version" != "$(GOLANGCI_LINT_REQUIRED_VERSION)" ]; then \
 		echo "golangci-lint $(GOLANGCI_LINT_REQUIRED_VERSION) is required; found $${found_version:-unknown}." >&2; \
 		echo "Install with: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v$(GOLANGCI_LINT_REQUIRED_VERSION)" >&2; \
-		echo "See README.md: Development quality checks." >&2; \
+		echo "See CONTRIBUTING.md: Development Setup." >&2; \
 		exit 1; \
 	fi
 

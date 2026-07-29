@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Launch an AI coding tool in Apple Containers with path-parity mounts and persistent state.
 set -euo pipefail
 
 show_help() {
