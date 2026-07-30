@@ -32,6 +32,9 @@ type State struct {
 	// ShareHostClaude reflects CLAUDE_CONTAINED_SHARE_HOST_CLAUDE=1
 	// (claude-contained:592).
 	ShareHostClaude bool
+	// ContainerRuntime is CLAUDE_CONTAINED_RUNTIME. Empty means unset; unlike
+	// CLAUDE_DNS there is no set-but-empty distinction to preserve.
+	ContainerRuntime string
 }
 
 // Probe captures host state. HOME comes from the environment rather than the
@@ -47,17 +50,18 @@ func Probe() State {
 	dnsEnv, dnsSet := os.LookupEnv("CLAUDE_DNS")
 
 	return State{
-		Home:            os.Getenv("HOME"),
-		UID:             strconv.Itoa(os.Getuid()),
-		GID:             strconv.Itoa(os.Getgid()),
-		Arch:            containerArch(),
-		Timezone:        Timezone(),
-		Now:             time.Now(),
-		GHToken:         os.Getenv("AI_GH_TOKEN"),
-		Memory:          memory,
-		DNSEnv:          dnsEnv,
-		DNSEnvSet:       dnsSet,
-		ShareHostClaude: os.Getenv("CLAUDE_CONTAINED_SHARE_HOST_CLAUDE") == "1",
+		Home:             os.Getenv("HOME"),
+		UID:              strconv.Itoa(os.Getuid()),
+		GID:              strconv.Itoa(os.Getgid()),
+		Arch:             containerArch(),
+		Timezone:         Timezone(),
+		Now:              time.Now(),
+		GHToken:          os.Getenv("AI_GH_TOKEN"),
+		Memory:           memory,
+		DNSEnv:           dnsEnv,
+		DNSEnvSet:        dnsSet,
+		ShareHostClaude:  os.Getenv("CLAUDE_CONTAINED_SHARE_HOST_CLAUDE") == "1",
+		ContainerRuntime: os.Getenv("CLAUDE_CONTAINED_RUNTIME"),
 	}
 }
 

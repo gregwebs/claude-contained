@@ -707,3 +707,103 @@ func asToolError(err error, target **ToolError) bool {
 	}
 	return ok
 }
+
+// The -H capability notice. It is a Print step rather than direct output because
+// Build is pure and resumable: its prefix is re-emitted on every prompt round, so
+// printing directly would repeat the notice once per round.
+func TestHostForwardNoticeIsEmittedForApple(t *testing.T) {
+	prof := appleProfile()
+	prof.HostForwardNotice = []string{"first", "second"}
+
+	cfg := cli.Config{Tool: "claude", ShellMode: true, HostForwards: []string{"3845"}}
+	program, err := Build(cfg, testHost(), Facts{ProjectDir: "/home/dev/work/app"}, prof, Answers{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	want := []Step{Print{Text: "first", Stderr: true}, Print{Text: "second", Stderr: true}}
+	if got := printSteps(program.Steps); !reflect.DeepEqual(got, want) {
+		t.Errorf("notice steps = %#v, want %#v", got, want)
+	}
+	// The env var is still emitted: this is a notice, not a refusal.
+	if !hasEnvArg(program.Run.Args, "HOST_FORWARD_PORTS", "3845") {
+		t.Error("HOST_FORWARD_PORTS was not emitted")
+	}
+}
+
+// Position inside stderr is load-bearing: bash prints the notice at :1799, before
+// the tool warning (:1882), the shared-skills lines (:1906) and the node_modules
+// notice (:1939). Any other position is a corpus diff for a case that combines
+// them.
+func TestHostForwardNoticePrecedesTheOtherNotices(t *testing.T) {
+	prof := appleProfile()
+	prof.HostForwardNotice = []string{"host-forward notice"}
+
+	// -t vibe -y produces the tool warning; ContainedNodeModules produces the
+	// node_modules notice once the project looks like a Node project.
+	cfg := cli.Config{Tool: "vibe", YoloMode: true, ShellMode: true, HostForwards: []string{"3845"}}
+	program, err := Build(cfg, testHost(), Facts{ProjectDir: "/home/dev/work/app"}, prof, Answers{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	prints := printSteps(program.Steps)
+	if len(prints) < 2 {
+		t.Fatalf("expected the notice and the tool warning, got %#v", prints)
+	}
+	if prints[0].(Print).Text != "host-forward notice" {
+		t.Errorf("the -H notice must come first, got %#v", prints)
+	}
+}
+
+func TestHostForwardNoticeAbsentForDocker(t *testing.T) {
+	// The Docker profile carries no notice, which is the whole capability
+	// difference: it reaches host services bound to 127.0.0.1.
+	prof := runtime.Profile{Name: "claude-docked"}
+
+	cfg := cli.Config{Tool: "claude", ShellMode: true, HostForwards: []string{"3845"}}
+	program, err := Build(cfg, testHost(), Facts{ProjectDir: "/home/dev/work/app"}, prof, Answers{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	if got := printSteps(program.Steps); len(got) != 0 {
+		t.Errorf("Docker should print nothing for -H, got %#v", got)
+	}
+	if !hasEnvArg(program.Run.Args, "HOST_FORWARD_PORTS", "3845") {
+		t.Error("HOST_FORWARD_PORTS was not emitted")
+	}
+}
+
+func TestNoHostForwardNoticeWithoutFlag(t *testing.T) {
+	prof := appleProfile()
+	prof.HostForwardNotice = []string{"should not appear"}
+
+	cfg := cli.Config{Tool: "claude", ShellMode: true}
+	program, err := Build(cfg, testHost(), Facts{ProjectDir: "/home/dev/work/app"}, prof, Answers{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if got := printSteps(program.Steps); len(got) != 0 {
+		t.Errorf("no -H means no notice, got %#v", got)
+	}
+}
+
+func printSteps(steps []Step) []Step {
+	var out []Step
+	for _, s := range steps {
+		if _, ok := s.(Print); ok {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+func hasEnvArg(args []runtime.Arg, key, value string) bool {
+	for _, a := range args {
+		if e, ok := a.(runtime.EnvArg); ok && e.Key == key && e.Value == value {
+			return true
+		}
+	}
+	return false
+}

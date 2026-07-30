@@ -3,24 +3,37 @@ package runtime
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
-	"runtime"
 	"time"
 )
 
+// dockerHelp is the bash `claude-docked --help` text plus the two
+// runtime-selection additions, which bash cannot have. See appleHelp.
+//
 //go:embed help_docked.txt
 var dockerHelp string
 
 // dockerMacSSHSocket is the bridged socket Docker Desktop exposes on macOS.
 const dockerMacSSHSocket = "/run/host-services/ssh-auth.sock"
 
-// Docker drives Docker via the `docker` CLI.
-type Docker struct{}
+// dockerPollInterval is how long EnsureUp waits between daemon probes while
+// Docker Desktop starts. A package variable only so a test can shrink it.
+var dockerPollInterval = time.Second
 
-func NewDocker() *Docker { return &Docker{} }
+// ErrNotRunning reports that the container runtime is down and this host cannot
+// be asked to start it. EnsureUp has already explained itself on stderr.
+var ErrNotRunning = errors.New("container runtime is not running")
+
+// Docker drives Docker via the `docker` CLI.
+type Docker struct{ platform Platform }
+
+// NewDocker takes the platform explicitly; see NewApple for why there is no
+// zero-argument form.
+func NewDocker(p Platform) *Docker { return &Docker{platform: p} }
 
 func (d *Docker) Profile() Profile {
 	return Profile{
@@ -30,6 +43,9 @@ func (d *Docker) Profile() Profile {
 		DefaultDNS:       nil,
 		NotRunningPrompt: "Docker is not running. Start Docker Desktop? [Y/n] ",
 		Help:             dockerHelp,
+		// No notice: Docker routes to host services bound to 127.0.0.1, so -H
+		// works for everything.
+		HostForwardNotice: nil,
 	}
 }
 
@@ -48,8 +64,9 @@ func (d *Docker) RenderRun(spec RunSpec) []string {
 			argv = append(argv, d.sshArgs()...)
 		case HostGatewayArg:
 			// macOS and Windows provide this built-in; only Linux needs the
-			// explicit mapping.
-			if runtime.GOOS == "linux" {
+			// explicit mapping. Exactly Linux, with no else -- an unrecognized
+			// platform gets no mapping, matching claude-docked:1828.
+			if d.platform == Linux {
 				argv = append(argv, "--add-host", "host.docker.internal:host-gateway")
 			}
 		case LabelArg:
@@ -62,10 +79,20 @@ func (d *Docker) RenderRun(spec RunSpec) []string {
 }
 
 // sshArgs covers all three configurations: Docker Desktop on macOS exposes a
-// bridged socket at a fixed path, while on Linux the real agent socket has to be
-// mounted through -- the one place a bind is not expressed as --mount.
+// bridged socket at a fixed path, while everywhere else the real agent socket has
+// to be mounted through -- the one place a bind is not expressed as --mount.
+//
+// The platform test is `== Darwin` *with* a catch-all else, where the
+// host-gateway test above is `== Linux` *without* one. The asymmetry is
+// claude-docked:1813-1825 versus :1828, and it decides what an unrecognized
+// platform does; tidying the two into one shape would change that silently.
+//
+// SSH_AUTH_SOCK is read here rather than captured into host.State because two of
+// the three configurations ignore it: hoisting it would push a Docker-on-Linux
+// detail above internal/runtime. bash reads it at the same point in the same
+// process, so there is no behavioral difference.
 func (d *Docker) sshArgs() []string {
-	if runtime.GOOS == "darwin" {
+	if d.platform == Darwin {
 		return []string{
 			"--mount", "type=bind,src=" + dockerMacSSHSocket + ",dst=/ssh-agent",
 			"-e", "SSH_AUTH_SOCK=/ssh-agent",
@@ -120,28 +147,52 @@ func (d *Docker) InspectEnv(ctx context.Context, name string) ([]string, error) 
 	if err != nil {
 		return nil, nil
 	}
-	return splitLines(string(out)), nil
+	// splitEnvLines, not splitLines: an environment value's surrounding
+	// whitespace is significant and the Apple path preserves it.
+	return splitEnvLines(string(out)), nil
 }
 
-func (d *Docker) EnsureUp(ctx context.Context, out io.Writer, confirm func(string) bool) error {
-	if exec.CommandContext(ctx, d.Bin(), "info").Run() == nil {
+func (d *Docker) EnsureUp(ctx context.Context, stdout, stderr io.Writer, confirm func(string) bool) error {
+	if d.daemonUp(ctx) {
 		return nil
+	}
+	if d.platform != Darwin {
+		// Off macOS the daemon is a service, not an application. Starting it is
+		// distro-specific and may or may not need root (`sudo systemctl start
+		// docker`, or `systemctl --user start docker-desktop` for Docker Desktop
+		// on Linux and rootless installs), so there is nothing this process can
+		// usefully offer to do -- and a [Y/n] whose "yes" branch cannot work is
+		// worse than a plain diagnosis.
+		//
+		// This deliberately diverges from claude-docked:869-872, which runs
+		// `open -a Docker` on a host with no `open` and then either dies with no
+		// message under `set -e` or polls forever. That is the bug this ticket
+		// exists to fix, and there is no oracle for the correct behavior.
+		_, _ = fmt.Fprintln(stderr, "error: Docker is not running.")
+		_, _ = fmt.Fprintln(stderr, "       Start the daemon and retry (for example: sudo systemctl start docker,")
+		_, _ = fmt.Fprintln(stderr, "       or systemctl --user start docker-desktop for Docker Desktop).")
+		return ErrNotRunning
 	}
 	if !confirm(d.Profile().NotRunningPrompt) {
 		return ErrAborted
 	}
 	// Unlike Apple Containers' single start command, Docker Desktop is an
-	// application: open it and wait for the daemon to answer.
+	// application: open it and wait for the daemon to answer. The wait is
+	// deliberately unbounded, matching claude-docked:872.
 	_ = exec.CommandContext(ctx, "open", "-a", "Docker").Run()
-	_, _ = fmt.Fprintln(out, "Waiting for Docker to start...")
+	_, _ = fmt.Fprintln(stdout, "Waiting for Docker to start...")
 	for {
-		if exec.CommandContext(ctx, d.Bin(), "info").Run() == nil {
+		if d.daemonUp(ctx) {
 			return nil
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(time.Second):
+		case <-time.After(dockerPollInterval):
 		}
 	}
+}
+
+func (d *Docker) daemonUp(ctx context.Context) bool {
+	return exec.CommandContext(ctx, d.Bin(), "info").Run() == nil
 }

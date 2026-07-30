@@ -59,6 +59,8 @@ Behavior:
     ~/.codex/skills/.system is mounted back read-only over DIR/.system so
     built-in skills remain visible.
   - SSH agent forwarding is disabled by default; use --ssh to enable (for git push).
+  - -H reaches host services listening on 0.0.0.0, but Apple Containers cannot
+    reach services bound only to 127.0.0.1; use the Docker runtime for those.
   - Apple Containers defaults the container's resolver to the vmnet gateway, which
     often cannot resolve. The launcher uses --dns 1.1.1.1 by default. Explicit
     --dns wins; set CLAUDE_DNS=system to use the runtime default, or
@@ -1799,6 +1801,13 @@ done
 if [[ ${#host_forwards[@]} -gt 0 ]]; then
   IFS=','; forwards_str="${host_forwards[*]}"; unset IFS
   container_argv+=( -e "HOST_FORWARD_PORTS=${forwards_str}" )
+  # Apple Containers routes the container through the vmnet gateway, which cannot
+  # reach a host service bound to 127.0.0.1 (apple/container#346). The forward
+  # still works for services listening on 0.0.0.0, so this is a notice, not a
+  # refusal. Kept byte-identical to the Go launcher's Apple profile
+  # (internal/runtime/apple.go) because the differential harness compares stderr.
+  echo "Warning: Apple Containers cannot reach host services bound only to 127.0.0.1." >&2
+  echo "         -H reaches host services listening on 0.0.0.0; use Docker for the rest." >&2
 fi
 
 # Override the container's DNS resolvers (see CLAUDE_DNS above)

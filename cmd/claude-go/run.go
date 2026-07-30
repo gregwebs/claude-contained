@@ -28,14 +28,28 @@ type runner func(ctx context.Context, argv []string, stdin io.Reader, stdout, st
 
 // run is the single point every exit path returns through.
 func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	return runWith(execRuntime, argv, stdin, stdout, stderr)
+	return runWith(execRuntime, runtime.HostPlatform(), argv, stdin, stdout, stderr)
 }
 
-func runWith(exec runner, argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	rt := runtime.Select(argv[0], "", "")
-	prof := rt.Profile()
-
+// plat is a parameter for the same reason exec is: it is the only way a test can
+// exercise the Docker-on-Linux and Docker-on-macOS configurations from either
+// host. Without it, every test here would silently change which runtime it
+// selects depending on the machine it runs on -- and CI is Linux while
+// development is macOS.
+func runWith(exec runner, plat runtime.Platform, argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
+	// Probe first: the selection reads CLAUDE_CONTAINED_RUNTIME out of host
+	// state, like every other environment variable the launcher honors. Probe
+	// itself is unobservable here -- it reads env, `uname -m` and /etc/localtime.
 	h := host.Probe()
+
+	sel := runtime.Selection{
+		Flag:     cli.ScanRuntime(argv[1:]),
+		Env:      h.ContainerRuntime,
+		Argv0:    argv[0],
+		Platform: plat,
+	}
+	rt := runtime.Select(sel)
+	prof := rt.Profile()
 
 	cfg, err := cli.Parse(argv[1:], prof.Name, h.ShareHostClaude, stderr)
 	if err != nil {
@@ -44,6 +58,17 @@ func runWith(exec runner, argv []string, stdin io.Reader, stdout, stderr io.Writ
 	if cfg.HelpRequested {
 		_, _ = fmt.Fprint(stdout, prof.Help)
 		return cli.ExitOK
+	}
+
+	// After --help, so that -h wins wherever it appears exactly as in bash, and
+	// before anything touches the host, so no container command can run under a
+	// runtime the user is about to be told is impossible. That ordering is also
+	// what lets Apple.EnsureUp assume a macOS host. The value comes from the real
+	// parse rather than the pre-scan, so a disagreement between the two could
+	// only mis-select, never mis-report.
+	sel.Flag = cfg.ContainerRuntime
+	if err := runtime.ValidateSelection(sel, stderr); err != nil {
+		return cli.ExitUsage
 	}
 
 	// The tool process environment. Command-line variables are validated here,
@@ -74,7 +99,7 @@ func runWith(exec runner, argv []string, stdin io.Reader, stdout, stderr io.Writ
 
 	// The runtime-liveness check comes before anything else touches the host,
 	// matching bash. Declining is an abort, not a failure.
-	if err := rt.EnsureUp(ctx, stdout, prompter.confirm); err != nil {
+	if err := rt.EnsureUp(ctx, stdout, stderr, prompter.confirm); err != nil {
 		if errors.Is(err, runtime.ErrAborted) {
 			_, _ = fmt.Fprintln(stdout, "Aborted.")
 			return cli.ExitFailure

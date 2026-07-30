@@ -2,43 +2,9 @@ package runtime
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
-
-// argv[0] is the selector precisely so that no flag the bash launchers do not
-// know has to enter the CLI surface.
-func TestSelectByArgv0(t *testing.T) {
-	cases := []struct {
-		argv0 string
-		want  string
-	}{
-		{"claude-go", "claude-contained"},
-		{"bin/claude-go", "claude-contained"},
-		{"/usr/local/bin/claude-contained", "claude-contained"},
-		{"claude-go-docked", "claude-docked"},
-		{"bin/claude-go-docked", "claude-docked"},
-		{"/opt/bin/claude-docked", "claude-docked"},
-	}
-
-	for _, tc := range cases {
-		if got := Select(tc.argv0, "", "").Profile().Name; got != tc.want {
-			t.Errorf("Select(%q) selected %q, want %q", tc.argv0, got, tc.want)
-		}
-	}
-}
-
-// Ticket 09 adds explicit selection; the precedence is already wired.
-func TestSelectOverridePrecedence(t *testing.T) {
-	if got := Select("claude-go", "docker", "").Profile().Name; got != "claude-docked" {
-		t.Errorf("env override ignored, got %q", got)
-	}
-	if got := Select("claude-go-docked", "", "apple").Profile().Name; got != "claude-contained" {
-		t.Errorf("flag override ignored, got %q", got)
-	}
-	if got := Select("claude-go", "apple", "docker").Profile().Name; got != "claude-docked" {
-		t.Errorf("flag should beat env, got %q", got)
-	}
-}
 
 // Mount syntax is deliberately *not* a divergence: both runtimes take the same
 // form, read-only marker included.
@@ -52,8 +18,8 @@ func TestMountRenderingIsShared(t *testing.T) {
 		Command: []string{"sh"},
 	}
 
-	apple := NewApple().RenderRun(spec)
-	docker := NewDocker().RenderRun(spec)
+	apple := NewApple(Darwin).RenderRun(spec)
+	docker := NewDocker(Darwin).RenderRun(spec)
 
 	want := []string{
 		"run", "--rm", "-it",
@@ -87,8 +53,8 @@ func TestZellijLabelsAreDockerOnly(t *testing.T) {
 		Command: []string{"sh"},
 	}
 
-	apple := NewApple().RenderRun(spec)
-	docker := NewDocker().RenderRun(spec)
+	apple := NewApple(Darwin).RenderRun(spec)
+	docker := NewDocker(Darwin).RenderRun(spec)
 
 	wantApple := []string{"run", "--rm", "-it", "img", "sh"}
 	if !reflect.DeepEqual(apple[1:], wantApple) {
@@ -120,8 +86,8 @@ func TestExecRenderingIsShared(t *testing.T) {
 		Command: []string{"srt-run", "/opt/claude/claude"},
 	}
 
-	apple := NewApple().RenderExec(spec)
-	docker := NewDocker().RenderExec(spec)
+	apple := NewApple(Darwin).RenderExec(spec)
+	docker := NewDocker(Darwin).RenderExec(spec)
 
 	want := []string{
 		"exec", "-it", "-u", "dev",
@@ -147,7 +113,7 @@ func TestRuntimeSpecificRendering(t *testing.T) {
 		Image: "img",
 	}
 
-	apple := NewApple().RenderRun(spec)
+	apple := NewApple(Darwin).RenderRun(spec)
 	if !contains(apple, "--ssh") {
 		t.Error("Apple Containers should use its dedicated --ssh flag")
 	}
@@ -155,7 +121,7 @@ func TestRuntimeSpecificRendering(t *testing.T) {
 		t.Error("Apple Containers has no label concept")
 	}
 
-	docker := NewDocker().RenderRun(spec)
+	docker := NewDocker(Darwin).RenderRun(spec)
 	if contains(docker, "--ssh") {
 		t.Error("Docker has no --ssh flag")
 	}
@@ -167,10 +133,10 @@ func TestRuntimeSpecificRendering(t *testing.T) {
 // Apple Containers points at an often-unreachable vmnet gateway, so it forces a
 // resolver; Docker keeps its own.
 func TestDNSDefaultsDifferPerRuntime(t *testing.T) {
-	if got := NewApple().Profile().DefaultDNS; !reflect.DeepEqual(got, []string{"1.1.1.1"}) {
+	if got := NewApple(Darwin).Profile().DefaultDNS; !reflect.DeepEqual(got, []string{"1.1.1.1"}) {
 		t.Errorf("apple DefaultDNS = %#v", got)
 	}
-	if got := NewDocker().Profile().DefaultDNS; got != nil {
+	if got := NewDocker(Darwin).Profile().DefaultDNS; got != nil {
 		t.Errorf("docker DefaultDNS = %#v, want none", got)
 	}
 }
@@ -178,8 +144,8 @@ func TestDNSDefaultsDifferPerRuntime(t *testing.T) {
 // The help texts differ by far more than the program name -- description line,
 // DNS paragraph, a Docker-only build block -- so they are two literal texts.
 func TestHelpTextsAreDistinct(t *testing.T) {
-	apple := NewApple().Profile().Help
-	docker := NewDocker().Profile().Help
+	apple := NewApple(Darwin).Profile().Help
+	docker := NewDocker(Darwin).Profile().Help
 
 	if apple == "" || docker == "" {
 		t.Fatal("help text is empty")
@@ -196,4 +162,36 @@ func contains(haystack []string, needle string) bool {
 		}
 	}
 	return false
+}
+
+// The help fixtures are the bash help text plus the runtime-selection lines, which
+// bash cannot have -- it selects its runtime by being a different file. Nothing in
+// the corpus or the shell suites compares Go's help against bash's, so this makes
+// the intended difference executable instead of prose. Regenerate the fixtures with
+//
+//	diff <(./claude-contained --help) internal/runtime/help_contained.txt
+//
+// which must show *only* these additions.
+func TestHelpDocumentsRuntimeSelection(t *testing.T) {
+	apple := NewApple(Darwin).Profile().Help
+	docker := NewDocker(Darwin).Profile().Help
+
+	for name, help := range map[string]string{"apple": apple, "docker": docker} {
+		if !strings.Contains(help, "--container-runtime") {
+			t.Errorf("%s help does not document --container-runtime", name)
+		}
+		if !strings.Contains(help, "CLAUDE_CONTAINED_RUNTIME") {
+			t.Errorf("%s help does not document CLAUDE_CONTAINED_RUNTIME", name)
+		}
+	}
+
+	// The -H caveat is a property of Apple Containers, so only its help carries it
+	// -- and that half *is* byte-identical to the bash text.
+	const caveat = "bound only to 127.0.0.1"
+	if !strings.Contains(apple, caveat) {
+		t.Errorf("apple help does not carry the -H caveat %q", caveat)
+	}
+	if strings.Contains(docker, caveat) {
+		t.Error("docker help should not carry the -H caveat: Docker reaches those services")
+	}
 }

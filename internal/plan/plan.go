@@ -237,6 +237,20 @@ func Build(cfg cli.Config, h host.State, f Facts, prof runtime.Profile, ans Answ
 	}
 	if len(cfg.HostForwards) > 0 {
 		add(runtime.EnvArg{Key: "HOST_FORWARD_PORTS", Value: strings.Join(cfg.HostForwards, ",")})
+		// Emitted, not refused: -H also serves host services listening on
+		// 0.0.0.0, which every runtime reaches, so a refusal would remove working
+		// behavior. The notice sits exactly where bash's does
+		// (claude-contained:1798-1804) so the two stderr streams agree line for
+		// line -- the tool warning (:1882), the shared-skills lines (:1906) and
+		// the node_modules notice (:1939) all come after it, and the steps below
+		// are emitted in that same order.
+		//
+		// A Print step rather than an Fprintln here, because Build is a pure
+		// resumable function: its prefix is re-emitted on every prompt round, so
+		// printing directly would repeat the notice once per round.
+		for _, line := range prof.HostForwardNotice {
+			p.Steps = append(p.Steps, Print{Text: line, Stderr: true})
+		}
 	}
 	for _, ip := range resolveDNS(cfg, h, prof) {
 		add(runtime.DNSArg{Server: ip})

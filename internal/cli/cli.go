@@ -35,6 +35,76 @@ func (e *ExitError) Error() string { return fmt.Sprintf("exit %d", e.Code) }
 
 func exitWith(code int) error { return &ExitError{Code: code} }
 
+// RuntimeFlag selects the container runtime. It is the first flag the bash
+// launchers do not have -- they select their runtime by *being a different file*
+// -- which makes it a deliberate divergence in the unknown-flag path rather than
+// an oversight. See docs/adr/0004-go-launcher-rewrite.md; ticket 11 drops the
+// second launcher name and leaves this as the only way for Docker users to
+// choose.
+const RuntimeFlag = "--container-runtime"
+
+// valueTakingFlags are the flags that consume the *following* token as their
+// value. ScanRuntime skips those tokens, so that `-e --container-runtime=docker`
+// is an environment assignment (which Parse then rejects) rather than a runtime
+// selection. Without the skip, the pre-scan and Parse would disagree, and Parse's
+// rejection would name the wrong program in its "run '%s --help'" line.
+//
+// -R and -a are absent deliberately: their values are optional and are only
+// consumed when the next token does not start with a dash, which
+// --container-runtime always does.
+var valueTakingFlags = map[string]bool{
+	"-C": true, "--dir": true,
+	"-m": true, "--mount": true,
+	"--name":         true,
+	"--session":      true,
+	"--share-skills": true,
+	"-t":             true,
+	"--tool":         true,
+	"-e":             true,
+	"--env":          true,
+	"-p":             true,
+	"-H":             true,
+	"--dns":          true,
+	"--allow-host":   true,
+	RuntimeFlag:      true,
+}
+
+// ScanRuntime extracts the container-runtime flag before Parse runs.
+//
+// Two scans of argv exist because the runtime has to be chosen *before* the
+// command line is parsed -- Parse's error messages embed the program name and
+// --help prints the selected runtime's own literal text -- while validation of
+// the value belongs after parsing, so that -h/--help still wins. Selection uses
+// this scan; the diagnosis uses Config.ContainerRuntime from the real parse.
+// TestScanRuntimeAgreesWithParse pins them together.
+//
+// Last occurrence wins, matching Parse. A missing or dash-leading value yields
+// "" and leaves the report to Parse. Nothing after `--` is examined, so a tool
+// argument can never select a runtime.
+func ScanRuntime(args []string) string {
+	value := ""
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		switch {
+		case arg == "--":
+			return value
+		case arg == RuntimeFlag:
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				value = args[i+1]
+				i++
+			}
+		case strings.HasPrefix(arg, RuntimeFlag+"="):
+			value = strings.TrimPrefix(arg, RuntimeFlag+"=")
+		case valueTakingFlags[arg]:
+			// Skip unconditionally, even when the next token looks like a flag:
+			// Parse consumes it as a value or rejects the whole command line, and
+			// either way it is not a runtime selection.
+			i++
+		}
+	}
+	return value
+}
+
 // Config is the parsed command line.
 type Config struct {
 	ShellMode            bool
@@ -49,6 +119,10 @@ type Config struct {
 	ProjectDir           string
 	ExtraMounts          []string
 	ToolArgs             []string
+	// ContainerRuntime is --container-runtime's value, unvalidated: the accepted
+	// names live in internal/runtime, which diagnoses a bad one after --help has
+	// had its chance.
+	ContainerRuntime     string
 	ZellijMode           bool
 	ZellijNewSession     bool
 	ZellijSessionName    string
@@ -182,6 +256,19 @@ func Parse(args []string, progName string, shareHostClaudeEnv bool, stderr io.Wr
 			if err := requireInline("--session", v, "a non-empty name"); err != nil {
 				return cfg, err
 			}
+
+		case arg == RuntimeFlag:
+			if err := requireValue(RuntimeFlag, next, "apple or docker"); err != nil {
+				return cfg, err
+			}
+			cfg.ContainerRuntime = next
+			i++
+		case strings.HasPrefix(arg, RuntimeFlag+"="):
+			v := strings.TrimPrefix(arg, RuntimeFlag+"=")
+			if err := requireInline(RuntimeFlag, v, "apple or docker"); err != nil {
+				return cfg, err
+			}
+			cfg.ContainerRuntime = v
 
 		case arg == "--readonly-extras":
 			cfg.ReadonlyExtras = true

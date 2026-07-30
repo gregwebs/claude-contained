@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"claude-contained/internal/host"
+	"claude-contained/internal/runtime"
 )
 
 // --- fixtures -------------------------------------------------------------
@@ -105,14 +106,38 @@ func launcherArgv(project string) []string {
 	return []string{"claude-contained", "-s", "-N", "-W", "-C", project}
 }
 
-// withStubbedHostAndPath points HOME at a scratch directory and prepends the
-// stub `container` binary to PATH, both restored by testing.T's cleanup.
-func withStubbedHostAndPath(t *testing.T) {
+// writeStubDocker is writeStubContainer's Docker twin: `info` stands in for
+// `system status` and `ps` for `list`. Installed in the same directory so a test
+// can select either runtime without knowing which binary gets called.
+func writeStubDocker(t *testing.T, dir string) {
+	t.Helper()
+	script := "#!/bin/sh\ncase \"$1\" in\n" +
+		"  info) exit 0 ;;\n" +
+		"  ps) [ -n \"$STUB_LIST\" ] && printf '%s\\n' \"$STUB_LIST\"; exit 0 ;;\n" +
+		"  inspect) [ -n \"$STUB_INSPECT\" ] && printf '%s' \"$STUB_INSPECT\"; exit 0 ;;\n" +
+		"  *) exit 0 ;;\n" +
+		"esac\n"
+	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// withStubbedHostAndPath points HOME at a scratch directory and prepends stub
+// `container` and `docker` binaries to PATH, both restored by testing.T's
+// cleanup.
+//
+// Both stubs are installed because runWith's platform is a *parameter*: a test
+// that selects Docker must not fall through to a real daemon. On CI's Linux
+// runner that daemon exists and answers, which would make these tests pass or
+// fail for reasons unrelated to their assertions.
+func withStubbedHostAndPath(t *testing.T) string {
 	t.Helper()
 	home := t.TempDir()
 	stubDir := writeStubContainer(t)
+	writeStubDocker(t, stubDir)
 	t.Setenv("HOME", home)
 	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return stubDir
 }
 
 func boolStr(b bool) string {
@@ -140,7 +165,7 @@ func TestLocksReleasedOnlyAfterContainerExit(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := runWith(fake, launcherArgv(project), strings.NewReader(""), &stdout, &stderr)
+	code := runWith(fake, runtime.Darwin, launcherArgv(project), strings.NewReader(""), &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("runWith exit = %d, want 0\nstderr:\n%s", code, stderr.String())
 	}
@@ -186,7 +211,7 @@ func TestSignalDuringRunReleasesAfterExit(t *testing.T) {
 			}
 
 			var stdout, stderr bytes.Buffer
-			code := runWith(fake, launcherArgv(project), strings.NewReader(""), &stdout, &stderr)
+			code := runWith(fake, runtime.Darwin, launcherArgv(project), strings.NewReader(""), &stdout, &stderr)
 
 			if !lockedDuringRun {
 				t.Error("lock should still be held while the container is up, mid-signal")
@@ -226,7 +251,7 @@ func TestUserLockSurvivesAcrossRun(t *testing.T) {
 
 	fake := func(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) int { return 0 }
 	var stdout, stderr bytes.Buffer
-	code := runWith(fake, launcherArgv(project), strings.NewReader(""), &stdout, &stderr)
+	code := runWith(fake, runtime.Darwin, launcherArgv(project), strings.NewReader(""), &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("runWith exit = %d, want 0\nstderr:\n%s", code, stderr.String())
 	}
@@ -251,7 +276,7 @@ func TestOtherOwnerSurvivesAcrossRun(t *testing.T) {
 
 	fake := func(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) int { return 0 }
 	var stdout, stderr bytes.Buffer
-	code := runWith(fake, launcherArgv(project), strings.NewReader(""), &stdout, &stderr)
+	code := runWith(fake, runtime.Darwin, launcherArgv(project), strings.NewReader(""), &stdout, &stderr)
 	if code != 0 {
 		t.Fatalf("runWith exit = %d, want 0\nstderr:\n%s", code, stderr.String())
 	}

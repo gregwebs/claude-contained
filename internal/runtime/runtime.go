@@ -10,6 +10,8 @@ package runtime
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io"
 	"strings"
 )
@@ -111,6 +113,17 @@ type Profile struct {
 	DefaultDNS []string
 	// NotRunningPrompt is the exact prompt shown when the runtime is down.
 	NotRunningPrompt string
+	// HostForwardNotice is printed to stderr, one line per element, when -H is
+	// used and this runtime cannot reach host services bound to 127.0.0.1. Empty
+	// means the runtime forwards them properly, so nothing is said.
+	//
+	// A notice and not a refusal: -H is also used for host services listening on
+	// 0.0.0.0, which both runtimes reach through the same in-container socat
+	// forward (image/host-forward.sh), so refusing would remove working
+	// behavior. Data on Profile rather than a Runtime method because plan.Build
+	// must stay a pure function and already receives a Profile; NotRunningPrompt
+	// is the existing precedent for a runtime-specific literal message.
+	HostForwardNotice []string
 	// Help is the full --help text. The two launchers' help differs by much
 	// more than the program name -- the description line, the --dns line, an
 	// entire DNS paragraph, a Docker-only "Build the image" block, and even
@@ -140,30 +153,113 @@ type Runtime interface {
 	// EnsureUp checks whether the runtime is running and, if not, asks confirm
 	// and starts it. It owns its user-facing output, because the runtimes
 	// differ in more than a probe: Docker opens an application and polls,
-	// Apple Containers issues one command.
-	EnsureUp(ctx context.Context, out io.Writer, confirm func(prompt string) bool) error
+	// Apple Containers issues one command, and on a host where the runtime is a
+	// system service there is nothing to offer at all -- so the report may be a
+	// refusal on stderr rather than a prompt.
+	EnsureUp(ctx context.Context, stdout, stderr io.Writer, confirm func(prompt string) bool) error
 }
 
-// Select chooses the runtime from argv[0]. This deliberately avoids adding a
-// flag: any flag the bash launchers do not know would itself be a divergence in
-// the unknown-flag path, and bash picks its runtime by *being a different file*.
-// A basename containing "dock" means Docker, anything else Apple Containers --
-// which is why the build produces a `claude-go-docked` symlink.
+// Runtime names accepted by --container-runtime and CLAUDE_CONTAINED_RUNTIME.
+const (
+	NameApple  = "apple"
+	NameDocker = "docker"
+)
+
+// Selection is every input that decides which container runtime is used, in
+// precedence order. Grouping them makes the precedence one readable expression
+// instead of positional parameters nobody can order from the call site.
+type Selection struct {
+	Flag     string   // --container-runtime; "" when absent
+	Env      string   // CLAUDE_CONTAINED_RUNTIME; "" when unset
+	Argv0    string   // a basename containing "dock" selects Docker
+	Platform Platform // decides the default, and is handed to the runtime built
+}
+
+// Select chooses the container runtime: --container-runtime, else
+// CLAUDE_CONTAINED_RUNTIME, else an argv[0] basename containing "dock", else the
+// host platform (Apple Containers on macOS, Docker elsewhere).
 //
-// Ticket 09 adds explicit selection by flag and environment variable; the
-// signature already has room for both, with argv[0] as the fallback.
-func Select(argv0, envOverride, flagOverride string) Runtime {
-	choice := flagOverride
-	if choice == "" {
-		choice = envOverride
+// argv[0] remains a selector because bash picks its runtime by *being a
+// different file* and the `claude-go-docked` symlink preserves that. It is no
+// longer the final fallback, though: a basename *without* "dock" is not a
+// selection, because "not docked" cannot mean Apple Containers on a host that
+// has none.
+//
+// Select is total -- an unrecognized Flag or Env value falls through to the next
+// source rather than failing here. It has to run *before* the command line is
+// parsed at all, because cli.Parse's error messages name the program and --help
+// prints the selected runtime's own literal text, so a runtime must exist on
+// every path including the one about to exit 2. Diagnosing a bad value is
+// ValidateSelection's job, called after parsing so that -h/--help still wins,
+// exactly as it does in bash.
+func Select(s Selection) Runtime {
+	if rt, ok := byName(s.Flag, s.Platform); ok {
+		return rt
 	}
-	if choice == "" {
-		choice = baseName(argv0)
+	if rt, ok := byName(s.Env, s.Platform); ok {
+		return rt
 	}
-	if strings.Contains(strings.ToLower(choice), "dock") {
-		return NewDocker()
+	if strings.Contains(strings.ToLower(baseName(s.Argv0)), "dock") {
+		return NewDocker(s.Platform)
 	}
-	return NewApple()
+	if s.Platform == Darwin {
+		return NewApple(s.Platform)
+	}
+	return NewDocker(s.Platform)
+}
+
+// byName matches a *typed* runtime name exactly, case-insensitively. It is
+// deliberately not the substring test Select applies to argv[0]: "dock" matching
+// is for basenames, and applying it to a value someone typed would turn
+// `dockerr` into a silent selection instead of the usage error it deserves.
+//
+// An apple selection on a non-macOS host is returned here and refused by
+// ValidateSelection, so that --container-runtime=apple --help still prints the
+// help for the runtime the user asked about.
+func byName(name string, p Platform) (Runtime, bool) {
+	switch strings.ToLower(name) {
+	case NameApple:
+		return NewApple(p), true
+	case NameDocker:
+		return NewDocker(p), true
+	}
+	return nil, false
+}
+
+// ValidateSelection reports the usage error in a selection, if any, to stderr
+// and returns a non-nil error when the caller should exit with a usage status.
+//
+// Only the source actually *used* is checked: a valid --container-runtime
+// rescues a broken environment variable, which is what "the flag wins" has to
+// mean to be useful.
+func ValidateSelection(s Selection, stderr io.Writer) error {
+	if s.Flag != "" {
+		return validateRuntimeName("--container-runtime", s.Flag, s.Platform, stderr)
+	}
+	if s.Env != "" {
+		return validateRuntimeName("CLAUDE_CONTAINED_RUNTIME", s.Env, s.Platform, stderr)
+	}
+	return nil
+}
+
+// ErrBadSelection reports that the runtime selection is unusable. EnsureUp's
+// counterpart for selection: the message is already on stderr.
+var ErrBadSelection = errors.New("invalid container runtime selection")
+
+func validateRuntimeName(source, value string, p Platform, stderr io.Writer) error {
+	switch strings.ToLower(value) {
+	case NameDocker:
+		return nil
+	case NameApple:
+		if p != Darwin {
+			_, _ = fmt.Fprintln(stderr, "error: the apple container runtime is available only on macOS")
+			_, _ = fmt.Fprintln(stderr, "       use --container-runtime=docker or CLAUDE_CONTAINED_RUNTIME=docker")
+			return ErrBadSelection
+		}
+		return nil
+	}
+	_, _ = fmt.Fprintf(stderr, "error: %s must be %s or %s: %s\n", source, NameApple, NameDocker, value)
+	return ErrBadSelection
 }
 
 func baseName(path string) string {
@@ -202,4 +298,32 @@ func renderCommonArg(a Arg) ([]string, bool) {
 		return []string{"--dns", v.Server}, true
 	}
 	return nil, false
+}
+
+// splitLines splits and trims, which is right for container *names*: bash reads
+// `container list --quiet` / `docker ps` output and skips blank lines.
+func splitLines(s string) []string {
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		if line = strings.TrimSpace(line); line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
+}
+
+// splitEnvLines splits *without* trimming. bash reads inspect output with
+// `while IFS= read -r line`, which preserves surrounding whitespace, and the
+// Apple path preserves it too (the value comes out of a JSON string). Trimming
+// here would make the two runtimes disagree for an environment value with a
+// leading or trailing space -- the one thing InspectEnv must never do, since
+// both runtimes feed the same Zellij discovery.
+func splitEnvLines(s string) []string {
+	var out []string
+	for _, line := range strings.Split(s, "\n") {
+		if line != "" {
+			out = append(out, line)
+		}
+	}
+	return out
 }

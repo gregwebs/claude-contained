@@ -59,7 +59,7 @@ GitHub Actions runs `make quality` for pull requests and pushes to `main`.
 
 ## Repository Architecture
 
-- **Bash launchers**: `claude-contained` targets Apple Containers and `claude-docked` targets Docker. They expose the same flag interface and must be changed together. They are also the behavioral oracle for the Go rewrite.
+- **Bash launchers**: `claude-contained` targets Apple Containers and `claude-docked` targets Docker. They expose the same flag interface and must be changed together, apart from the three intentional differences listed under Critical Invariants. They are also the behavioral oracle for the Go rewrite.
 - **Go launcher**: `cmd/claude-go` drives the port. `internal/cli` parses flags, `internal/host` inspects and prepares host state, `internal/plan` builds a resumable execution plan, and `internal/runtime` is the container-runtime seam.
 - **Container image**: `Dockerfile` assembles the image. Production helpers and configuration live under `image/`; each script documents its purpose at the top of the file.
 - **Tests**: Go unit tests live beside their packages. Shell suites under `tests/` exercise runtime behavior. `tests/differential/` compares the Go candidate with both bash launchers.
@@ -73,7 +73,9 @@ The VS Code template has separate implementation notes in [devcontainer/CLAUDE.m
 
 Treat changes to flags, validation, mounts, prompts, naming, cleanup, or tool invocation as cross-runtime changes. Update both bash launchers, their help text, the Go port where implemented, and the appropriate parity tests.
 
-The Go runtime is selected from the executable basename (`dock` selects Docker), not from a new CLI flag. Code above `internal/runtime` must not mention `container` or `docker` commands.
+The Go launcher selects its container runtime in this order: `--container-runtime` (`apple` or `docker`), else `CLAUDE_CONTAINED_RUNTIME`, else an `argv[0]` basename containing `dock`, else the host platform — Apple Containers on macOS, Docker elsewhere. A basename *without* `dock` is not a selection, because "not docked" cannot mean Apple Containers on a host that has none. `--container-runtime` is the one flag the bash launchers do not have; they reject it as unknown, and `tests/arg-parsing.test.sh` pins both halves of that divergence so a later parity fix does not delete the flag.
+
+Code above `internal/runtime` must not mention `container` or `docker` commands.
 
 See [ADR-0003](docs/adr/0003-flag-only-cli.md) for the flag-only CLI and [ADR-0004](docs/adr/0004-go-launcher-rewrite.md) for the Go port.
 

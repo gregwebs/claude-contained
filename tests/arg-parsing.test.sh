@@ -47,6 +47,10 @@ run() {
 line_has() { grep -qxF -- "$2" "$1"; }
 file_has() { grep -qF -- "$2" "$1"; }
 
+# target_is_go distinguishes the Go binary from the bash launchers, which is
+# needed for exactly one flag: --container-runtime, which only Go has.
+target_is_go() { [[ "$(basename "$1")" == claude-go* ]]; }
+
 suite() {
   set +e
   local target="$1"
@@ -161,6 +165,54 @@ suite() {
   rc=$?
   [[ $rc -eq 2 ]] && file_has "$err" "--session is valid only with --zellij"
   _check "--session requires --zellij" $?
+
+  # --- the container-runtime flag ------------------------------------------
+  #
+  # This is the one flag the Go launcher has and the bash launchers do not: they
+  # select their runtime by *being a different file*. The divergence is
+  # deliberate (ADR-0004), so both halves are pinned here rather than left
+  # accidental -- otherwise a later "parity fix" deletes the flag.
+  #
+  # The discriminator is --ssh, not the Docker socket mount: Apple emits `--ssh`
+  # on every platform and Docker emits it on none, so these assertions hold on a
+  # Linux host too. Asserting the macOS bridged-socket mount would pass here and
+  # fail in CI.
+  if target_is_go "$target"; then
+    run "$target" --container-runtime
+    rc=$?
+    [[ $rc -eq 2 ]] && file_has "$err" "--container-runtime requires apple or docker"
+    _check "--container-runtime reports a missing value" $?
+
+    run "$target" --container-runtime=bogus
+    rc=$?
+    [[ $rc -eq 2 ]] && file_has "$err" "must be apple or docker"
+    _check "--container-runtime rejects an unknown runtime" $?
+
+    run "$target" -N -s -S -C "$proj" --container-runtime=docker
+    rc=$?
+    [[ $rc -eq 0 ]] && ! line_has "$out" "--ssh"
+    _check "--container-runtime=docker selects the Docker runtime" $?
+
+    run "$target" -N -s -S -C "$proj" --container-runtime=apple
+    rc=$?
+    [[ $rc -eq 0 ]] && line_has "$out" "--ssh"
+    _check "--container-runtime=apple selects Apple Containers" $?
+
+    CLAUDE_CONTAINED_RUNTIME=docker run "$target" -N -s -S -C "$proj"
+    rc=$?
+    [[ $rc -eq 0 ]] && ! line_has "$out" "--ssh"
+    _check "CLAUDE_CONTAINED_RUNTIME selects the runtime" $?
+
+    CLAUDE_CONTAINED_RUNTIME=docker run "$target" -N -s -S -C "$proj" --container-runtime=apple
+    rc=$?
+    [[ $rc -eq 0 ]] && line_has "$out" "--ssh"
+    _check "the flag beats CLAUDE_CONTAINED_RUNTIME" $?
+  else
+    run "$target" --container-runtime=docker
+    rc=$?
+    [[ $rc -eq 2 ]] && file_has "$err" "unknown flag: --container-runtime"
+    _check "the bash launcher rejects --container-runtime (pinned divergence)" $?
+  fi
 
   return "$fails"
 }

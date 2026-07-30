@@ -26,6 +26,7 @@ There are no positional arguments. Use `-C` for the project directory, `-m` for 
 | `--dns IP` | Use an IP as a DNS resolver (repeatable; Apple default: `1.1.1.1`) |
 | `--allow-host HOST` | Allow sandbox egress to a host (repeatable) |
 | `--no-sandbox` | Disable the srt sandbox for this run |
+| `--container-runtime NAME` | Container runtime: `apple` or `docker` (Go launcher only, until the shell launchers are retired) |
 | `-s`, `--shell` | Start a bash shell instead of the selected tool |
 | `-S`, `--ssh` | Enable SSH agent forwarding |
 | `-w`, `--worktree` | Include a Git worktree's main repository without prompting |
@@ -342,7 +343,9 @@ claude-docked -H 3845 -H 8080
 
 ### Apple Containers
 
-Apple Containers can reach host services bound to `0.0.0.0`, but not services bound only to `127.0.0.1`. Use `host.local` for services listening on all interfaces. The `-H` flag cannot bridge localhost-only services such as the Figma Desktop MCP; use `claude-docked` for those.
+Apple Containers can reach host services bound to `0.0.0.0`, but not services bound only to `127.0.0.1`. Use `host.local` for services listening on all interfaces. The `-H` flag cannot bridge localhost-only services such as the Figma Desktop MCP.
+
+`-H` still works here for services listening on `0.0.0.0`, so it is not refused — but the launcher warns on stderr that localhost-only services are out of reach. For those, select the Docker runtime (`--container-runtime=docker`, `CLAUDE_CONTAINED_RUNTIME=docker`, or `claude-docked`).
 
 See [apple/container#346](https://github.com/apple/container/issues/346) for the relevant host-routing feature request.
 

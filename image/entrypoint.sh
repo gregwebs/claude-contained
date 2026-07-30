@@ -18,20 +18,9 @@ if [ -n "$HOST_IP" ]; then
   grep -q "host.local" /etc/hosts 2>/dev/null || echo "$HOST_IP host.local" >> /etc/hosts
 fi
 
-# Forward host ports to container localhost (for MCPs that expect localhost)
-if [ -n "${HOST_FORWARD_PORTS:-}" ]; then
-  IFS=',' read -ra PORTS <<< "$HOST_FORWARD_PORTS"
-  for mapping in "${PORTS[@]}"; do
-    if [[ "$mapping" == *:* ]]; then
-      local_port="${mapping%%:*}"
-      host_port="${mapping##*:}"
-    else
-      local_port="$mapping"
-      host_port="$mapping"
-    fi
-    socat "TCP-LISTEN:${local_port},fork,reuseaddr TCP:host.local:${host_port}" &
-  done
-fi
+# Forward host ports to container localhost (for MCPs that expect localhost).
+# Must follow the host.local /etc/hosts write above, which the relays resolve.
+host-forward
 
 # Path parity setup: match host HOME and UID/GID
 if [ -n "${HOST_HOME:-}" ]; then

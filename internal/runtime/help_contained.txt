@@ -30,6 +30,7 @@ Options:
   --zellij           Run the tool inside a persistent Zellij workspace
   --session NAME     With --zellij, the Zellij session to start or attach to
   --new-session      With --zellij, start even when another session is live
+  --container-runtime NAME  Container runtime: apple or docker (default: per host)
   -h, --help         Show this help message
 
 Behavior:
@@ -53,6 +54,11 @@ Behavior:
     ~/.codex/skills/.system is mounted back read-only over DIR/.system so
     built-in skills remain visible.
   - SSH agent forwarding is disabled by default; use --ssh to enable (for git push).
+  - -H reaches host services listening on 0.0.0.0, but Apple Containers cannot
+    reach services bound only to 127.0.0.1; use the Docker runtime for those.
+  - The container runtime is selected by --container-runtime, else
+    CLAUDE_CONTAINED_RUNTIME, else the launcher name, else the host default
+    (Apple Containers on macOS, Docker elsewhere).
   - Apple Containers defaults the container's resolver to the vmnet gateway, which
     often cannot resolve. The launcher uses --dns 1.1.1.1 by default. Explicit
     --dns wins; set CLAUDE_DNS=system to use the runtime default, or

@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"claude-contained/internal/host"
+	"claude-contained/internal/runtime"
 )
 
 // markedInspectJSON is the Apple JSON shape runtime.Apple.InspectEnv parses,
@@ -53,7 +54,7 @@ func TestZellijAttachHoldsNoWorktreeLock(t *testing.T) {
 	t.Cleanup(func() { replaceProcess = orig })
 
 	var stdout, stderr bytes.Buffer
-	code := runWith(failRunner(t), []string{"claude-contained", "--zellij", "--attach", "--session", "alpha", "-W", "-C", project},
+	code := runWith(failRunner(t), runtime.Darwin, []string{"claude-contained", "--zellij", "--attach", "--session", "alpha", "-W", "-C", project},
 		strings.NewReader(""), &stdout, &stderr)
 
 	if code != 0 {
@@ -84,7 +85,7 @@ func TestZellijAttachNoSessionsCreatesNothing(t *testing.T) {
 	t.Cleanup(func() { replaceProcess = orig })
 
 	var stdout, stderr bytes.Buffer
-	code := runWith(failRunner(t), []string{"claude-contained", "--zellij", "--attach"},
+	code := runWith(failRunner(t), runtime.Darwin, []string{"claude-contained", "--zellij", "--attach"},
 		strings.NewReader(""), &stdout, &stderr)
 
 	if code != 0 {
@@ -108,7 +109,7 @@ func TestZellijLaunchRefusesWhenAnotherSessionLive(t *testing.T) {
 	t.Setenv("STUB_INSPECT", markedInspectJSON("other"))
 
 	var stdout, stderr bytes.Buffer
-	code := runWith(failRunner(t), []string{"claude-contained", "--zellij", "-N", "-s", "-C", project},
+	code := runWith(failRunner(t), runtime.Darwin, []string{"claude-contained", "--zellij", "-N", "-s", "-C", project},
 		strings.NewReader(""), &stdout, &stderr)
 
 	if code != 1 {
@@ -144,7 +145,7 @@ func TestZellijLaunchProceedsWithNewSession(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	code := runWith(recorder, []string{"claude-contained", "--zellij", "--new-session", "--session", "mine", "-N", "-s", "-C", project},
+	code := runWith(recorder, runtime.Darwin, []string{"claude-contained", "--zellij", "--new-session", "--session", "mine", "-N", "-s", "-C", project},
 		strings.NewReader(""), &stdout, &stderr)
 
 	if code != 0 {

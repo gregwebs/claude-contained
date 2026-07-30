@@ -12,7 +12,7 @@ The goal is a normal local workflow with a smaller host footprint: alias a tool 
 
 ## Important Caveats
 
-- **Host localhost access**: `-H PORT` works with `claude-docked` (Docker) but not `claude-contained` (Apple Containers) for services bound to localhost. See [Accessing Host Services](USAGE.md#accessing-host-services).
+- **Host localhost access**: `-H PORT` reaches host services listening on `0.0.0.0` under either container runtime, but only Docker reaches services bound to `127.0.0.1`. The launcher says so on stderr when you use `-H` under Apple Containers. See [Accessing Host Services](USAGE.md#accessing-host-services).
 - **`~/.claude.json` is relocated**: On first run, your `~/.claude.json` is moved to `~/.claude-contained/.claude.json` and replaced with a symlink. This allows containers to share the file. **If you delete `~/.claude-contained/`, you will lose your Claude account state and some settings.** You will have to log in again.
 - **Contained Claude settings are separate**: Contained runs use `~/.claude-contained/claude` as their Claude profile by default and do not mount host `~/.claude/settings.json`. Host Claude extension resources (`skills`, `agents`, `commands`, and `plugins`) and `~/.claude-contained/.claude.json` are still shared.
 - **Concurrent contained and uncontained sessions share some state**: Regular and contained Claude use separate settings by default, but they share account state and extension resources. Concurrent writes to those shared files may conflict.

@@ -1,10 +1,16 @@
 // Command claude-go is the Go launcher for contained AI coding sessions.
 //
-// The container runtime it drives is selected from argv[0] by
-// internal/runtime.Select, so no flag the bash launchers lack has to enter the
-// CLI surface -- such a flag would itself be a divergence in the unknown-flag
-// path. Which basename maps to which runtime is that package's business, not
-// this one's.
+// The container runtime it drives is selected by internal/runtime.Select:
+// --container-runtime, else CLAUDE_CONTAINED_RUNTIME, else an argv[0] basename
+// containing "dock", else the host platform (Apple Containers on macOS, Docker
+// elsewhere). How each of those maps to a runtime is that package's business,
+// not this one's.
+//
+// The flag is knowingly absent from the bash launchers, which select their
+// runtime by being different files. That makes it a real divergence in the
+// unknown-flag path, accepted and pinned by a test rather than avoided -- see
+// docs/adr/0004-go-launcher-rewrite.md and ticket 11, which drops the second
+// launcher name entirely.
 package main
 
 import (

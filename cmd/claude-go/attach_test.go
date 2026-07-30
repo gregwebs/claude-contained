@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"claude-contained/internal/runtime"
 )
 
 // failRunner fails the test if the container `run` path is ever reached --
@@ -65,7 +67,7 @@ func TestAttachHoldsNoWorktreeLock(t *testing.T) {
 	var stdout, stderr bytes.Buffer
 	// -W requests locking; attach must bypass it entirely. failRunner fails
 	// the test if the container `run` path is ever reached.
-	code := runWith(failRunner(t), []string{"claude-contained", "-a", "live", "-W", "-C", project},
+	code := runWith(failRunner(t), runtime.Darwin, []string{"claude-contained", "-a", "live", "-W", "-C", project},
 		strings.NewReader(""), &stdout, &stderr)
 
 	if code != 0 {
@@ -106,7 +108,7 @@ func TestAttachPickerHoldsNoWorktreeLock(t *testing.T) {
 	t.Cleanup(func() { replaceProcess = orig })
 
 	var stdout, stderr bytes.Buffer
-	code := runWith(failRunner(t), []string{"claude-contained", "-a", "-W", "-C", project},
+	code := runWith(failRunner(t), runtime.Darwin, []string{"claude-contained", "-a", "-W", "-C", project},
 		strings.NewReader("1\n"), &stdout, &stderr)
 
 	if code != 0 {
@@ -139,7 +141,7 @@ func TestAttachByNameMissCreatesNothing(t *testing.T) {
 	t.Cleanup(func() { replaceProcess = orig })
 
 	var stdout, stderr bytes.Buffer
-	code := runWith(failRunner(t), []string{"claude-contained", "-a", "nope", "-C", project},
+	code := runWith(failRunner(t), runtime.Darwin, []string{"claude-contained", "-a", "nope", "-C", project},
 		strings.NewReader(""), &stdout, &stderr)
 
 	if code != 1 {

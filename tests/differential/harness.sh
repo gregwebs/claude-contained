@@ -95,6 +95,10 @@ run_side() {
   # would leak into every later case that doesn't touch it.
   unset DIFF_LIST_OUTPUT DIFF_INSPECT_DIR DIFF_SNAPSHOT_PATHS
   unset CLAUDE_DNS CLAUDE_CONTAINED_SHARE_HOST_CLAUDE CLAUDE_MEMORY AI_GH_TOKEN
+  # Not optional: an ambient CLAUDE_CONTAINED_RUNTIME would make the Go side
+  # render a different runtime than the bash side, and *every* corpus entry
+  # would diverge with a diff that looks like a rendering bug.
+  unset CLAUDE_CONTAINED_RUNTIME
   CASE_ARGS_OUT=()
   CASE_STDIN_OUT=""
 
