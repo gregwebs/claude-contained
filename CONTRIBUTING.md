@@ -1,22 +1,31 @@
-# Contributing
+# Overview
 
 This project maintains two production bash launchers while incrementally porting their behavior to a shared Go binary. Changes should preserve behavior across Apple Containers and Docker.
+
+# Critical Invariants
+
+- Keep `claude-contained` and `claude-docked` behavior and flags in sync; they remain the differential oracle for the Go launcher. Three differences are intentional: `claude-contained` forces a default DNS resolver, `claude-docked` emits Zellij tracking labels, and `claude-contained` prints the `-H` capability notice. Everything else diverging is a bug.
+- In the Go launcher, container-runtime-specific commands belong only in `internal/runtime`.
+- The Dockerfile must stay below Apple Containers' 16k file limit. Put scripts and long configuration in `image/` and copy them into the image.
+- Preserve the privilege drop and fail-closed sandbox setup. The sandbox runtime must not run as root or use a policy writable by the contained agent.
+- Preserve worktree-lock cleanup and signal behavior. Use `signal.Notify`, not `signal.Ignore`, in the Go launcher.
+- Every production shell script should state its purpose at the top of the file.
+
+Run `make quality` for the standard contributor gate. See [CONTRIBUTING.md](CONTRIBUTING.md#quality-checks) for required tool versions and the broader test matrix.
+
+# Quality Checks
+
+Run `make quality` for the standard contributor gate.
 
 ## Development Setup
 
 The local quality gate requires:
 
 - ShellCheck `0.11.0`
-- golangci-lint `2.12.2`
+- golangci-lint `2.12.2` from github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
 - A Go toolchain compatible with `go.mod`
 
-Install golangci-lint with:
-
-```bash
-go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
-```
-
-Package-manager installations are fine when their reported versions match exactly. Verify the required tools with:
+Verify tool versions match CI with:
 
 ```bash
 shellcheck --version
@@ -24,7 +33,7 @@ golangci-lint version
 make check-tools
 ```
 
-## Quality Checks
+## Details
 
 Run the fast aggregate gate:
 
@@ -110,5 +119,5 @@ In the Go launcher, use `signal.Notify`, not `signal.Ignore`. Ignored signal dis
 - Keep [README.md](README.md) focused on the project overview, quick start, caveats, supported tools, and high-level design.
 - Put flags, examples, operational behavior, and troubleshooting in [USAGE.md](USAGE.md).
 - Put development workflow and implementation constraints here.
-- Keep [CLAUDE.md](CLAUDE.md) concise and agent-specific.
+- Keep [AGENTS.md](AGENTS.md) concise and agent-specific.
 - When flags change, update launcher help, generated Go help fixtures, and `USAGE.md` together.
