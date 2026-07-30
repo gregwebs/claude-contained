@@ -16,15 +16,14 @@
 # the child dies normally -- which is what "well under the stub sleep" below
 # is checking for.
 #
-# claude-contained's own signal discipline was never at risk here (bash's
+# The bash launchers' own signal discipline was never at risk here (bash's
 # traps defer to `exit N` and never give the shell's own children an ignored
-# disposition), but this suite is the ticket's TDD seam per the implementation
-# plan: run it against the bash oracle first (the default target list below),
-# then point it at the Go binary via CLAUDE_CONTAINED_TEST_TARGETS to prove
-# Go's signal.Notify reproduces the same observable behavior.
+# disposition); this suite proved Go's signal.Notify reproduces the same
+# observable behavior before the bash launchers were retired, and now runs
+# against the Go binary exclusively.
 #
 # Usage: tests/signal-handling.test.sh
-#        CLAUDE_CONTAINED_TEST_TARGETS="bin/claude-go bin/claude-go-docked" tests/signal-handling.test.sh
+#        CLAUDE_CONTAINED_TEST_TARGETS="bin/claude-contained bin/claude-contained-docked" tests/signal-handling.test.sh
 set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -139,7 +138,7 @@ start_launcher() {
   launcher_pid="$(cat "$launcher_pid_file")"
 }
 
-read -ra targets <<< "${CLAUDE_CONTAINED_TEST_TARGETS:-claude-contained claude-docked}"
+read -ra targets <<< "${CLAUDE_CONTAINED_TEST_TARGETS:-bin/claude-contained bin/claude-contained-docked}"
 
 for target in "${targets[@]}"; do
   echo "== ${target} =="

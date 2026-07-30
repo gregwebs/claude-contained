@@ -8,18 +8,28 @@
 # crosses two launchers, and how prompts are handled under non-terminal stdin.
 #
 # Usage:
-#   tests/differential/harness.sh [--target NAME]... [--compare REF:CANDIDATE]...
+#   tests/differential/harness.sh --target NAME [--target NAME]...
+#                                 [--compare REF:CANDIDATE]... [--case GLOB]...
+#   tests/differential/harness.sh --compare REF:CANDIDATE [--compare REF:CANDIDATE]...
 #                                 [--case GLOB]...
 #
-# With neither --target nor --compare, runs against both claude-contained and
-# claude-docked. Each is compared against itself: two fresh, isolated
-# invocations of the same corpus entry against the same target, which is what
-# proves the isolation and normalization are complete.
+# --target NAME runs the corpus against that target, compared against itself:
+# two fresh, isolated invocations of the same corpus entry against the same
+# target, which is what proves the isolation and normalization are complete.
 #
 # --compare REF:CANDIDATE runs the two sides against *different* launchers,
-# which is how the Go launcher is proven equivalent to a bash reference.
+# which is how a candidate launcher is proven equivalent to a reference one.
 # --case restricts the corpus by basename glob, so a caller can assert the
 # subset a given ticket implements while the rest stays wired up.
+#
+# Ticket 11 deleted the bash launchers this harness used to default to
+# (`claude-contained` and `claude-docked` at the repository root), once the
+# corpus was clean against both container runtimes across the full corpus at
+# commit 973eeff. There is no default target any more: --target or --compare
+# is required. The bash launchers are recoverable with
+# `git show 973eeff:claude-contained` (and `:claude-docked`) if a regression
+# needs the oracle back; ticket 12 converts this corpus to golden tests, which
+# is the long-term replacement for that oracle.
 set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -62,7 +72,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 if [[ ${#targets[@]} -eq 0 && ${#compares[@]} -eq 0 ]]; then
-  targets=(claude-contained claude-docked)
+  echo "error: --target or --compare is required; the bash oracle was removed in 973eeff" >&2
+  echo "       and can be recovered with: git show 973eeff:claude-contained" >&2
+  echo "       Ticket 12 converts this corpus to golden tests." >&2
+  exit 2
 fi
 
 project_template="$(mktemp -d)"

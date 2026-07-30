@@ -51,16 +51,6 @@ run() {
 line_has() { grep -qxF -- "$2" "$1"; }
 file_has() { grep -qF -- "$2" "$1"; }
 
-# target_is_go distinguishes the Go binary from the bash launchers, which is
-# needed for exactly one flag: --container-runtime, which only Go has. Ticket
-# 11 gave the Go binary the bash launchers' own basename (claude-contained), so
-# a basename check can no longer tell them apart; the Go binaries are the ones
-# built under bin/, so a path-prefix check is the discriminator now. This
-# whole distinction -- and the bash-side "pinned divergence" branch below --
-# goes away once ticket 11 deletes the bash launchers and retargets this
-# suite at bin/ exclusively.
-target_is_go() { [[ "$1" == bin/* ]]; }
-
 suite() {
   set +e
   local target="$1"
@@ -190,77 +180,56 @@ suite() {
 
   # --- the container-runtime flag ------------------------------------------
   #
-  # This is the one flag the Go launcher has and the bash launchers do not: they
-  # select their runtime by *being a different file*. The divergence is
-  # deliberate (ADR-0004), so both halves are pinned here rather than left
-  # accidental -- otherwise a later "parity fix" deletes the flag.
-  #
   # The discriminator is --ssh, not the Docker socket mount: Apple emits `--ssh`
   # on every platform and Docker emits it on none, so these assertions hold on a
   # Linux host too. Asserting the macOS bridged-socket mount would pass here and
   # fail in CI.
-  if target_is_go "$target"; then
-    run "$target" --container-runtime
-    rc=$?
-    [[ $rc -eq 2 ]] && file_has "$err" "--container-runtime requires apple or docker"
-    _check "--container-runtime reports a missing value" $?
+  run "$target" --container-runtime
+  rc=$?
+  [[ $rc -eq 2 ]] && file_has "$err" "--container-runtime requires apple or docker"
+  _check "--container-runtime reports a missing value" $?
 
-    run "$target" --container-runtime=bogus
-    rc=$?
-    [[ $rc -eq 2 ]] && file_has "$err" "must be apple or docker"
-    _check "--container-runtime rejects an unknown runtime" $?
+  run "$target" --container-runtime=bogus
+  rc=$?
+  [[ $rc -eq 2 ]] && file_has "$err" "must be apple or docker"
+  _check "--container-runtime rejects an unknown runtime" $?
 
-    run "$target" -N -s -S -C "$proj" --container-runtime=docker
-    rc=$?
-    [[ $rc -eq 0 ]] && ! line_has "$out" "--ssh"
-    _check "--container-runtime=docker selects the Docker runtime" $?
+  run "$target" -N -s -S -C "$proj" --container-runtime=docker
+  rc=$?
+  [[ $rc -eq 0 ]] && ! line_has "$out" "--ssh"
+  _check "--container-runtime=docker selects the Docker runtime" $?
 
-    run "$target" -N -s -S -C "$proj" --container-runtime=apple
-    rc=$?
-    [[ $rc -eq 0 ]] && line_has "$out" "--ssh"
-    _check "--container-runtime=apple selects Apple Containers" $?
+  run "$target" -N -s -S -C "$proj" --container-runtime=apple
+  rc=$?
+  [[ $rc -eq 0 ]] && line_has "$out" "--ssh"
+  _check "--container-runtime=apple selects Apple Containers" $?
 
-    CLAUDE_CONTAINED_RUNTIME=docker run "$target" -N -s -S -C "$proj"
-    rc=$?
-    [[ $rc -eq 0 ]] && ! line_has "$out" "--ssh"
-    _check "CLAUDE_CONTAINED_RUNTIME selects the runtime" $?
+  CLAUDE_CONTAINED_RUNTIME=docker run "$target" -N -s -S -C "$proj"
+  rc=$?
+  [[ $rc -eq 0 ]] && ! line_has "$out" "--ssh"
+  _check "CLAUDE_CONTAINED_RUNTIME selects the runtime" $?
 
-    CLAUDE_CONTAINED_RUNTIME=docker run "$target" -N -s -S -C "$proj" --container-runtime=apple
-    rc=$?
-    [[ $rc -eq 0 ]] && line_has "$out" "--ssh"
-    _check "the flag beats CLAUDE_CONTAINED_RUNTIME" $?
+  CLAUDE_CONTAINED_RUNTIME=docker run "$target" -N -s -S -C "$proj" --container-runtime=apple
+  rc=$?
+  [[ $rc -eq 0 ]] && line_has "$out" "--ssh"
+  _check "the flag beats CLAUDE_CONTAINED_RUNTIME" $?
 
-    # --- the build-context flag ---------------------------------------------
-    #
-    # Also Go-only: bash always finds its build context by self-location, since
-    # it is a script inside the checkout. Pinned the same way --container-runtime
-    # is, above.
-    run "$target" --build-context
-    rc=$?
-    [[ $rc -eq 2 ]] && file_has "$err" "--build-context requires a directory"
-    _check "--build-context reports a missing value" $?
+  # --- the build-context flag ---------------------------------------------
+  run "$target" --build-context
+  rc=$?
+  [[ $rc -eq 2 ]] && file_has "$err" "--build-context requires a directory"
+  _check "--build-context reports a missing value" $?
 
-    run "$target" -R --build-context "$extra"
-    rc=$?
-    [[ $rc -eq 2 ]] && file_has "$err" "--build-context has no Dockerfile"
-    _check "--build-context without a Dockerfile is refused by name" $?
-  else
-    run "$target" --container-runtime=docker
-    rc=$?
-    [[ $rc -eq 2 ]] && file_has "$err" "unknown flag: --container-runtime"
-    _check "the bash launcher rejects --container-runtime (pinned divergence)" $?
-
-    run "$target" --build-context=/tmp
-    rc=$?
-    [[ $rc -eq 2 ]] && file_has "$err" "unknown flag: --build-context"
-    _check "the bash launcher rejects --build-context (pinned divergence)" $?
-  fi
+  run "$target" -R --build-context "$extra"
+  rc=$?
+  [[ $rc -eq 2 ]] && file_has "$err" "--build-context has no Dockerfile"
+  _check "--build-context without a Dockerfile is refused by name" $?
 
   return "$fails"
 }
 
 total=0
-read -ra targets <<< "${CLAUDE_CONTAINED_TEST_TARGETS:-claude-contained claude-docked}"
+read -ra targets <<< "${CLAUDE_CONTAINED_TEST_TARGETS:-bin/claude-contained bin/claude-contained-docked}"
 for target in "${targets[@]}"; do
   echo "== ${target} =="
   suite "$target"

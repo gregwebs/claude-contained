@@ -107,7 +107,7 @@ deadpid() { # echoes a PID reliably not alive
   echo "$p"
 }
 
-read -ra targets <<< "${CLAUDE_CONTAINED_TEST_TARGETS:-claude-contained claude-docked}"
+read -ra targets <<< "${CLAUDE_CONTAINED_TEST_TARGETS:-bin/claude-contained bin/claude-contained-docked}"
 
 for target in "${targets[@]}"; do
   echo "== ${target} =="

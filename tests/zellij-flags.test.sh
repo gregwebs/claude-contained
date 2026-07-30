@@ -118,7 +118,8 @@ line_has() { # line_has <file> <exact-line>
 
 # The launcher's program name, as it appears in its own messages. Mirrors the
 # Go binary's runtime selection: a basename containing "dock" is the Docker
-# launcher. Lets the same assertions run against bin/claude-go{,-docked}.
+# launcher. Lets the same assertions run against bin/claude-contained{,-docked}.
+# Retired once both runtimes share one program name (internal/runtime.ProgName).
 target_prog_name() { # target_prog_name <target>
   case "$1" in *dock*) echo claude-docked ;; *) echo claude-contained ;; esac
 }
@@ -263,7 +264,7 @@ suite() {
 }
 
 total=0
-read -ra targets <<< "${CLAUDE_CONTAINED_TEST_TARGETS:-claude-contained claude-docked}"
+read -ra targets <<< "${CLAUDE_CONTAINED_TEST_TARGETS:-bin/claude-contained bin/claude-contained-docked}"
 for target in "${targets[@]}"; do
   echo "== ${target} =="
   suite "$target"

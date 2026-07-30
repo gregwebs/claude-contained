@@ -67,7 +67,7 @@ launcher_run() { # launcher_run <target> <home> <project> [extra env...]
 }
 
 echo "== srt placeholder cleanup =="
-read -ra targets <<< "${CLAUDE_CONTAINED_TEST_TARGETS:-claude-contained claude-docked}"
+read -ra targets <<< "${CLAUDE_CONTAINED_TEST_TARGETS:-bin/claude-contained bin/claude-contained-docked}"
 for target in "${targets[@]}"; do
   setup_runtime_stubs
   home="$(mktemp -d)"

@@ -41,7 +41,7 @@ done
 # resolver and Docker does not. So the override supplies one name per runtime,
 # positionally, and the Docker half is skipped rather than run against the Apple
 # binary when only one target is given -- which would fail spuriously.
-read -ra targets <<< "${CLAUDE_CONTAINED_TEST_TARGETS:-claude-contained claude-docked}"
+read -ra targets <<< "${CLAUDE_CONTAINED_TEST_TARGETS:-bin/claude-contained bin/claude-contained-docked}"
 apple_target="${targets[0]}"
 docker_target="${targets[1]:-}"
 
