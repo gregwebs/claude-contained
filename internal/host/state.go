@@ -35,6 +35,9 @@ type State struct {
 	// ContainerRuntime is CLAUDE_CONTAINED_RUNTIME. Empty means unset; unlike
 	// CLAUDE_DNS there is no set-but-empty distinction to preserve.
 	ContainerRuntime string
+	// BuildContext is CLAUDE_CONTAINED_BUILD_CONTEXT: the checkout --rebuild
+	// builds from. Empty means unset; there is no set-but-empty distinction.
+	BuildContext string
 }
 
 // Probe captures host state. HOME comes from the environment rather than the
@@ -62,6 +65,7 @@ func Probe() State {
 		DNSEnvSet:        dnsSet,
 		ShareHostClaude:  os.Getenv("CLAUDE_CONTAINED_SHARE_HOST_CLAUDE") == "1",
 		ContainerRuntime: os.Getenv("CLAUDE_CONTAINED_RUNTIME"),
+		BuildContext:     os.Getenv(BuildContextEnvVar),
 	}
 }
 

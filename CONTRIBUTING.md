@@ -73,7 +73,9 @@ The VS Code template has separate implementation notes in [devcontainer/CLAUDE.m
 
 Treat changes to flags, validation, mounts, prompts, naming, cleanup, or tool invocation as cross-runtime changes. Update both bash launchers, their help text, the Go port where implemented, and the appropriate parity tests.
 
-The Go launcher selects its container runtime in this order: `--container-runtime` (`apple` or `docker`), else `CLAUDE_CONTAINED_RUNTIME`, else an `argv[0]` basename containing `dock`, else the host platform — Apple Containers on macOS, Docker elsewhere. A basename *without* `dock` is not a selection, because "not docked" cannot mean Apple Containers on a host that has none. `--container-runtime` is the one flag the bash launchers do not have; they reject it as unknown, and `tests/arg-parsing.test.sh` pins both halves of that divergence so a later parity fix does not delete the flag.
+The Go launcher selects its container runtime in this order: `--container-runtime` (`apple` or `docker`), else `CLAUDE_CONTAINED_RUNTIME`, else an `argv[0]` basename containing `dock`, else the host platform — Apple Containers on macOS, Docker elsewhere. A basename *without* `dock` is not a selection, because "not docked" cannot mean Apple Containers on a host that has none.
+
+`--container-runtime` and `--build-context` are the two flags the bash launchers do not have; they reject both as unknown, and `tests/arg-parsing.test.sh` pins each half of both divergences so a later parity fix does not delete either flag. `--build-context DIR` names the checkout `--rebuild` builds from, ahead of `CLAUDE_CONTAINED_BUILD_CONTEXT` and self-location (see `docs/adr/0004-go-launcher-rewrite.md`); bash always finds it by self-location, since it is a script inside the checkout.
 
 Code above `internal/runtime` must not mention `container` or `docker` commands.
 

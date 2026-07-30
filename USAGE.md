@@ -27,6 +27,7 @@ There are no positional arguments. Use `-C` for the project directory, `-m` for 
 | `--allow-host HOST` | Allow sandbox egress to a host (repeatable) |
 | `--no-sandbox` | Disable the srt sandbox for this run |
 | `--container-runtime NAME` | Container runtime: `apple` or `docker` (Go launcher only, until the shell launchers are retired) |
+| `--build-context DIR` | Checkout holding the Dockerfile for `--rebuild` (Go launcher only, until the shell launchers are retired) |
 | `-s`, `--shell` | Start a bash shell instead of the selected tool |
 | `-S`, `--ssh` | Enable SSH agent forwarding |
 | `-w`, `--worktree` | Include a Git worktree's main repository without prompting |
@@ -115,6 +116,23 @@ claude-contained --zellij --shell
 
 Use the same flags with `claude-docked` unless a section below calls out a runtime difference.
 
+## Updating
+
+The launcher does not check for updates. To pick up a new version:
+
+```bash
+git -C /path/to/claude-contained pull
+make -C /path/to/claude-contained build
+```
+
+Then rebuild the image if the change touched the Dockerfile or anything under `image/`:
+
+```bash
+claude-contained --rebuild=full
+```
+
+A `git pull` alone only updates the checkout's sources; it neither rebuilds the compiled Go binary nor the container image.
+
 ## Rebuilding the Image
 
 Use a launcher to refresh its image and exit:
@@ -128,7 +146,9 @@ claude-docked --rebuild=full
 
 The default `tools` rebuild refreshes the AI CLI portion of the image and the layers after it. If the targeted rebuild fails, the launcher automatically retries with a full rebuild.
 
-`full` pulls the latest base image and rebuilds everything without cache. Rebuilding requires the launcher to run from this repository checkout, or from a symlink into it, so it can find the local Dockerfile.
+`full` pulls the latest base image and rebuilds everything without cache.
+
+Rebuilding needs to find the checkout that holds the Dockerfile. The Go launcher (`bin/claude-go`, `bin/claude-go-docked`) resolves it in this order: `--build-context DIR`, then `CLAUDE_CONTAINED_BUILD_CONTEXT=DIR`, then its own directory if that holds a `Dockerfile`, then the Git repository enclosing it if *that* root holds one — which is what makes a repo-adjacent install or a symlink into the checkout keep working with no flag at all. The bash launchers only have the last two: they are scripts inside the checkout, so self-location always finds it, and they have no `--build-context` flag.
 
 ### Optional Java Layer
 

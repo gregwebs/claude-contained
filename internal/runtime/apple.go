@@ -8,12 +8,12 @@ import (
 	"os/exec"
 )
 
-// appleHelp is the bash `claude-contained --help` text plus the two
-// runtime-selection additions (the --container-runtime option line and its
-// Behavior bullet), which bash cannot have because it selects its runtime by
-// being a different file. That is the only difference, and it is deliberate --
-// see docs/adr/0004-go-launcher-rewrite.md. A comment cannot live inside the
-// .txt, which is printed verbatim.
+// appleHelp is the bash `claude-contained --help` text plus the
+// runtime-selection and build-context additions, which bash cannot have
+// because it selects its runtime by being a different file and always finds
+// its build context by self-location. That is the only difference, and it is
+// deliberate -- see docs/adr/0004-go-launcher-rewrite.md. A comment cannot
+// live inside the .txt, which is printed verbatim.
 //
 //go:embed help_contained.txt
 var appleHelp string
@@ -89,10 +89,14 @@ func (a *Apple) RenderExec(spec ExecSpec) []string {
 	return append(argv, spec.Command...)
 }
 
+// RenderBuild shares its shape with Docker's: only Bin() differs. See
+// renderCommonArg for the analogous split on the run path.
 func (a *Apple) RenderBuild(spec BuildSpec) []string {
 	argv := []string{a.Bin(), "build"}
-	if spec.Platform != "" {
-		argv = append(argv, "--platform", spec.Platform)
+	// --pull before --no-cache, matching claude-contained:546 argument for
+	// argument: the corpus compares the emitted argv.
+	if spec.Pull {
+		argv = append(argv, "--pull")
 	}
 	if spec.NoCache {
 		argv = append(argv, "--no-cache")

@@ -95,8 +95,10 @@ fmt:
 # Ranges are deliberately bounded rather than open-ended, so a corpus entry
 # added by a later ticket is not silently pulled in before its code exists.
 # Widen this list as each later ticket lands rather than editing the corpus.
+# Newly admitted by ticket 10: 57-59, the rebuild paths (tools, full, and an
+# unknown mode rejected before any build runs).
 DIFF_CASES := --case '0*' --case '1*' --case '2*' --case '3[0-9]-*' --case '40-*' \
-              --case '41-*' --case '4[2-9]-*' --case '5[0-6]-*'
+              --case '41-*' --case '4[2-9]-*' --case '5[0-9]-*'
 
 difftest: build
 	tests/differential/harness.sh \

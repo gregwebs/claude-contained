@@ -31,6 +31,7 @@ Options:
   --session NAME     With --zellij, the Zellij session to start or attach to
   --new-session      With --zellij, start even when another session is live
   --container-runtime NAME  Container runtime: apple or docker (default: per host)
+  --build-context DIR  Checkout holding the Dockerfile for --rebuild
   -h, --help         Show this help message
 
 Behavior:
@@ -57,6 +58,9 @@ Behavior:
   - The container runtime is selected by --container-runtime, else
     CLAUDE_CONTAINED_RUNTIME, else the launcher name, else the host default
     (Apple Containers on macOS, Docker elsewhere).
+  - --rebuild finds the Dockerfile via --build-context, else
+    CLAUDE_CONTAINED_BUILD_CONTEXT, else this executable's own directory or the
+    Git repository containing it.
   - --dns overrides the container's resolvers; set CLAUDE_DNS=1.1.1.1 (comma-
     separated for several) to apply it to every run without typing the flag, or
     CLAUDE_DNS=system to use Docker's runtime default.

@@ -3,27 +3,25 @@
 // The whole flag surface is parsed here even though ticket 02 only executes the
 // basic run path. Splitting the parser would mean porting it twice, and the
 // flag-only CLI is one unit: `--` handling, the require_value rule and the
-// unknown-flag arm all interact. Flags whose behavior is not ported yet are
-// recognized and validated exactly as bash does, then refused with exit 3.
+// unknown-flag arm all interact.
 package cli
 
 import (
 	"fmt"
 	"io"
+	"regexp"
 	"strings"
 
 	"claude-contained/internal/host"
 )
 
-// Exit codes. 0/1/2 mirror bash; 3 is deliberately unused by both bash
-// launchers, so the differential harness reports an unported path as a
-// divergence instead of letting it pass as a matching error.
+// Exit codes. 0/1/2 mirror bash. Status 3 is no longer produced by anything:
+// ticket 10 removed the last CheckUnportedEarly guard (-R/--rebuild), so
+// nothing above this package should reuse it for a new meaning.
 const (
-	ExitOK        = 0
-	ExitFailure   = 1
-	ExitUsage     = 2
-	ExitUnported  = 3
-	unportedIntro = "error: %s is not yet supported by the Go launcher\n"
+	ExitOK      = 0
+	ExitFailure = 1
+	ExitUsage   = 2
 )
 
 // ExitError carries the process exit code for a failure that has already
@@ -42,6 +40,13 @@ func exitWith(code int) error { return &ExitError{Code: code} }
 // second launcher name and leaves this as the only way for Docker users to
 // choose.
 const RuntimeFlag = "--container-runtime"
+
+// BuildContextFlag names the checkout --rebuild builds from. Like RuntimeFlag it
+// is a flag the bash launchers do not have -- they are scripts inside the
+// checkout, so they always find it by self-location -- which makes it a
+// deliberate divergence in the unknown-flag path, pinned by
+// tests/arg-parsing.test.sh rather than left accidental.
+const BuildContextFlag = "--build-context"
 
 // valueTakingFlags are the flags that consume the *following* token as their
 // value. ScanRuntime skips those tokens, so that `-e --container-runtime=docker`
@@ -67,6 +72,7 @@ var valueTakingFlags = map[string]bool{
 	"--dns":          true,
 	"--allow-host":   true,
 	RuntimeFlag:      true,
+	BuildContextFlag: true,
 }
 
 // ScanRuntime extracts the container-runtime flag before Parse runs.
@@ -122,7 +128,10 @@ type Config struct {
 	// ContainerRuntime is --container-runtime's value, unvalidated: the accepted
 	// names live in internal/runtime, which diagnoses a bad one after --help has
 	// had its chance.
-	ContainerRuntime     string
+	ContainerRuntime string
+	// BuildContext is --build-context's value, unvalidated: internal/host checks
+	// for a Dockerfile when a rebuild actually needs one.
+	BuildContext         string
 	ZellijMode           bool
 	ZellijNewSession     bool
 	ZellijSessionName    string
@@ -270,6 +279,19 @@ func Parse(args []string, progName string, shareHostClaudeEnv bool, stderr io.Wr
 			}
 			cfg.ContainerRuntime = v
 
+		case arg == BuildContextFlag:
+			if err := requireValue(BuildContextFlag, next, "a directory"); err != nil {
+				return cfg, err
+			}
+			cfg.BuildContext = next
+			i++
+		case strings.HasPrefix(arg, BuildContextFlag+"="):
+			v := strings.TrimPrefix(arg, BuildContextFlag+"=")
+			if err := requireInline(BuildContextFlag, v, "a non-empty directory"); err != nil {
+				return cfg, err
+			}
+			cfg.BuildContext = v
+
 		case arg == "--readonly-extras":
 			cfg.ReadonlyExtras = true
 
@@ -412,6 +434,23 @@ func Parse(args []string, progName string, shareHostClaudeEnv bool, stderr io.Wr
 		return cfg, err
 	}
 	return cfg, nil
+}
+
+var zellijSessionNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
+
+// ValidateZellijSessionName mirrors validate_zellij_session_name
+// (claude-contained:375-388).
+func ValidateZellijSessionName(name string, stderr io.Writer) error {
+	if name == "" {
+		_, _ = fmt.Fprintln(stderr, "error: Zellij session name cannot be empty")
+		return exitWith(ExitUsage)
+	}
+	if name[0] == '-' || !zellijSessionNamePattern.MatchString(name) {
+		_, _ = fmt.Fprintf(stderr, "error: invalid Zellij session name: %s\n", name)
+		_, _ = fmt.Fprintln(stderr, "       Use only letters, numbers, '_', '.', and '-'; do not start with '-'.")
+		return exitWith(ExitUsage)
+	}
+	return nil
 }
 
 // validate mirrors claude-contained:826-878. Order matters: each check's

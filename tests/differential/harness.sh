@@ -99,6 +99,11 @@ run_side() {
   # render a different runtime than the bash side, and *every* corpus entry
   # would diverge with a diff that looks like a rendering bug.
   unset CLAUDE_CONTAINED_RUNTIME
+  # Same reasoning for the build context: an ambient value would make the Go
+  # side build a different context than bash (which ignores the variable
+  # entirely), and entries 57-58 would diverge with a diff that looks like a
+  # rendering bug.
+  unset CLAUDE_CONTAINED_BUILD_CONTEXT
   CASE_ARGS_OUT=()
   CASE_STDIN_OUT=""
 

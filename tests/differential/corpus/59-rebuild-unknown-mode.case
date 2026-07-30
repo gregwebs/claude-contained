@@ -1,0 +1,7 @@
+CASE_DESCRIPTION="an unknown rebuild mode is rejected before any build runs"
+
+CASE_EXPECT_RUNTIME_ARGS=0
+
+case_args() {
+  CASE_ARGS_OUT=(-R nonsense)
+}

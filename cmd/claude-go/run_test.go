@@ -289,3 +289,137 @@ func TestOtherOwnerSurvivesAcrossRun(t *testing.T) {
 		t.Fatalf("lock reason = %q, want it to still contain aic-other-1111", reason)
 	}
 }
+
+// --- ticket 10: rebuild dispatch and the deleted update check --------------
+
+// rebuildContextFixture returns a directory holding a Dockerfile, passed via
+// --build-context. Self-location cannot be exercised end to end here: under
+// `go test`, os.Executable() resolves to a scratch build directory outside any
+// checkout (internal/host/buildcontext_test.go covers self-location directly,
+// against real fixture checkouts).
+func rebuildContextFixture(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM scratch\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+func TestRebuildExitsWithoutStartingASession(t *testing.T) {
+	withStubbedHostAndPath(t)
+	bc := rebuildContextFixture(t)
+
+	var calls [][]string
+	rec := func(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
+		calls = append(calls, argv)
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runWith(rec, runtime.Darwin, []string{"claude-contained", "-R", "--build-context", bc}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr.String())
+	}
+	if len(calls) != 1 {
+		t.Fatalf("recorded %d runtime invocations, want exactly 1: %#v", len(calls), calls)
+	}
+	if calls[0][1] != "build" {
+		t.Errorf("argv[1] = %q, want build", calls[0][1])
+	}
+	for _, a := range calls[0] {
+		if a == "run" || strings.HasPrefix(a, "aic-") {
+			t.Errorf("rebuild must never start a session: %v", calls[0])
+		}
+	}
+}
+
+func TestRebuildIgnoresTheProjectDirectory(t *testing.T) {
+	withStubbedHostAndPath(t)
+	bc := rebuildContextFixture(t)
+
+	rec := func(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) int { return 0 }
+
+	var stdout, stderr bytes.Buffer
+	code := runWith(rec, runtime.Darwin,
+		[]string{"claude-contained", "-R", "--build-context", bc, "-C", "/nonexistent/definitely"},
+		strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 -- bash rebuilds before it ever resolves the project directory\nstderr:\n%s", code, stderr.String())
+	}
+}
+
+func TestRebuildNoneStartsASession(t *testing.T) {
+	project := t.TempDir()
+	withStubbedHostAndPath(t)
+
+	var calls [][]string
+	rec := func(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
+		calls = append(calls, argv)
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runWith(rec, runtime.Darwin, []string{"claude-contained", "-R", "none", "-s", "-N", "-C", project}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr.String())
+	}
+	if len(calls) != 1 || calls[0][1] != "run" {
+		t.Fatalf("calls = %#v, want exactly one `run`: -R none is the typable sentinel and starts a session", calls)
+	}
+}
+
+func TestRebuildUsesTheSelectedRuntime(t *testing.T) {
+	withStubbedHostAndPath(t)
+	bc := rebuildContextFixture(t)
+
+	var calls [][]string
+	rec := func(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
+		calls = append(calls, argv)
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runWith(rec, runtime.Darwin,
+		[]string{"claude-contained", "--container-runtime=docker", "-R", "--build-context", bc},
+		strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr.String())
+	}
+	if len(calls) != 1 || calls[0][0] != "docker" {
+		t.Fatalf("calls = %#v, want argv[0] = docker", calls)
+	}
+}
+
+// TestNoUpdateCheckAfterARun guards against the deletion in §4.5 being
+// reintroduced: after a full run, stdout says nothing about an update, and
+// nothing fetched -- the project directory's .git/FETCH_HEAD is untouched.
+func TestNoUpdateCheckAfterARun(t *testing.T) {
+	project := host.ResolvePath(t.TempDir())
+	runGitTest(t, project, "init", "-q")
+	runGitTest(t, project, "-c", "user.email=t@example.com", "-c", "user.name=test", "commit", "-q", "--allow-empty", "-m", "init")
+
+	withStubbedHostAndPath(t)
+
+	fetchHead := filepath.Join(project, ".git", "FETCH_HEAD")
+	before, beforeErr := os.Stat(fetchHead)
+
+	fake := func(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) int { return 0 }
+	var stdout, stderr bytes.Buffer
+	code := runWith(fake, runtime.Darwin, []string{"claude-contained", "-s", "-N", "-C", project}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr.String())
+	}
+
+	if strings.Contains(stdout.String(), "Update available") {
+		t.Errorf("stdout should never mention an update: %q", stdout.String())
+	}
+
+	after, afterErr := os.Stat(fetchHead)
+	switch {
+	case beforeErr == nil && (afterErr != nil || !after.ModTime().Equal(before.ModTime())):
+		t.Error("FETCH_HEAD changed during the run: something fetched")
+	case beforeErr != nil && afterErr == nil:
+		t.Error("FETCH_HEAD appeared during the run: something fetched")
+	}
+}

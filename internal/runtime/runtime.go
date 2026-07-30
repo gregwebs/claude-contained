@@ -86,13 +86,18 @@ type ExecSpec struct {
 	Command []string
 }
 
-// BuildSpec is the shape of an image build (ticket 10).
+// BuildSpec is the shape of an image build. There is no Platform field: neither
+// launcher has ever passed --platform on a rebuild (README.md documents it for
+// manual builds, which is a different command), and a field no caller can set is
+// an invitation to render an argument bash never emitted.
 type BuildSpec struct {
-	Tag       string
-	Context   string
-	Platform  string
-	BuildArgs []string
+	Tag     string
+	Context string
+	// Pull refreshes the base image; NoCache discards every layer. The full
+	// rebuild sets both (claude-contained:546).
+	Pull      bool
 	NoCache   bool
+	BuildArgs []string
 }
 
 // Profile is the pure, data-only half of a runtime: everything plan building

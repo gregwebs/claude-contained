@@ -11,8 +11,9 @@ import (
 	"time"
 )
 
-// dockerHelp is the bash `claude-docked --help` text plus the two
-// runtime-selection additions, which bash cannot have. See appleHelp.
+// dockerHelp is the bash `claude-docked --help` text plus the
+// runtime-selection and build-context additions, which bash cannot have. See
+// appleHelp.
 //
 //go:embed help_docked.txt
 var dockerHelp string
@@ -119,10 +120,13 @@ func (d *Docker) RenderExec(spec ExecSpec) []string {
 	return append(argv, spec.Command...)
 }
 
+// RenderBuild shares its shape with Apple's: only Bin() differs.
 func (d *Docker) RenderBuild(spec BuildSpec) []string {
 	argv := []string{d.Bin(), "build"}
-	if spec.Platform != "" {
-		argv = append(argv, "--platform", spec.Platform)
+	// --pull before --no-cache, matching claude-contained:546 argument for
+	// argument: the corpus compares the emitted argv.
+	if spec.Pull {
+		argv = append(argv, "--pull")
 	}
 	if spec.NoCache {
 		argv = append(argv, "--no-cache")

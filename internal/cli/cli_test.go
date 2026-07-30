@@ -171,3 +171,105 @@ func TestRuntimeFlagName(t *testing.T) {
 		t.Error("RuntimeFlag must be listed in valueTakingFlags, or ScanRuntime will misread its value")
 	}
 }
+
+// --build-context, both forms, and last occurrence wins -- the same shape
+// --container-runtime already has.
+func TestBuildContextFlagForms(t *testing.T) {
+	cfg, err := Parse([]string{"--build-context", "/a"}, "claude-contained", false, io.Discard)
+	if err != nil {
+		t.Fatalf("Parse (space form): %v", err)
+	}
+	if cfg.BuildContext != "/a" {
+		t.Errorf("BuildContext = %q, want %q", cfg.BuildContext, "/a")
+	}
+
+	cfg, err = Parse([]string{"--build-context=/b"}, "claude-contained", false, io.Discard)
+	if err != nil {
+		t.Fatalf("Parse (= form): %v", err)
+	}
+	if cfg.BuildContext != "/b" {
+		t.Errorf("BuildContext = %q, want %q", cfg.BuildContext, "/b")
+	}
+
+	cfg, err = Parse([]string{"--build-context", "/a", "--build-context=/b"}, "claude-contained", false, io.Discard)
+	if err != nil {
+		t.Fatalf("Parse (repeated): %v", err)
+	}
+	if cfg.BuildContext != "/b" {
+		t.Errorf("BuildContext = %q, want the last occurrence %q", cfg.BuildContext, "/b")
+	}
+}
+
+func TestBuildContextRequiresValue(t *testing.T) {
+	for _, argv := range [][]string{
+		{"--build-context"},
+		{"--build-context="},
+	} {
+		t.Run(strings.Join(argv, " "), func(t *testing.T) {
+			var stderr bytes.Buffer
+			_, err := Parse(argv, "claude-contained", false, &stderr)
+
+			var exit *ExitError
+			if !asExitError(err, &exit) || exit.Code != ExitUsage {
+				t.Fatalf("Parse(%q) error = %v, want exit %d", argv, err, ExitUsage)
+			}
+			if !strings.Contains(stderr.String(), "requires") {
+				t.Errorf("stderr = %q, want it to mention \"requires\"", stderr.String())
+			}
+		})
+	}
+}
+
+// Validation belongs to the rebuild step (internal/host.FindBuildContext), not
+// to Parse: a nonexistent directory must parse fine.
+func TestBuildContextValueIsNotValidatedByParse(t *testing.T) {
+	cfg, err := Parse([]string{"--build-context", "/definitely/does/not/exist"}, "claude-contained", false, io.Discard)
+	if err != nil {
+		t.Fatalf("Parse should accept an unvalidated directory: %v", err)
+	}
+	if cfg.BuildContext != "/definitely/does/not/exist" {
+		t.Errorf("BuildContext = %q, want the raw value", cfg.BuildContext)
+	}
+}
+
+// The pre-scan and Parse must agree on where --build-context's value ends, or
+// a later flag inside it could be read as a runtime selection by one and not
+// the other.
+func TestScanRuntimeSkipsBuildContextValue(t *testing.T) {
+	args := []string{"--build-context", "--container-runtime=docker"}
+	if got := ScanRuntime(args); got != "" {
+		t.Errorf("ScanRuntime(%q) = %q, want \"\": the token is --build-context's value", args, got)
+	}
+
+	var stderr bytes.Buffer
+	_, err := Parse(args, "claude-contained", false, &stderr)
+	var exit *ExitError
+	if !asExitError(err, &exit) || exit.Code != ExitUsage {
+		t.Fatalf("Parse(%q) error = %v, want exit %d (a dash-leading --build-context value)", args, err, ExitUsage)
+	}
+}
+
+func TestRebuildModeDefaults(t *testing.T) {
+	cases := []struct {
+		name string
+		argv []string
+		want string
+	}{
+		{"no flag", []string{"-s"}, "none"},
+		{"-R alone", []string{"-R"}, "tools"},
+		{"-R before another flag", []string{"-R", "-s"}, "tools"},
+		{"-R full", []string{"-R", "full"}, "full"},
+		{"--rebuild= empty mode", []string{"--rebuild="}, ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, err := Parse(tc.argv, "claude-contained", false, io.Discard)
+			if err != nil {
+				t.Fatalf("Parse(%q): %v", tc.argv, err)
+			}
+			if cfg.RebuildMode != tc.want {
+				t.Errorf("RebuildMode = %q, want %q", cfg.RebuildMode, tc.want)
+			}
+		})
+	}
+}

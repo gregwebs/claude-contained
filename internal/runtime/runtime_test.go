@@ -155,6 +155,62 @@ func TestHelpTextsAreDistinct(t *testing.T) {
 	}
 }
 
+// RenderBuild rendering is shared too, mirroring TestMountRenderingIsShared:
+// both runtimes emit `build [--pull] [--no-cache] [--build-arg K=V]... -t TAG
+// CTX` in that order, differing only in the binary.
+func TestRenderBuildIsSharedApartFromTheBinary(t *testing.T) {
+	cases := []struct {
+		name string
+		spec BuildSpec
+		want []string
+	}{
+		{
+			"tools refresh",
+			BuildSpec{Tag: "claude-contained:latest", Context: "/ctx", BuildArgs: []string{"AI_TOOLS_CACHE_BUST=20260729211507"}},
+			[]string{"build", "--build-arg", "AI_TOOLS_CACHE_BUST=20260729211507", "-t", "claude-contained:latest", "/ctx"},
+		},
+		{
+			"full rebuild",
+			BuildSpec{Tag: "claude-contained:latest", Context: "/ctx", Pull: true, NoCache: true},
+			[]string{"build", "--pull", "--no-cache", "-t", "claude-contained:latest", "/ctx"},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			apple := NewApple(Darwin).RenderBuild(tc.spec)
+			docker := NewDocker(Darwin).RenderBuild(tc.spec)
+
+			if !reflect.DeepEqual(apple[1:], tc.want) {
+				t.Errorf("apple rendered %#v, want %#v", apple[1:], tc.want)
+			}
+			if !reflect.DeepEqual(docker[1:], tc.want) {
+				t.Errorf("docker rendered %#v, want %#v", docker[1:], tc.want)
+			}
+			if apple[0] != "container" || docker[0] != "docker" {
+				t.Errorf("wrong binaries: %q / %q", apple[0], docker[0])
+			}
+		})
+	}
+}
+
+// The help fixtures also carry the build-context additions, alongside the
+// runtime-selection ones TestHelpDocumentsRuntimeSelection already pins.
+// Regenerate with the same diff command documented there.
+func TestHelpDocumentsBuildContext(t *testing.T) {
+	apple := NewApple(Darwin).Profile().Help
+	docker := NewDocker(Darwin).Profile().Help
+
+	for name, help := range map[string]string{"apple": apple, "docker": docker} {
+		if !strings.Contains(help, "--build-context") {
+			t.Errorf("%s help does not document --build-context", name)
+		}
+		if !strings.Contains(help, "CLAUDE_CONTAINED_BUILD_CONTEXT") {
+			t.Errorf("%s help does not document CLAUDE_CONTAINED_BUILD_CONTEXT", name)
+		}
+	}
+}
+
 func contains(haystack []string, needle string) bool {
 	for _, s := range haystack {
 		if s == needle {

@@ -107,10 +107,14 @@ func runWith(exec runner, plat runtime.Platform, argv []string, stdin io.Reader,
 		return cli.ExitFailure
 	}
 
-	// Bash rebuilds or execs into an attach before it ever looks at the project
-	// directory, so these are refused first.
-	if err := cli.CheckUnportedEarly(cfg, stderr); err != nil {
-		return exitCode(err)
+	// Bash rebuilds and exits before it ever looks at the project directory
+	// (claude-contained:892-896), so this sits between the runtime-liveness
+	// check and the attach dispatch: nothing below has run yet, so there is
+	// nothing to unwind and no cleanup to skip.
+	if cfg.RebuildMode != rebuildNone {
+		return runRebuild(ctx, exec, rt, cfg.RebuildMode,
+			host.BuildContextSources{Flag: cfg.BuildContext, Env: h.BuildContext, Self: selfPath(argv[0])},
+			h.Now, stdin, stdout, stderr)
 	}
 
 	// Attach reconnects to a running container and *replaces* this process,
@@ -237,11 +241,6 @@ func runWith(exec runner, plat runtime.Platform, argv []string, stdin io.Reader,
 		return signalExitCode(sig)
 	}
 
-	// check_for_updates runs before bash's `exit`, i.e. before the EXIT trap
-	// releases the locks (claude-contained:1962-1966) -- the launcher holds
-	// the worktree locks across its `git fetch`. The deferred cleanup above
-	// preserves that ordering: it only runs once this function returns.
-	checkForUpdates(argv[0], stdout)
 	return containerExit
 }
 
@@ -560,41 +559,6 @@ func execRuntime(ctx context.Context, argv []string, stdin io.Reader, stdout, st
 		return cli.ExitFailure
 	}
 	return cli.ExitOK
-}
-
-// checkForUpdates is best-effort and silent on every failure, matching the
-// bash subshell that discards all of its own errors. The message names the
-// product, so it stays literal for both container runtimes.
-func checkForUpdates(argv0 string, stdout io.Writer) {
-	scriptDir := filepath.Dir(host.ResolvePath(argv0))
-
-	repoRoot, err := gitOutput(scriptDir, "rev-parse", "--show-toplevel")
-	if err != nil || repoRoot == "" {
-		return
-	}
-	if err := exec.Command("git", "-C", repoRoot, "fetch", "--quiet").Run(); err != nil {
-		return
-	}
-	local, err := gitOutput(repoRoot, "rev-parse", "HEAD")
-	if err != nil {
-		return
-	}
-	upstream, err := gitOutput(repoRoot, "rev-parse", "@{u}")
-	if err != nil {
-		return
-	}
-	if local != upstream {
-		_, _ = fmt.Fprintln(stdout, "")
-		_, _ = fmt.Fprintf(stdout, "Update available for claude-contained! Run 'git -C %s pull' to update.\n", repoRoot)
-	}
-}
-
-func gitOutput(dir string, args ...string) (string, error) {
-	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(out)), nil
 }
 
 func exitCode(err error) int {
