@@ -69,10 +69,38 @@ GitHub Actions runs `make quality` for pull requests and pushes to `main`.
 
 - **Go launcher**: `cmd/claude-contained` is the entry point. `internal/cli` parses flags, `internal/host` inspects and prepares host state, `internal/plan` builds a resumable execution plan, and `internal/runtime` is the container-runtime seam.
 - **Container image**: `Dockerfile` assembles the image. Production helpers and configuration live under `image/`; each script documents its purpose at the top of the file.
-- **Tests**: Go unit tests live beside their packages. Shell suites under `tests/` exercise runtime behavior (`make test-shell` runs the whole matrix). `tests/differential/` holds the corpus that proved the Go launcher behavior-preserving against the retired bash launchers; ticket 12 converts it to golden test data.
+- **Tests**: Go unit tests live beside their packages. Shell suites under `tests/` exercise runtime behavior (`make test-shell` runs every `tests/*.test.sh` against both build outputs). `tests/differential/` is not part of that matrix and is reachable from no `make` target: it holds the corpus that proved the Go launcher behavior-preserving against the retired bash launchers, and its harness now refuses to run because the oracle it compared against is gone. Ticket 12 converts the corpus to golden test data.
 - **Design records**: [CONTEXT.md](CONTEXT.md) defines project vocabulary. Architectural decisions live under [`docs/adr/`](docs/adr/).
 
 The VS Code template has separate implementation notes in [devcontainer/CLAUDE.md](devcontainer/CLAUDE.md).
+
+### Citations of the retired bash launchers
+
+Comments across `internal/` cite the launchers they were ported from, in the form
+`claude-contained:1970` or `claude-docked:1828` -- a file name and a line number.
+Those two files were deleted in ticket 11, so the citations do not resolve against a
+checkout. **They also do not resolve against a single commit**: the launchers kept
+changing while the port was in progress, so a line number means whatever it meant when
+that comment was written. `claude-docked:1828` is the host-gateway mapping as of ticket
+09, but line 1813 by the time the launchers were deleted.
+
+Resolve a citation against the commit that introduced the comment, not against the tip:
+
+```bash
+commit=$(git blame -L 18,19 --porcelain internal/runtime/platform.go | head -1 | cut -d' ' -f1)
+git show "$commit^:claude-docked" | sed -n '1826,1832p'   # a few lines of context
+```
+
+Read them as anchors, not exact offsets -- some point at the head of a block rather than
+the operative line. The deletion parent is `973eeff`, so `git show 973eeff:claude-docked`
+recovers the final state of either launcher when you want the whole file rather than one
+citation.
+
+They are kept rather than stripped because they are the only surviving evidence for
+*why* a behavior is shaped the way it is -- particularly the deliberate divergences,
+where the comment records that the Go code knowingly does something the bash original
+did not. Do not add new ones: for code written after the cut over there is no bash
+original to cite, and the reason belongs in the comment itself.
 
 ## Contributor Guardrails
 
