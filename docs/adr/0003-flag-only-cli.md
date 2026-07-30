@@ -9,7 +9,7 @@ Two flags were split rather than carried over. `-a NAME` had three meanings — 
 ## Consequences
 
 - `claude-contained .` is now an error rather than a synonym for the default. Bare `claude-contained` is unchanged, which is the common case, and the error names both replacement flags.
-- The `claude-docked` name is dropped in a later phase; until then both launchers carry these changes in lockstep, enforced by the test suites that loop over both targets.
+- The `claude-docked` name was dropped in ticket 11: both runtimes now install under one name, and Docker is selected with `--container-runtime=docker` or `CLAUDE_CONTAINED_RUNTIME=docker` (an `argv[0]` basename containing `dock` still works too, as a compat affordance).
 - A second `--` now reaches the tool verbatim instead of being silently dropped, so `--` can be forwarded to tools that have their own separator convention.
 - `--share-skills` accepts both `--share-skills DIR` and `--share-skills=DIR`, matching `--dns`, `--allow-host` and `--env`.
 - Value-taking flags used to run a bare `shift; x="$1"` and died with `unbound variable` under `set -u` when given last; they now report a missing value. `tests/arg-parsing.test.sh` covers this for every such flag.

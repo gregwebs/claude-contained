@@ -1,12 +1,11 @@
 # Usage
 
-This guide covers the complete `claude-contained` and `claude-docked` command-line interface and their runtime behavior. See [README.md](README.md) for installation and the project overview.
+This guide covers the complete `claude-contained` command-line interface and its runtime behavior. See [README.md](README.md) for installation and the project overview.
 
 ## Command Line
 
 ```text
 claude-contained [options] [-- <tool args...>]
-claude-docked [options] [-- <tool args...>]
 ```
 
 There are no positional arguments. Use `-C` for the project directory, `-m` for extra mounts, and the first `--` to pass all remaining arguments to the selected tool verbatim.
@@ -26,8 +25,8 @@ There are no positional arguments. Use `-C` for the project directory, `-m` for 
 | `--dns IP` | Use an IP as a DNS resolver (repeatable; Apple default: `1.1.1.1`) |
 | `--allow-host HOST` | Allow sandbox egress to a host (repeatable) |
 | `--no-sandbox` | Disable the srt sandbox for this run |
-| `--container-runtime NAME` | Container runtime: `apple` or `docker` (Go launcher only, until the shell launchers are retired) |
-| `--build-context DIR` | Checkout holding the Dockerfile for `--rebuild` (Go launcher only, until the shell launchers are retired) |
+| `--container-runtime NAME` | Container runtime: `apple` or `docker` |
+| `--build-context DIR` | Checkout holding the Dockerfile for `--rebuild` |
 | `-s`, `--shell` | Start a bash shell instead of the selected tool |
 | `-S`, `--ssh` | Enable SSH agent forwarding |
 | `-w`, `--worktree` | Include a Git worktree's main repository without prompting |
@@ -114,7 +113,18 @@ claude-contained --zellij --new-session --session review
 claude-contained --zellij --shell
 ```
 
-Use the same flags with `claude-docked` unless a section below calls out a runtime difference.
+Every flag above works the same way regardless of which container runtime is selected, unless a section below calls out a runtime difference. The runtime is chosen in this order:
+
+| Source | Value | Result |
+|---|---|---|
+| `--container-runtime` | `apple` / `docker` (case-insensitive) | that runtime |
+| `CLAUDE_CONTAINED_RUNTIME` | same | that runtime |
+| `argv[0]` basename | contains `dock` | Docker (compat affordance, e.g. a `claude-docked` symlink) |
+| `argv[0]` basename | anything else | not a selection — falls through |
+| host platform | `darwin` | Apple Containers |
+| host platform | anything else | Docker |
+
+`--container-runtime=apple` on a non-macOS host exits 2 with a message on stderr, since Apple Containers has no non-macOS implementation.
 
 ## Updating
 
@@ -138,17 +148,17 @@ A `git pull` alone only updates the checkout's sources; it neither rebuilds the 
 Use a launcher to refresh its image and exit:
 
 ```bash
-claude-contained --rebuild      # Refresh AI CLI layers
-claude-contained --rebuild=full # Pull and rebuild everything without cache
-claude-docked --rebuild
-claude-docked --rebuild=full
+claude-contained --rebuild                                # Refresh AI CLI layers
+claude-contained --rebuild=full                            # Pull and rebuild everything without cache
+claude-contained --container-runtime=docker --rebuild
+claude-contained --container-runtime=docker --rebuild=full
 ```
 
 The default `tools` rebuild refreshes the AI CLI portion of the image and the layers after it. If the targeted rebuild fails, the launcher automatically retries with a full rebuild.
 
 `full` pulls the latest base image and rebuilds everything without cache.
 
-Rebuilding needs to find the checkout that holds the Dockerfile. The Go launcher (`bin/claude-go`, `bin/claude-go-docked`) resolves it in this order: `--build-context DIR`, then `CLAUDE_CONTAINED_BUILD_CONTEXT=DIR`, then its own directory if that holds a `Dockerfile`, then the Git repository enclosing it if *that* root holds one — which is what makes a repo-adjacent install or a symlink into the checkout keep working with no flag at all. The bash launchers only have the last two: they are scripts inside the checkout, so self-location always finds it, and they have no `--build-context` flag.
+Rebuilding needs to find the checkout that holds the Dockerfile. It resolves in this order: `--build-context DIR`, then `CLAUDE_CONTAINED_BUILD_CONTEXT=DIR`, then this executable's own directory if that holds a `Dockerfile`, then the Git repository enclosing it if *that* root holds one — which is what makes a repo-adjacent install or a symlink into the checkout keep working with no flag at all. A symlinked `make install` (the default) keeps this working with no flag; a *copy* of the binary outside the checkout has no enclosing checkout and needs `--build-context` or `CLAUDE_CONTAINED_BUILD_CONTEXT` on every rebuild.
 
 ### Optional Java Layer
 
@@ -230,7 +240,7 @@ export CLAUDE_DNS=1.1.1.1,8.8.8.8
 
 An explicit `--dns` overrides `CLAUDE_DNS`. Set `CLAUDE_DNS=system` or `CLAUDE_DNS=none` to use the container runtime's default resolver.
 
-`claude-docked` keeps Docker's resolver by default but supports the same explicit flag and environment override.
+The Docker runtime keeps Docker's own resolver by default but supports the same explicit flag and environment override.
 
 If DNS still fails, check whether a local resolver, VPN, or iCloud Private Relay is holding UDP port 53:
 
@@ -351,15 +361,15 @@ Container `localhost` refers to the container, not the host. Use `host.local` fo
 Docker Desktop can route to services bound to host `127.0.0.1`. Forward one or more ports:
 
 ```bash
-claude-docked -H 3845
-claude-docked -H 3845 -H 8080
+claude-contained --container-runtime=docker -H 3845
+claude-contained --container-runtime=docker -H 3845 -H 8080
 ```
 
 ### Apple Containers
 
 Apple Containers can reach host services bound to `0.0.0.0`, but not services bound only to `127.0.0.1`. Use `host.local` for services listening on all interfaces. The `-H` flag cannot bridge localhost-only services such as the Figma Desktop MCP.
 
-`-H` still works here for services listening on `0.0.0.0`, so it is not refused — but the launcher warns on stderr that localhost-only services are out of reach. For those, select the Docker runtime (`--container-runtime=docker`, `CLAUDE_CONTAINED_RUNTIME=docker`, or `claude-docked`).
+`-H` still works here for services listening on `0.0.0.0`, so it is not refused — but the launcher warns on stderr that localhost-only services are out of reach. For those, select the Docker runtime (`--container-runtime=docker` or `CLAUDE_CONTAINED_RUNTIME=docker`).
 
 See [apple/container#346](https://github.com/apple/container/issues/346) for the relevant host-routing feature request.
 
@@ -368,10 +378,10 @@ See [apple/container#346](https://github.com/apple/container/issues/346) for the
 Figma Desktop MCP listens on localhost port 3845. Enable the MCP server in Figma Desktop, keep the app running, and use:
 
 ```bash
-claude-docked -H 3845
+claude-contained --container-runtime=docker -H 3845
 ```
 
-For other localhost-only MCPs, use `claude-docked -H PORT`.
+For other localhost-only MCPs, use `claude-contained --container-runtime=docker -H PORT`.
 
 For a service listening on all host interfaces, configure its client to use `host.local`:
 

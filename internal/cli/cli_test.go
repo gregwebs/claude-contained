@@ -127,7 +127,7 @@ func TestContainerRuntimeValueIsNotValidatedByParse(t *testing.T) {
 }
 
 // -h wins wherever it appears, exactly as in bash, so an invalid runtime value
-// must not pre-empt it. The ordering is enforced in cmd/claude-go; this pins the
+// must not pre-empt it. The ordering is enforced in cmd/claude-contained; this pins the
 // parser half.
 func TestHelpIsRecognizedAlongsideARuntimeValue(t *testing.T) {
 	cfg, err := Parse([]string{"--container-runtime=bogus", "--help"}, "claude-contained", false, io.Discard)

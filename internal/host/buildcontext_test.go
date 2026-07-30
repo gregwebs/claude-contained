@@ -50,7 +50,7 @@ func TestBuildContextFlagWins(t *testing.T) {
 	got, err := FindBuildContext(BuildContextSources{
 		Flag: flagDir,
 		Env:  envDir,
-		Self: filepath.Join(selfBin, "claude-go"),
+		Self: filepath.Join(selfBin, "claude-contained"),
 	})
 	if err != nil {
 		t.Fatalf("FindBuildContext: %v", err)
@@ -66,7 +66,7 @@ func TestBuildContextEnvBeatsSelfLocation(t *testing.T) {
 
 	got, err := FindBuildContext(BuildContextSources{
 		Env:  envDir,
-		Self: filepath.Join(selfBin, "claude-go"),
+		Self: filepath.Join(selfBin, "claude-contained"),
 	})
 	if err != nil {
 		t.Fatalf("FindBuildContext: %v", err)
@@ -78,7 +78,7 @@ func TestBuildContextEnvBeatsSelfLocation(t *testing.T) {
 
 func TestBuildContextFromExecutableDirectory(t *testing.T) {
 	dir := contextDir(t, true)
-	exe := filepath.Join(dir, "claude-go")
+	exe := filepath.Join(dir, "claude-contained")
 
 	got, err := FindBuildContext(BuildContextSources{Self: exe})
 	if err != nil {
@@ -91,7 +91,7 @@ func TestBuildContextFromExecutableDirectory(t *testing.T) {
 
 func TestBuildContextFromEnclosingRepository(t *testing.T) {
 	repoRoot, binDir := gitRepoWithDockerfile(t, true)
-	exe := filepath.Join(binDir, "claude-go")
+	exe := filepath.Join(binDir, "claude-contained")
 
 	got, err := FindBuildContext(BuildContextSources{Self: exe})
 	if err != nil {
@@ -104,7 +104,7 @@ func TestBuildContextFromEnclosingRepository(t *testing.T) {
 
 func TestBuildContextRepositoryWithoutDockerfileIsNotAContext(t *testing.T) {
 	_, binDir := gitRepoWithDockerfile(t, false)
-	exe := filepath.Join(binDir, "claude-go")
+	exe := filepath.Join(binDir, "claude-contained")
 
 	_, err := FindBuildContext(BuildContextSources{Self: exe})
 	if !errors.Is(err, ErrNoBuildContext) {
@@ -114,13 +114,13 @@ func TestBuildContextRepositoryWithoutDockerfileIsNotAContext(t *testing.T) {
 
 func TestBuildContextResolvesSymlinkedInstall(t *testing.T) {
 	repoRoot, binDir := gitRepoWithDockerfile(t, true)
-	realExe := filepath.Join(binDir, "claude-go")
+	realExe := filepath.Join(binDir, "claude-contained")
 	if err := os.WriteFile(realExe, []byte("#!/bin/sh\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
 	linkDir := realTempDir(t)
-	link := filepath.Join(linkDir, "claude-go")
+	link := filepath.Join(linkDir, "claude-contained")
 	if err := os.Symlink(realExe, link); err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +142,7 @@ func TestBuildContextExplicitSourceDoesNotFallThrough(t *testing.T) {
 	_, err := FindBuildContext(BuildContextSources{
 		Flag: badFlagDir,
 		Env:  goodEnvDir,
-		Self: filepath.Join(selfBin, "claude-go"),
+		Self: filepath.Join(selfBin, "claude-contained"),
 	})
 
 	var bad *BadBuildContextError

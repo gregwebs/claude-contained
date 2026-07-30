@@ -21,6 +21,17 @@ The goal is a normal local workflow with a smaller host footprint: alias a tool 
 
 ## Quick Start
 
+### Build the launcher
+
+Both runtimes share one Go binary:
+
+```bash
+make build                          # bin/claude-contained
+make install                        # symlinks it to ~/.local/bin/claude-contained
+```
+
+`PREFIX` overrides the install location (default `~/.local`); make sure `$PREFIX/bin` is on your `PATH`.
+
 ### Apple Containers (macOS)
 
 1. Build the image:
@@ -35,7 +46,7 @@ The goal is a normal local workflow with a smaller host footprint: alias a tool 
    container build --platform linux/arm64 --build-arg INCLUDE_JAVA_LAYER=false -t claude-contained .
    ```
 
-2. Put `claude-contained` on your PATH, optionally with aliases:
+2. Optionally set up aliases:
 
    ```bash
    alias claude='claude-contained --yolo'
@@ -52,6 +63,8 @@ The goal is a normal local workflow with a smaller host footprint: alias a tool 
    claude-contained -C ./my-project # Specific project directory
    ```
 
+   macOS selects Apple Containers by default; no flag needed.
+
 ### Docker
 
 1. Build the image:
@@ -62,14 +75,14 @@ The goal is a normal local workflow with a smaller host footprint: alias a tool 
 
    Add `--build-arg INCLUDE_JAVA_LAYER=false` for the smaller image.
 
-2. Put `claude-docked` on your PATH.
-
-3. Run it:
+2. Select the Docker runtime:
 
    ```bash
-   claude-docked                 # Current directory
-   claude-docked -C ./my-project # Specific project directory
+   claude-contained --container-runtime=docker                 # Current directory
+   claude-contained --container-runtime=docker -C ./my-project # Specific project directory
    ```
+
+   Or set `CLAUDE_CONTAINED_RUNTIME=docker` once instead of passing the flag every time. On a non-macOS host, Docker is already the default and neither is required. A `claude-docked` symlink to the installed binary (`ln -s claude-contained ~/.local/bin/claude-docked`) also selects Docker, for anyone who had one from before the two launchers were unified.
 
 See [USAGE.md](USAGE.md) for the complete CLI reference and operational guides.
 
@@ -90,7 +103,7 @@ The contained Claude profile and the other tools' config directories are bind-mo
 - **Path parity**: The project directory, extra mounts, and the host HOME path appear at the same absolute paths inside the container.
 - **UID/GID parity**: The container user adopts the host user's IDs so files created in mounted directories keep useful ownership.
 - **Persistent tool state**: Tool profiles and selected caches live on the host while tool processes run inside the container.
-- **Runtime choices**: `claude-contained` targets Apple Containers and `claude-docked` targets Docker while exposing the same CLI behavior.
+- **Runtime choices**: one launcher targets either Apple Containers or Docker, chosen by `--container-runtime`, `CLAUDE_CONTAINED_RUNTIME`, or the host platform, while exposing the same CLI behavior.
 - **Defense in depth**: The container or VM is the isolation boundary. The included sandbox runtime adds a deny-by-default network guardrail around the tool process.
 - **Host services**: Containers use `host.local` for reachable host services; Docker can additionally forward localhost-bound services with `-H`.
 - **Image files**: Files under `image/` are copied into the image and kept out of the Dockerfile so the Dockerfile stays below Apple Containers' 16k file limit.

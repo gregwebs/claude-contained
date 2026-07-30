@@ -6,11 +6,10 @@
 // elsewhere). How each of those maps to a runtime is that package's business,
 // not this one's.
 //
-// The flag is knowingly absent from the bash launchers, which select their
-// runtime by being different files. That makes it a real divergence in the
-// unknown-flag path, accepted and pinned by a test rather than avoided -- see
-// docs/adr/0004-go-launcher-rewrite.md and ticket 11, which drops the second
-// launcher name entirely.
+// Ticket 11 dropped the second launcher name entirely: both runtimes install
+// under runtime.ProgName, and a Docker user selects the runtime with
+// --container-runtime or CLAUDE_CONTAINED_RUNTIME instead of a different
+// binary name. See docs/adr/0004-go-launcher-rewrite.md.
 package main
 
 import (

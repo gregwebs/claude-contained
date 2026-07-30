@@ -4,8 +4,9 @@
 # given invocation across two independent runs, comparing the full observable
 # result -- runtime arguments, stdout, stderr, exit status, and a filesystem
 # manifest -- rather than just the command line. See README.md in this
-# directory for why target-vs-itself is still the default mode, how --compare
-# crosses two launchers, and how prompts are handled under non-terminal stdin.
+# directory for why target-vs-itself was the default mode before ticket 11,
+# how --compare crosses two launchers, and how prompts are handled under
+# non-terminal stdin.
 #
 # Usage:
 #   tests/differential/harness.sh --target NAME [--target NAME]...

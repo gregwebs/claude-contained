@@ -85,7 +85,7 @@ func TestAppleRuntimeRefusedOffMacOS(t *testing.T) {
 	}
 
 	var stdout, stderr bytes.Buffer
-	argv := []string{"claude-go", "--container-runtime=apple", "-s", "-N", "-C", project}
+	argv := []string{"claude-contained", "--container-runtime=apple", "-s", "-N", "-C", project}
 	code := runWith(failRunner(t), runtime.Linux, argv, strings.NewReader(""), &stdout, &stderr)
 
 	if code != 2 {
@@ -123,7 +123,7 @@ func TestInvalidRuntimeValueIsRefused(t *testing.T) {
 			t.Setenv("CLAUDE_CONTAINED_RUNTIME", tc.env)
 			project := selectionProject(t)
 
-			argv := append([]string{"claude-go", "-s", "-N", "-C", project}, tc.args...)
+			argv := append([]string{"claude-contained", "-s", "-N", "-C", project}, tc.args...)
 			var got []string
 			var stdout, stderr bytes.Buffer
 			code := runWith(recordArgv(&got), runtime.Darwin, argv, strings.NewReader(""), &stdout, &stderr)
@@ -149,7 +149,7 @@ func TestHelpWinsOverInvalidRuntime(t *testing.T) {
 	withStubbedHostAndPath(t)
 
 	var stdout, stderr bytes.Buffer
-	argv := []string{"claude-go", "--container-runtime=bogus", "--help"}
+	argv := []string{"claude-contained", "--container-runtime=bogus", "--help"}
 	if code := runWith(failRunner(t), runtime.Darwin, argv, strings.NewReader(""), &stdout, &stderr); code != 0 {
 		t.Fatalf("exit %d, want 0; stderr: %s", code, stderr.String())
 	}

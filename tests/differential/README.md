@@ -18,45 +18,48 @@ tests/differential/harness.sh [--target NAME]... [--compare REF:CANDIDATE]...
                               [--case GLOB]...
 ```
 
-With neither `--target` nor `--compare`, runs the whole corpus against both
-`claude-contained` and `claude-docked`. Exits non-zero if anything diverges, or
-if a corpus entry turns out to be a no-op (see "The no-observable-result guard"
-below).
+`--target` or `--compare` is required; there is no default target any more.
+Exits non-zero if anything diverges, or if a corpus entry turns out to be a
+no-op (see "The no-observable-result guard" below).
 
 `--compare REF:CANDIDATE` runs each corpus entry once per side against two
-*different* launchers and diffs across them — this is how the Go launcher is
+*different* launchers and diffs across them — this is how the Go launcher was
 proven equivalent to a bash reference. `--case GLOB` (repeatable) restricts the
 corpus by basename, so a caller can assert the subset a given ticket implements
 while the rest stays wired up. Both target names resolve relative to the
-repository root, so `--compare claude-contained:bin/claude-go` works.
+repository root, so `--compare claude-contained:bin/claude-contained` works
+(when the reference exists -- see below).
 
-## Why target-vs-itself is still the default
+## Why target-vs-itself was the default, and why there is no default now
 
-This harness is a prefactor for the Go rewrite (see
-`.scratch/go-launcher/issues/`): the Go binary is one side of the comparison
-and a bash launcher the other, proving the port is behavior-preserving. That is
-what `--compare` does. The *default* mode remains running each corpus entry
-**twice against the same target** — two fresh, fully isolated invocations of
-`claude-contained`, and separately of `claude-docked` — with the two runs
-compared against each other.
+This harness was a prefactor for the Go rewrite (see
+`.scratch/go-launcher/issues/`): the Go binary was one side of the comparison
+and a bash launcher the other, proving the port was behavior-preserving. That
+is what `--compare` does. Before ticket 11, the *default* mode ran each corpus
+entry **twice against the same target** — two fresh, fully isolated
+invocations of `claude-contained`, and separately of `claude-docked` — with
+the two runs compared against each other.
 
-This is deliberate, not a placeholder. `claude-contained` and `claude-docked`
-have a few small, *intentional* differences (`claude-docked` has no forced
-default DNS resolver, and its Docker `run` emits Zellij-tracking labels
+That was deliberate, not a placeholder: `claude-contained` and `claude-docked`
+had a few small, *intentional* differences (`claude-docked` had no forced
+default DNS resolver, and its Docker `run` emitted Zellij-tracking labels
 `claude-contained.zellij*` that Apple Containers has no equivalent for) that
-a direct cross-comparison would report as failures even though nothing is
-wrong. Cross-runtime parity for everything that *should* be identical is
+a direct cross-comparison would have reported as failures even though nothing
+was wrong. Cross-runtime parity for everything that *should* be identical was
 already covered by the existing `tests/*.test.sh` suites, which run the same
-hand-written assertions against both targets. What this harness proves
-instead — and what a fixed-assertion suite structurally can't — is that two
+hand-written assertions against both targets. What this harness proved
+instead — and what a fixed-assertion suite structurally can't — was that two
 independent runs of one target produce byte-identical *normalized* output.
-That's the real substance of the ticket: the isolation is complete (neither
-run can observe the other's mutations) and the normalization of
-timestamp/PID/path noise is complete (two runs of the identical invocation
-never spuriously diverge). The same machinery, driven by
-`--compare claude-contained:bin/claude-go`, compares the Go launcher against a
-bash reference instead of against itself. Note that two `--target` flags do
-*not* cross-compare — each is still run against itself; crossing requires
+
+Ticket 11 deleted both bash launchers once that gate passed clean across the
+whole corpus for both container runtimes (commit `973eeff`), so there is
+nothing left to default to. `--target bin/claude-contained` reproduces the
+target-vs-itself proof against the Go binary alone. The retired bash
+launchers are recoverable with `git show 973eeff:claude-contained` (and
+`:claude-docked`) if a regression ever needs them back; ticket 12 converts
+this corpus into golden test data, which is the long-term replacement for the
+oracle these deletions retired. Note that two `--target` flags do *not*
+cross-compare — each is still run against itself; crossing requires
 `--compare`.
 
 ## How prompts are handled under non-terminal stdin

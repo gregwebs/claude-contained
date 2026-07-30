@@ -28,7 +28,7 @@ const (
 // HostPlatform reports the platform this binary runs on. This is the only
 // production read of runtime.GOOS inside the seam.
 //
-// cmd/claude-go/probe.go reads GOOS too, and deliberately keeps its own read: it
+// cmd/claude-contained/probe.go reads GOOS too, and deliberately keeps its own read: it
 // answers a different question -- "is the host already Linux, so that the
 // cross-platform node_modules overlay is pointless" -- which is about the
 // container *image*, not about the container runtime. Do not unify them.

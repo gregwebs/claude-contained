@@ -126,9 +126,9 @@ func (a *Apple) InspectEnv(ctx context.Context, name string) ([]string, error) {
 }
 
 // EnsureUp assumes a macOS host: an apple selection off darwin is refused by
-// ValidateSelection, which cmd/claude-go calls before anything touches the host,
-// so this method is unreachable on any other platform. There is therefore no
-// defensive platform arm here.
+// ValidateSelection, which cmd/claude-contained calls before anything touches
+// the host, so this method is unreachable on any other platform. There is
+// therefore no defensive platform arm here.
 func (a *Apple) EnsureUp(ctx context.Context, stdout, stderr io.Writer, confirm func(string) bool) error {
 	if exec.CommandContext(ctx, a.Bin(), "system", "status").Run() == nil {
 		return nil

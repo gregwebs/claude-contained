@@ -18,10 +18,10 @@ normalize_text() {
     -e 's/^[0-9]+ [0-9]+$/<PID> <EPOCH>/'
 }
 
-# path_hash_8 <path>; mirrors sanitize_foldername's companion in
-# claude-contained/claude-docked (default_zellij_session_name's hash half),
-# so the harness can compute the exact 8-char hash a given fixture path
-# produces and neutralize it -- unlike the fixture's basename (fixed to
+# path_hash_8 <path>; mirrors internal/zellij.SessionName's hash half (the
+# retired bash launchers' default_zellij_session_name before that), so the
+# harness can compute the exact 8-char hash a given fixture path produces and
+# neutralize it -- unlike the fixture's basename (fixed to
 # "project"/"home" in isolate.sh precisely to dodge this class of noise),
 # the *full* absolute path feeds this hash, and two fixture roots always
 # have different absolute paths by construction.
