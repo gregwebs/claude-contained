@@ -19,8 +19,10 @@ BIN_DIR := bin
 BIN := $(BIN_DIR)/claude-contained
 BIN_DOCKED := $(BIN_DIR)/claude-contained-docked
 
+PREFIX ?= $(HOME)/.local
+
 .PHONY: build test vet fmt clean quality fmt-check lint-go lint-shell check-tools \
-	check-shellcheck-version check-golangci-lint-version
+	check-shellcheck-version check-golangci-lint-version install test-shell
 
 quality: check-tools fmt-check vet test lint-go lint-shell
 
@@ -82,3 +84,15 @@ fmt:
 
 clean:
 	rm -rf $(BIN_DIR)
+
+# A symlink, not a copy: --rebuild finds the Dockerfile by resolving this
+# executable and walking to the enclosing git root (internal/host/buildcontext.go).
+# A copy outside the checkout has no enclosing checkout and forces
+# --build-context / CLAUDE_CONTAINED_BUILD_CONTEXT on every rebuild.
+install: build
+	mkdir -p $(PREFIX)/bin
+	ln -sf $(abspath $(BIN)) $(PREFIX)/bin/claude-contained
+
+test-shell: build
+	@for t in tests/*.test.sh; do echo "== $$t"; \
+	  CLAUDE_CONTAINED_TEST_TARGETS="$(BIN) $(BIN_DOCKED)" "$$t" || exit 1; done
