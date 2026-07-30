@@ -152,14 +152,8 @@ Rebuilding needs to find the checkout that holds the Dockerfile. The Go launcher
 
 ### Optional Java Layer
 
-JBR, HotswapAgent, jdtls, Maven, and JBang are included by default with `INCLUDE_JAVA_LAYER=true`. Build a smaller image without them using:
+JBR, HotswapAgent, jdtls, Maven, and JBang are included with `--build arg INCLUDE_JAVA_LAYER=true`.
 
-```bash
-container build --build-arg INCLUDE_JAVA_LAYER=false -t claude-contained .
-docker build --build-arg INCLUDE_JAVA_LAYER=false -t claude-contained .
-```
-
-Build arguments are not remembered. Pass `--build-arg INCLUDE_JAVA_LAYER=false` again for later full or manual rebuilds if you want Java to remain excluded. Without the Java layer, the Maven cache mount and the Java-focused devcontainer are not useful.
 
 ## Zellij Workspaces
 
