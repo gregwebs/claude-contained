@@ -1,4 +1,4 @@
-// Command claude-go is the Go launcher for contained AI coding sessions.
+// Command claude-contained is the Go launcher for contained AI coding sessions.
 //
 // The container runtime it drives is selected by internal/runtime.Select:
 // --container-runtime, else CLAUDE_CONTAINED_RUNTIME, else an argv[0] basename

@@ -1,9 +1,9 @@
-# The Go launcher. Output deliberately lands in bin/ under a different name than
-# the tracked `claude-contained` / `claude-docked` at the repo root: those are the
-# differential oracle for the rest of the rewrite and must not be overwritten.
+# The Go launcher. Output lands in bin/, built under its primary name.
 #
-# The `-docked` symlink is not cosmetic -- argv[0]'s basename is how the binary
-# selects its container runtime, so the same build serves both.
+# The `-docked` symlink is a compat/test fixture, not a shipped name: argv[0]'s
+# basename containing "dock" still selects the Docker runtime (a compat
+# affordance for users who had `claude-docked` on PATH), and it is how the
+# shell test suites drive the Docker runtime as a target path.
 
 GO ?= go
 GOFMT ?= gofmt
@@ -16,8 +16,8 @@ GOLANGCI_LINT_REQUIRED_VERSION := 2.12.2
 GO_SOURCES := $(shell git ls-files -- '*.go')
 SHELL_SOURCES := $(shell git ls-files -- '*.sh') claude-contained claude-docked
 BIN_DIR := bin
-BIN := $(BIN_DIR)/claude-go
-BIN_DOCKED := $(BIN_DIR)/claude-go-docked
+BIN := $(BIN_DIR)/claude-contained
+BIN_DOCKED := $(BIN_DIR)/claude-contained-docked
 
 .PHONY: build test vet fmt difftest clean quality fmt-check lint-go lint-shell check-tools \
 	check-shellcheck-version check-golangci-lint-version
@@ -68,8 +68,8 @@ lint-shell: check-shellcheck-version
 	$(SHELLCHECK) --severity=warning $(SHELL_SOURCES)
 
 build:
-	$(GO) build -o $(BIN) ./cmd/claude-go
-	ln -sf claude-go $(BIN_DOCKED)
+	$(GO) build -o $(BIN) ./cmd/claude-contained
+	ln -sf claude-contained $(BIN_DOCKED)
 
 test:
 	$(GO) test ./...

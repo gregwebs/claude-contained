@@ -20,7 +20,7 @@ func TestSelectPrecedence(t *testing.T) {
 		{"flag beats env", Selection{Flag: "apple", Env: "docker", Platform: Darwin}, "claude-contained"},
 		{"flag beats argv0", Selection{Flag: "apple", Argv0: "claude-go-docked", Platform: Darwin}, "claude-contained"},
 		{"env beats argv0", Selection{Env: "docker", Argv0: "claude-contained", Platform: Darwin}, "claude-docked"},
-		{"argv0 docked", Selection{Argv0: "bin/claude-go-docked", Platform: Darwin}, "claude-docked"},
+		{"argv0 docked", Selection{Argv0: "bin/claude-contained-docked", Platform: Darwin}, "claude-docked"},
 		{"argv0 docked absolute", Selection{Argv0: "/opt/bin/claude-docked", Platform: Darwin}, "claude-docked"},
 		{"argv0 plain on darwin defaults to apple", Selection{Argv0: "claude-go", Platform: Darwin}, "claude-contained"},
 		{"argv0 plain absolute on darwin", Selection{Argv0: "/usr/local/bin/claude-contained", Platform: Darwin}, "claude-contained"},
