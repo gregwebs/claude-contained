@@ -52,8 +52,14 @@ line_has() { grep -qxF -- "$2" "$1"; }
 file_has() { grep -qF -- "$2" "$1"; }
 
 # target_is_go distinguishes the Go binary from the bash launchers, which is
-# needed for exactly one flag: --container-runtime, which only Go has.
-target_is_go() { [[ "$(basename "$1")" == claude-go* ]]; }
+# needed for exactly one flag: --container-runtime, which only Go has. Ticket
+# 11 gave the Go binary the bash launchers' own basename (claude-contained), so
+# a basename check can no longer tell them apart; the Go binaries are the ones
+# built under bin/, so a path-prefix check is the discriminator now. This
+# whole distinction -- and the bash-side "pinned divergence" branch below --
+# goes away once ticket 11 deletes the bash launchers and retargets this
+# suite at bin/ exclusively.
+target_is_go() { [[ "$1" == bin/* ]]; }
 
 suite() {
   set +e

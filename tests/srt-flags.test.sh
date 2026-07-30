@@ -9,12 +9,8 @@
 # which bypass the entrypoint, since `container exec` does not run ENTRYPOINT --
 # must route through the srt-run wrapper instead.
 #
-# The attach-argv checks run black-box against every target (bash or Go): they
-# stub the runtime to report a running container and assert on the emitted
-# exec argv. The scripts are additionally sourced with CLAUDE_CONTAINED_LIB_ONLY=1
-# for a handful of unit checks against the shell attach-command builders
-# themselves; those only work for a bash launcher and are skipped for a
-# compiled binary.
+# The attach-argv checks run black-box against every target: they stub the
+# runtime to report a running container and assert on the emitted exec argv.
 #
 # Usage: tests/srt-flags.test.sh
 set -uo pipefail
@@ -27,12 +23,6 @@ repo_root="$(dirname "$here")"
 launcher_argv() { # launcher_argv <target> <flags...>
   local target="$1"; shift
   HOME="$home" PATH="${stub_dir}:$PATH" "${repo_root}/${target}" "$@" -N -s -C "$proj" 2>/dev/null
-}
-
-# A compiled binary cannot be sourced, so the CLAUDE_CONTAINED_LIB_ONLY unit
-# checks below apply only to the bash launchers.
-target_is_bash_launcher() { # target_is_bash_launcher <target>
-  [[ "$1" == "claude-contained" || "$1" == "claude-docked" ]]
 }
 
 stub_dir="$(mktemp -d)"
@@ -135,83 +125,14 @@ suite() {
   grep -Fq 'srt-run codex --yolo' <<<"$out"
   _check "attach yolo flag for a non-claude tool" $?
 
-  # 12-16. Attach builders. `container exec` skips the entrypoint, so the wrapper
-  #       has to be prepended here or the attached process runs unsandboxed.
-  #
-  # These assertions source the target to unit-test its shell functions, which
-  # only works for a bash launcher. When the suite is pointed at the Go binary
-  # they are skipped rather than failed -- the Go equivalents are ticket 07's
-  # own unit tests, not this suite's job.
-  if ! target_is_bash_launcher "$target"; then
-    echo "  SKIP: attach-builder unit checks (target is not a bash launcher)"
-    return "$fails"
-  fi
-
-  (
-    export CLAUDE_CONTAINED_LIB_ONLY=1
-    # shellcheck disable=SC1090
-    source "${repo_root}/${target}" -C . >/dev/null 2>&1
-
-    tool="claude"; yolo_mode=0; srt_disable=0
-    build_attach_cmd
-    # Defined by the sourced launcher before this assertion.
-    # shellcheck disable=SC2154
-    [[ "${attach_cmd[0]}" == "srt-run" && "${attach_cmd[1]}" == "/opt/claude/claude" ]]
-  )
-  _check "attach tool command is prefixed with srt-run" $?
-
-  (
-    export CLAUDE_CONTAINED_LIB_ONLY=1
-    # shellcheck disable=SC1090
-    source "${repo_root}/${target}" -C . >/dev/null 2>&1
-
-    tool="claude"; yolo_mode=0; srt_disable=1
-    build_attach_cmd
-    [[ "${attach_cmd[0]}" == "/opt/claude/claude" ]]
-  )
-  _check "attach tool command drops srt-run under --no-sandbox" $?
-
-  (
-    export CLAUDE_CONTAINED_LIB_ONLY=1
-    # shellcheck disable=SC1090
-    source "${repo_root}/${target}" -C . >/dev/null 2>&1
-
-    srt_disable=0
-    build_attach_shell_cmd
-    [[ "${attach_cmd[0]}" == "srt-run" && "${attach_cmd[1]}" == "/usr/local/bin/shell-run" ]]
-  )
-  _check "attach debug shell is prefixed with srt-run" $?
-
-  (
-    export CLAUDE_CONTAINED_LIB_ONLY=1
-    # shellcheck disable=SC1090
-    source "${repo_root}/${target}" -C . >/dev/null 2>&1
-
-    srt_disable=1
-    build_attach_shell_cmd
-    [[ "${attach_cmd[0]}" == "/usr/local/bin/shell-run" && ${#attach_cmd[@]} -eq 1 ]]
-  )
-  _check "attach debug shell drops srt-run under --no-sandbox" $?
-
-  # 16. Yolo flags must still land after the tool, not before the wrapper.
-  (
-    export CLAUDE_CONTAINED_LIB_ONLY=1
-    # shellcheck disable=SC1090
-    source "${repo_root}/${target}" -C . >/dev/null 2>&1
-
-    # Consumed by the sourced builder function.
-    # shellcheck disable=SC2034
-    tool="claude"
-    # Consumed by the sourced builder function.
-    # shellcheck disable=SC2034
-    yolo_mode=1
-    # Consumed by the sourced builder function.
-    # shellcheck disable=SC2034
-    srt_disable=0
-    build_attach_cmd
-    [[ "${attach_cmd[*]}" == "srt-run /opt/claude/claude --dangerously-skip-permissions" ]]
-  )
-  _check "yolo flag stays after the tool, behind the wrapper" $?
+  # Attach builders (`build_attach_cmd`/`build_attach_shell_cmd`, which prefix
+  # srt-run because `container exec`/`docker exec` skip the entrypoint) used to
+  # be additionally unit-tested here by sourcing a bash launcher's shell
+  # functions directly with CLAUDE_CONTAINED_LIB_ONLY=1. A compiled binary
+  # cannot be sourced, so that block is gone now that both launchers are Go;
+  # the Go equivalents are ticket 07's own unit tests
+  # (internal/attach/attach_test.go), and the black-box attach-argv checks
+  # above already exercise the same four shapes end to end.
 
   return "$fails"
 }
