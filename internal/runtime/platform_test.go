@@ -11,36 +11,40 @@ import (
 // on a macOS developer machine and on CI's Linux runner. Nothing here may read
 // runtime.GOOS.
 
+// wantBin discriminates which runtime Select returned. Profile().Name cannot
+// do this any more: ticket 11 gave both runtimes the same program name
+// (ProgName), so Bin() -- "container" for Apple, "docker" for Docker -- is the
+// only observable difference left.
 func TestSelectPrecedence(t *testing.T) {
 	cases := []struct {
-		name string
-		sel  Selection
-		want string
+		name    string
+		sel     Selection
+		wantBin string
 	}{
-		{"flag beats env", Selection{Flag: "apple", Env: "docker", Platform: Darwin}, "claude-contained"},
-		{"flag beats argv0", Selection{Flag: "apple", Argv0: "claude-go-docked", Platform: Darwin}, "claude-contained"},
-		{"env beats argv0", Selection{Env: "docker", Argv0: "claude-contained", Platform: Darwin}, "claude-docked"},
-		{"argv0 docked", Selection{Argv0: "bin/claude-contained-docked", Platform: Darwin}, "claude-docked"},
-		{"argv0 docked absolute", Selection{Argv0: "/opt/bin/claude-docked", Platform: Darwin}, "claude-docked"},
-		{"argv0 plain on darwin defaults to apple", Selection{Argv0: "claude-go", Platform: Darwin}, "claude-contained"},
-		{"argv0 plain absolute on darwin", Selection{Argv0: "/usr/local/bin/claude-contained", Platform: Darwin}, "claude-contained"},
+		{"flag beats env", Selection{Flag: "apple", Env: "docker", Platform: Darwin}, "container"},
+		{"flag beats argv0", Selection{Flag: "apple", Argv0: "claude-contained-docked", Platform: Darwin}, "container"},
+		{"env beats argv0", Selection{Env: "docker", Argv0: "claude-contained", Platform: Darwin}, "docker"},
+		{"argv0 docked", Selection{Argv0: "bin/claude-contained-docked", Platform: Darwin}, "docker"},
+		{"argv0 docked absolute", Selection{Argv0: "/opt/bin/claude-docked", Platform: Darwin}, "docker"},
+		{"argv0 plain on darwin defaults to apple", Selection{Argv0: "claude-contained", Platform: Darwin}, "container"},
+		{"argv0 plain absolute on darwin", Selection{Argv0: "/usr/local/bin/claude-contained", Platform: Darwin}, "container"},
 
 		// The rows that pin the actual fix. A basename without "dock" is not a
 		// selection, so it falls through to the platform default -- which cannot
 		// be Apple Containers on a host that has none.
-		{"argv0 plain on linux defaults to docker", Selection{Argv0: "claude-go", Platform: Linux}, "claude-docked"},
-		{"apple-named argv0 on linux still defaults to docker", Selection{Argv0: "claude-contained", Platform: Linux}, "claude-docked"},
-		{"unknown platform defaults to docker", Selection{Argv0: "claude-go"}, "claude-docked"},
+		{"argv0 plain on linux defaults to docker", Selection{Argv0: "claude-contained", Platform: Linux}, "docker"},
+		{"apple-named argv0 on linux still defaults to docker", Selection{Argv0: "claude-contained", Platform: Linux}, "docker"},
+		{"unknown platform defaults to docker", Selection{Argv0: "claude-contained"}, "docker"},
 
-		{"value case is ignored", Selection{Flag: "DOCKER", Platform: Darwin}, "claude-docked"},
-		{"env case is ignored", Selection{Env: "Apple", Platform: Darwin}, "claude-contained"},
-		{"nothing at all on darwin", Selection{Platform: Darwin}, "claude-contained"},
+		{"value case is ignored", Selection{Flag: "DOCKER", Platform: Darwin}, "docker"},
+		{"env case is ignored", Selection{Env: "Apple", Platform: Darwin}, "container"},
+		{"nothing at all on darwin", Selection{Platform: Darwin}, "container"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := Select(tc.sel).Profile().Name; got != tc.want {
-				t.Errorf("Select(%+v) selected %q, want %q", tc.sel, got, tc.want)
+			if got := Select(tc.sel).Bin(); got != tc.wantBin {
+				t.Errorf("Select(%+v) ran %q, want %q", tc.sel, got, tc.wantBin)
 			}
 		})
 	}
@@ -51,13 +55,13 @@ func TestSelectPrecedence(t *testing.T) {
 func TestSelectIsTotal(t *testing.T) {
 	// "dockerr" is not a Docker selection -- the substring rule is for basenames
 	// only -- so this falls through to argv[0].
-	sel := Selection{Flag: "dockerr", Argv0: "claude-go-docked", Platform: Darwin}
-	if got := Select(sel).Profile().Name; got != "claude-docked" {
+	sel := Selection{Flag: "dockerr", Argv0: "claude-contained-docked", Platform: Darwin}
+	if got := Select(sel).Bin(); got != "docker" {
 		t.Errorf("unrecognized flag value should fall through to argv[0], got %q", got)
 	}
 
 	// And with nothing else to fall through to, the platform default applies.
-	if got := Select(Selection{Env: "bogus", Platform: Darwin}).Profile().Name; got != "claude-contained" {
+	if got := Select(Selection{Env: "bogus", Platform: Darwin}).Bin(); got != "container" {
 		t.Errorf("unrecognized env value should fall through to the default, got %q", got)
 	}
 }
@@ -65,8 +69,8 @@ func TestSelectIsTotal(t *testing.T) {
 // An apple selection off macOS is *selected* so that --help still describes the
 // runtime the user asked about; ValidateSelection is what refuses it.
 func TestSelectAppleOffMacOSStillSelectsApple(t *testing.T) {
-	if got := Select(Selection{Flag: "apple", Platform: Linux}).Profile().Name; got != "claude-contained" {
-		t.Errorf("apple flag on linux selected %q, want claude-contained", got)
+	if got := Select(Selection{Flag: "apple", Platform: Linux}).Bin(); got != "container" {
+		t.Errorf("apple flag on linux ran %q, want container", got)
 	}
 }
 
@@ -191,7 +195,7 @@ func TestSSHIsOffByDefault(t *testing.T) {
 		joined := strings.Join(argv, " ")
 		for _, forbidden := range []string{"--ssh", "/ssh-agent", "SSH_AUTH_SOCK"} {
 			if strings.Contains(joined, forbidden) {
-				t.Errorf("%s: SSH forwarding leaked without -S: %v", rt.Profile().Name, argv)
+				t.Errorf("%s: SSH forwarding leaked without -S: %v", rt.Bin(), argv)
 			}
 		}
 	}

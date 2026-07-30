@@ -109,8 +109,13 @@ type BuildSpec struct {
 // Profile keeps it pure while letting it see the difference.
 type Profile struct {
 	// Name is the program name, used only in the handful of messages that
-	// embed it. The product name (the image tag, "reserved by
-	// claude-contained", the update notice) stays literal in both runtimes.
+	// embed it. Both runtimes carry the same value, ProgName -- ticket 11
+	// dropped the second launcher name -- but the field stays on Profile
+	// rather than collapsing to the package constant directly, because
+	// plan.Build takes a Profile and a hardcoded name inside it would be one
+	// more thing a test double has to remember to set correctly. The product
+	// name (the image tag, "reserved by claude-contained", the update notice)
+	// stays literal in both runtimes.
 	Name string
 	// DefaultDNS applies when neither --dns nor CLAUDE_DNS supplied one. Apple
 	// Containers points at an often-unreachable vmnet gateway, so it forces a
@@ -170,6 +175,12 @@ const (
 	NameDocker = "docker"
 )
 
+// ProgName is the single name the launcher is installed under. It is not
+// runtime-specific: ticket 11 dropped the second launcher name, so a Docker
+// user selects the runtime with --container-runtime or
+// CLAUDE_CONTAINED_RUNTIME instead of a different binary name.
+const ProgName = "claude-contained"
+
 // Selection is every input that decides which container runtime is used, in
 // precedence order. Grouping them makes the precedence one readable expression
 // instead of positional parameters nobody can order from the call site.
@@ -184,19 +195,21 @@ type Selection struct {
 // CLAUDE_CONTAINED_RUNTIME, else an argv[0] basename containing "dock", else the
 // host platform (Apple Containers on macOS, Docker elsewhere).
 //
-// argv[0] remains a selector because bash picks its runtime by *being a
-// different file* and the `claude-go-docked` symlink preserves that. It is no
-// longer the final fallback, though: a basename *without* "dock" is not a
-// selection, because "not docked" cannot mean Apple Containers on a host that
-// has none.
+// argv[0] is no longer the primary selection mechanism -- both runtimes now
+// install under the same name, ProgName -- but it survives as a compat
+// affordance: a user who symlinks `claude-docked` to the installed binary (or
+// still has one from before ticket 11) keeps selecting Docker that way with no
+// flag, and it is how the shell test suites drive the Docker runtime as a
+// target path. It is not the final fallback, though: a basename *without*
+// "dock" is not a selection, because "not docked" cannot mean Apple Containers
+// on a host that has none.
 //
 // Select is total -- an unrecognized Flag or Env value falls through to the next
 // source rather than failing here. It has to run *before* the command line is
 // parsed at all, because cli.Parse's error messages name the program and --help
 // prints the selected runtime's own literal text, so a runtime must exist on
 // every path including the one about to exit 2. Diagnosing a bad value is
-// ValidateSelection's job, called after parsing so that -h/--help still wins,
-// exactly as it does in bash.
+// ValidateSelection's job, called after parsing so that -h/--help still wins.
 func Select(s Selection) Runtime {
 	if rt, ok := byName(s.Flag, s.Platform); ok {
 		return rt

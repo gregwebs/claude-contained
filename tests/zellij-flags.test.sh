@@ -116,14 +116,6 @@ line_has() { # line_has <file> <exact-line>
   grep -Fqx -- "$2" "$1"
 }
 
-# The launcher's program name, as it appears in its own messages. Mirrors the
-# Go binary's runtime selection: a basename containing "dock" is the Docker
-# launcher. Lets the same assertions run against bin/claude-contained{,-docked}.
-# Retired once both runtimes share one program name (internal/runtime.ProgName).
-target_prog_name() { # target_prog_name <target>
-  case "$1" in *dock*) echo claude-docked ;; *) echo claude-contained ;; esac
-}
-
 target_is_docker() { # target_is_docker <target>
   [[ "$1" == *dock* ]]
 }
@@ -160,7 +152,7 @@ suite() {
   _check "--session=NAME accepts valid names and emits env markers" $?
   line_has "$out" "zellij-run" && line_has "$out" "Good_1.2-3" && line_has "$out" "bash" && ! line_has "$out" "/usr/local/bin/shell-run"
   _check "--zellij --shell launches bash inside zellij-run" $?
-  file_has "$out" "missing Zellij support" && file_has "$out" "$(target_prog_name "$target") --rebuild=full"
+  file_has "$out" "missing Zellij support" && file_has "$out" "claude-contained --rebuild=full"
   _check "--zellij command includes stale-image rebuild hint" $?
   if target_is_docker "$target"; then
     line_has "$out" "claude-contained.zellij=1" && line_has "$out" "claude-contained.zellij.session=Good_1.2-3"

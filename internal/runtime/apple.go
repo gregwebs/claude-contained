@@ -8,12 +8,10 @@ import (
 	"os/exec"
 )
 
-// appleHelp is the bash `claude-contained --help` text plus the
-// runtime-selection and build-context additions, which bash cannot have
-// because it selects its runtime by being a different file and always finds
-// its build context by self-location. That is the only difference, and it is
-// deliberate -- see docs/adr/0004-go-launcher-rewrite.md. A comment cannot
-// live inside the .txt, which is printed verbatim.
+// appleHelp is the source of truth for Apple Containers' --help text; changes
+// go through help_contained.txt and the assertions in runtime_test.go, not a
+// diff against a retired bash script -- see docs/adr/0004-go-launcher-rewrite.md.
+// A comment cannot live inside the .txt, which is printed verbatim.
 //
 //go:embed help_contained.txt
 var appleHelp string
@@ -31,7 +29,7 @@ func NewApple(p Platform) *Apple { return &Apple{platform: p} }
 
 func (a *Apple) Profile() Profile {
 	return Profile{
-		Name: "claude-contained",
+		Name: ProgName,
 		// Apple Containers points the container at the vmnet gateway
 		// (192.168.64.1) for DNS, which is frequently unreachable, so a public
 		// resolver is the default rather than an extra flag the user must know.

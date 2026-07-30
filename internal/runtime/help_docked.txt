@@ -1,5 +1,5 @@
 Usage:
-  claude-docked [options] [-- <tool args...>]
+  claude-contained [options] [-- <tool args...>]
 
 Description:
   Runs AI coding assistants inside a Docker container.
@@ -56,7 +56,8 @@ Behavior:
     built-in skills remain visible.
   - SSH agent forwarding is disabled by default; use --ssh to enable (for git push).
   - The container runtime is selected by --container-runtime, else
-    CLAUDE_CONTAINED_RUNTIME, else the launcher name, else the host default
+    CLAUDE_CONTAINED_RUNTIME, else an argv[0] basename containing "dock" (a
+    compat affordance for a "docked" symlink from before), else the host default
     (Apple Containers on macOS, Docker elsewhere).
   - --rebuild finds the Dockerfile via --build-context, else
     CLAUDE_CONTAINED_BUILD_CONTEXT, else this executable's own directory or the
@@ -79,34 +80,34 @@ Behavior:
     Use --zellij --attach [--session NAME] to reconnect to a live Zellij session.
 
 Examples:
-  claude-docked                      # Run claude in current directory
-  claude-docked -t codex             # Run codex instead
-  claude-docked -t copilot           # Run copilot instead
-  claude-docked -t gemini            # Run gemini instead
-  claude-docked -t vibe              # Run vibe instead
-  claude-docked -C ~/code/my-app     # Run in a specific project directory
-  claude-docked -m ../other/project  # Mount an extra directory
-  claude-docked -m ../lib:ro         # Mount ../lib read-only
-  claude-docked --readonly-extras -m ../a -m ../b  # All extra mounts read-only
-  claude-docked -- --model sonnet    # Pass args to tool
-  claude-docked -y -t codex          # Codex with --yolo
-  claude-docked -S                   # Enable SSH agent (for git push)
-  claude-docked -s                   # Debug shell in current directory
-  claude-docked --rebuild            # Refresh AI tools, then exit
-  claude-docked --rebuild=full       # Full fresh rebuild, then exit
-  claude-docked -p 8080:8080         # Expose port 8080
-  claude-docked -H 3845              # Forward host:3845 to container localhost:3845
-  claude-docked -e API_URL=http://host.local:8080  # Set an env var
-  claude-docked --dns 1.1.1.1        # Override the container's DNS resolvers
-  claude-docked --allow-host example.com  # Permit one extra egress host
-  claude-docked --no-sandbox -s      # Debug shell with the sandbox off
-  claude-docked --share-skills /Users/me/Projects/skills
-  claude-docked -a                   # List and attach to running container
-  claude-docked -a myproject         # Attach to container aic-myproject
-  claude-docked --name myproject     # Create a container named aic-myproject
-  claude-docked --zellij             # Start this project in Zellij
-  claude-docked --zellij --attach    # Attach to a live Zellij-backed container
-  claude-docked --zellij --new-session --session=review
+  claude-contained                     # Run claude in current directory
+  claude-contained -t codex            # Run codex instead
+  claude-contained -t copilot          # Run copilot instead
+  claude-contained -t gemini           # Run gemini instead
+  claude-contained -t vibe             # Run vibe instead
+  claude-contained -C ~/code/my-app    # Run in a specific project directory
+  claude-contained -m ../other/project # Mount an extra directory
+  claude-contained -m ../lib:ro        # Mount ../lib read-only
+  claude-contained --readonly-extras -m ../a -m ../b  # All extra mounts read-only
+  claude-contained -- --model sonnet   # Pass args to tool
+  claude-contained -y -t codex         # Codex with --yolo
+  claude-contained -S                  # Enable SSH agent (for git push)
+  claude-contained -s                  # Debug shell in current directory
+  claude-contained --rebuild           # Refresh AI tools, then exit
+  claude-contained --rebuild=full      # Full fresh rebuild, then exit
+  claude-contained -p 8080:8080        # Expose port 8080
+  claude-contained -H 3845             # Forward host:3845 to container localhost:3845
+  claude-contained -e API_URL=http://host.local:8080  # Set an env var
+  claude-contained --dns 1.1.1.1       # Override the container's DNS resolvers
+  claude-contained --allow-host example.com  # Permit one extra egress host
+  claude-contained --no-sandbox -s     # Debug shell with the sandbox off
+  claude-contained --share-skills /Users/me/Projects/skills
+  claude-contained -a                  # List and attach to running container
+  claude-contained -a myproject        # Attach to container aic-myproject
+  claude-contained --name myproject    # Create a container named aic-myproject
+  claude-contained --zellij            # Start this project in Zellij
+  claude-contained --zellij --attach   # Attach to a live Zellij-backed container
+  claude-contained --zellij --new-session --session=review
 
 Build the image:
   docker build -t claude-contained .

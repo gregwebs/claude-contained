@@ -11,8 +11,7 @@ import (
 	"time"
 )
 
-// dockerHelp is the bash `claude-docked --help` text plus the
-// runtime-selection and build-context additions, which bash cannot have. See
+// dockerHelp is the source of truth for the Docker runtime's --help text; see
 // appleHelp.
 //
 //go:embed help_docked.txt
@@ -38,7 +37,7 @@ func NewDocker(p Platform) *Docker { return &Docker{platform: p} }
 
 func (d *Docker) Profile() Profile {
 	return Profile{
-		Name: "claude-docked",
+		Name: ProgName,
 		// Docker keeps its own runtime resolver, so there is no forced default
 		// here -- unlike Apple Containers.
 		DefaultDNS:       nil,

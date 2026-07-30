@@ -163,15 +163,19 @@ func TestHelpWinsOverInvalidRuntime(t *testing.T) {
 
 // The help text belongs to the *selected* runtime, so an apple selection off
 // macOS still describes Apple Containers before being refused.
+//
+// The discriminator is each runtime's description line, not the program name:
+// ticket 11 gave both runtimes the same name (internal/runtime.ProgName), so
+// the name is no longer a valid way to tell which runtime's help was printed.
 func TestHelpDescribesTheSelectedRuntime(t *testing.T) {
 	withStubbedHostAndPath(t)
 
 	for _, tc := range []struct{ flag, want string }{
-		{"--container-runtime=docker", "claude-docked"},
-		{"--container-runtime=apple", "claude-contained"},
+		{"--container-runtime=docker", "Docker container"},
+		{"--container-runtime=apple", "Apple Containers sandbox"},
 	} {
 		var stdout, stderr bytes.Buffer
-		argv := []string{"claude-go", tc.flag, "--help"}
+		argv := []string{"claude-contained", tc.flag, "--help"}
 		if code := runWith(failRunner(t), runtime.Darwin, argv, strings.NewReader(""), &stdout, &stderr); code != 0 {
 			t.Fatalf("exit %d; stderr: %s", code, stderr.String())
 		}

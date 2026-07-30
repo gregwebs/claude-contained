@@ -447,9 +447,15 @@ func TestRunCommand(t *testing.T) {
 		t.Errorf("RunCommand = %#v, want %#v", got, want)
 	}
 
-	// The hint differs by program name; the product line does not.
-	docker := RunCommand("s", "claude-docked", nil)
-	if !strings.Contains(docker[2], "claude-contained image") || !strings.Contains(docker[2], "claude-docked --rebuild=full") {
-		t.Errorf("docker guard = %q, want it to name claude-docked but keep the product line literal", docker[2])
+	// The hint template's %s is the launcher's program name and the product
+	// line is literal, regardless of what's passed for progName. Every real
+	// caller now passes runtime.ProgName for both runtimes (ticket 11 dropped
+	// the second launcher name), but the parameter itself is not stripped
+	// (rebuild.go's reportBuildContextError and cli.Parse keep it too, for the
+	// same reason), so this exercises the templating with an arbitrary value
+	// rather than asserting anything about which names are actually in use.
+	arbitrary := RunCommand("s", "some-other-name", nil)
+	if !strings.Contains(arbitrary[2], "claude-contained image") || !strings.Contains(arbitrary[2], "some-other-name --rebuild=full") {
+		t.Errorf("guard = %q, want the product line literal and the hint naming the passed-in program", arbitrary[2])
 	}
 }

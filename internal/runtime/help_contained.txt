@@ -58,7 +58,8 @@ Behavior:
   - -H reaches host services listening on 0.0.0.0, but Apple Containers cannot
     reach services bound only to 127.0.0.1; use the Docker runtime for those.
   - The container runtime is selected by --container-runtime, else
-    CLAUDE_CONTAINED_RUNTIME, else the launcher name, else the host default
+    CLAUDE_CONTAINED_RUNTIME, else an argv[0] basename containing "dock" (a
+    compat affordance for a "docked" symlink from before), else the host default
     (Apple Containers on macOS, Docker elsewhere).
   - --rebuild finds the Dockerfile via --build-context, else
     CLAUDE_CONTAINED_BUILD_CONTEXT, else this executable's own directory or the

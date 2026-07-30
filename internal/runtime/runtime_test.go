@@ -141,6 +141,25 @@ func TestDNSDefaultsDifferPerRuntime(t *testing.T) {
 	}
 }
 
+// Ticket 11 dropped the second launcher name: both runtimes are installed
+// under the same program name, and a Docker user selects the runtime with
+// --container-runtime or CLAUDE_CONTAINED_RUNTIME instead of a different
+// binary name. This is the single assertion that makes "the Docker
+// launcher's name no longer exists" executable.
+func TestBothRuntimesUseThePrimaryProgramName(t *testing.T) {
+	for name, p := range map[string]Profile{
+		"apple":  NewApple(Darwin).Profile(),
+		"docker": NewDocker(Darwin).Profile(),
+	} {
+		if p.Name != ProgName {
+			t.Errorf("%s Profile.Name = %q, want %q", name, p.Name, ProgName)
+		}
+		if strings.Contains(p.Help, "claude-docked") {
+			t.Errorf("%s help still names the retired Docker launcher", name)
+		}
+	}
+}
+
 // The help texts differ by far more than the program name -- description line,
 // DNS paragraph, a Docker-only build block -- so they are two literal texts.
 func TestHelpTextsAreDistinct(t *testing.T) {
@@ -220,14 +239,9 @@ func contains(haystack []string, needle string) bool {
 	return false
 }
 
-// The help fixtures are the bash help text plus the runtime-selection lines, which
-// bash cannot have -- it selects its runtime by being a different file. Nothing in
-// the corpus or the shell suites compares Go's help against bash's, so this makes
-// the intended difference executable instead of prose. Regenerate the fixtures with
-//
-//	diff <(./claude-contained --help) internal/runtime/help_contained.txt
-//
-// which must show *only* these additions.
+// The help_*.txt fixtures are the source of truth for --help text; there is no
+// longer a bash script to diff against, so changes go through the .txt files
+// and the assertions here and in TestHelpDocumentsBuildContext.
 func TestHelpDocumentsRuntimeSelection(t *testing.T) {
 	apple := NewApple(Darwin).Profile().Help
 	docker := NewDocker(Darwin).Profile().Help
@@ -238,6 +252,12 @@ func TestHelpDocumentsRuntimeSelection(t *testing.T) {
 		}
 		if !strings.Contains(help, "CLAUDE_CONTAINED_RUNTIME") {
 			t.Errorf("%s help does not document CLAUDE_CONTAINED_RUNTIME", name)
+		}
+		// Discoverability, not just presence: the flag must be in the Options
+		// block, not merely mentioned in Notes prose, or a Docker user has no
+		// way to find the flag that replaced the second launcher name.
+		if !strings.Contains(help, "  --container-runtime NAME") {
+			t.Errorf("%s help does not list --container-runtime in the Options block", name)
 		}
 	}
 

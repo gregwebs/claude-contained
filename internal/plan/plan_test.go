@@ -28,7 +28,7 @@ func testHost() host.State {
 }
 
 func appleProfile() runtime.Profile {
-	return runtime.Profile{Name: "claude-contained", DefaultDNS: []string{"1.1.1.1"}}
+	return runtime.Profile{Name: runtime.ProgName, DefaultDNS: []string{"1.1.1.1"}}
 }
 
 // The headline property from the ticket: a full Answers map up front yields the
@@ -440,7 +440,7 @@ func TestBuildUnknownToolStillReportsItsSteps(t *testing.T) {
 // and the two opt-out spellings, which is a `${CLAUDE_DNS+x}` test in bash.
 func TestResolveDNS(t *testing.T) {
 	apple := appleProfile()
-	docker := runtime.Profile{Name: "claude-docked"}
+	docker := runtime.Profile{Name: runtime.ProgName}
 
 	cases := []struct {
 		name  string
@@ -759,7 +759,7 @@ func TestHostForwardNoticePrecedesTheOtherNotices(t *testing.T) {
 func TestHostForwardNoticeAbsentForDocker(t *testing.T) {
 	// The Docker profile carries no notice, which is the whole capability
 	// difference: it reaches host services bound to 127.0.0.1.
-	prof := runtime.Profile{Name: "claude-docked"}
+	prof := runtime.Profile{Name: runtime.ProgName}
 
 	cfg := cli.Config{Tool: "claude", ShellMode: true, HostForwards: []string{"3845"}}
 	program, err := Build(cfg, testHost(), Facts{ProjectDir: "/home/dev/work/app"}, prof, Answers{})

@@ -283,10 +283,10 @@ func TestInspectEnvFailureIsEmptyNotError(t *testing.T) {
 	for _, rt := range []Runtime{NewApple(Darwin), NewDocker(Darwin)} {
 		got, err := rt.InspectEnv(context.Background(), "c")
 		if err != nil {
-			t.Errorf("%s: InspectEnv returned an error: %v", rt.Profile().Name, err)
+			t.Errorf("%s: InspectEnv returned an error: %v", rt.Bin(), err)
 		}
 		if got != nil {
-			t.Errorf("%s: InspectEnv() = %q, want nil", rt.Profile().Name, got)
+			t.Errorf("%s: InspectEnv() = %q, want nil", rt.Bin(), got)
 		}
 	}
 }
