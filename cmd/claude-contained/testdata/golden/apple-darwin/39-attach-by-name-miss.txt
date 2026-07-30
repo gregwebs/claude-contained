@@ -1,0 +1,15 @@
+# case: 39-attach-by-name-miss
+# desc: -a NAME with no matching running container is refused rather than silently creating one
+# config: apple-darwin
+--- exit ---
+1
+--- runtime-args ---
+(empty)
+--- stdout ---
+(empty)
+--- stderr ---
+error: no running container named aic-nonexistent-project
+       use --name nonexistent-project to create a new one
+--- filesystem ---
+HOME dir 755
+PROJ dir 755

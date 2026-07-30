@@ -1,0 +1,23 @@
+# case: 57-rebuild-tools
+# desc: --rebuild refreshes the AI tool layers and exits without a session
+# config: docker-linux
+--- exit ---
+0
+--- runtime-args ---
+== docker build ==
+--build-arg
+AI_TOOLS_CACHE_BUST=<TOKEN>
+-t
+claude-contained:latest
+<PROJ>/buildctx
+
+--- stdout ---
+(empty)
+--- stderr ---
+Rebuilding claude-contained image (AI tools refresh)...
+--- filesystem ---
+HOME dir 755
+PROJ dir 755
+PROJ/buildctx dir 755
+PROJ/buildctx/Dockerfile file 644
+  | FROM scratch

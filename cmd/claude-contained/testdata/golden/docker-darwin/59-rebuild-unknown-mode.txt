@@ -1,0 +1,15 @@
+# case: 59-rebuild-unknown-mode
+# desc: an unknown rebuild mode is rejected before any build runs
+# config: docker-darwin
+--- exit ---
+1
+--- runtime-args ---
+(empty)
+--- stdout ---
+(empty)
+--- stderr ---
+Unknown rebuild mode: nonsense
+Supported rebuild modes: tools, full
+--- filesystem ---
+HOME dir 755
+PROJ dir 755

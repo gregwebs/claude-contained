@@ -1,0 +1,114 @@
+# case: 42-share-skills-symlinked-dir-nested
+# desc: --share-skills mounts a symlinked directory target and its own nested symlink
+# config: apple-darwin
+--- exit ---
+0
+--- runtime-args ---
+== container run ==
+--rm
+-it
+--memory
+8g
+--name
+aic-project-<TIME>
+-e
+HOST_HOME=<HOME>
+-e
+HOST_UID=<UID>
+-e
+HOST_GID=<GID>
+-w
+<PROJ>
+--mount
+type=bind,src=<HOME>/.claude-contained/claude,dst=<HOME>/.claude
+--mount
+type=bind,src=<HOME>/.codex,dst=<HOME>/.codex
+--mount
+type=bind,src=<HOME>/.copilot,dst=<HOME>/.copilot
+--mount
+type=bind,src=<HOME>/.gemini,dst=<HOME>/.gemini
+--mount
+type=bind,src=<HOME>/.vibe,dst=<HOME>/.vibe
+--mount
+type=bind,src=<HOME>/.m2,dst=<HOME>/.m2
+--mount
+type=bind,src=<HOME>/.vaadin,dst=<HOME>/.vaadin
+--mount
+type=bind,src=<PROJ>,dst=<PROJ>
+-e
+TZ=UTC
+--mount
+type=bind,src=<HOME>/.claude/agents,dst=<HOME>/.claude/agents
+--mount
+type=bind,src=<HOME>/.claude/commands,dst=<HOME>/.claude/commands
+--mount
+type=bind,src=<HOME>/.claude/plugins,dst=<HOME>/.claude/plugins
+-e
+GIT_PROTECT_DIRS=<PROJ>
+--dns
+1.1.1.1
+--mount
+type=bind,src=<HOME>/.claude-contained,dst=<HOME>/.claude-contained
+--mount
+type=bind,src=<PROJ>/skills-src,dst=<HOME>/.claude/skills,readonly
+--mount
+type=bind,src=<PROJ>/skills-src,dst=<HOME>/.codex/skills,readonly
+--mount
+type=bind,src=<PROJ>/skills-src,dst=<HOME>/.agents/skills,readonly
+--mount
+type=bind,src=<PROJ>/skills-src,dst=<HOME>/.copilot/skills,readonly
+--mount
+type=bind,src=<PROJ>/skills-src,dst=<HOME>/.gemini/skills,readonly
+--mount
+type=bind,src=<PROJ>/skills-src,dst=<HOME>/.vibe/skills,readonly
+--mount
+type=bind,src=<PROJ>/skills-src,dst=<PROJ>/skills-src,readonly
+--mount
+type=bind,src=<PROJ>/target-dir,dst=<PROJ>/target-dir,readonly
+--mount
+type=bind,src=<PROJ>/nested-target,dst=<PROJ>/nested-target,readonly
+claude-contained:latest
+/usr/local/bin/shell-run
+
+--- stdout ---
+(empty)
+--- stderr ---
+Sharing skills: <PROJ>/skills-src -> <HOME>/.claude/skills (read-only)
+Sharing skills: <PROJ>/skills-src -> <HOME>/.codex/skills (read-only)
+Sharing skills: <PROJ>/skills-src -> <HOME>/.agents/skills (read-only)
+Sharing skills: <PROJ>/skills-src -> <HOME>/.copilot/skills (read-only)
+Sharing skills: <PROJ>/skills-src -> <HOME>/.gemini/skills (read-only)
+Sharing skills: <PROJ>/skills-src -> <HOME>/.vibe/skills (read-only)
+Sharing shared skills source: <PROJ>/skills-src -> <PROJ>/skills-src (read-only)
+Sharing symlinked skills target: <PROJ>/target-dir -> <PROJ>/target-dir (read-only)
+Sharing symlinked skills target: <PROJ>/nested-target -> <PROJ>/nested-target (read-only)
+--- filesystem ---
+HOME dir 755
+HOME/.agents dir 755
+HOME/.claude dir 755
+HOME/.claude-contained dir 755
+HOME/.claude-contained/claude dir 755
+HOME/.claude-contained/claude/agents dir 755
+HOME/.claude-contained/claude/commands dir 755
+HOME/.claude-contained/claude/plugins dir 755
+HOME/.claude-contained/claude/skills dir 755
+HOME/.claude/agents dir 755
+HOME/.claude/commands dir 755
+HOME/.claude/plugins dir 755
+HOME/.claude/skills dir 755
+HOME/.codex dir 755
+HOME/.copilot dir 755
+HOME/.gemini dir 755
+HOME/.m2 dir 755
+HOME/.vaadin dir 755
+HOME/.vibe dir 755
+PROJ dir 755
+PROJ/nested-target dir 755
+PROJ/nested-target/file.md file 644
+  | nested
+PROJ/skills-src dir 755
+PROJ/skills-src/dir-link symlink 755 -> PROJ/target-dir
+PROJ/target-dir dir 755
+PROJ/target-dir/file.md file 644
+  | content
+PROJ/target-dir/nested-link symlink 755 -> PROJ/nested-target

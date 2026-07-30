@@ -1,0 +1,82 @@
+# case: 17-dns-env-var
+# desc: CLAUDE_DNS supplies a per-user resolver list when --dns is absent
+# config: docker-darwin
+--- exit ---
+0
+--- runtime-args ---
+== docker run ==
+--rm
+-it
+--memory
+8g
+--name
+aic-project-<TIME>
+-e
+HOST_HOME=<HOME>
+-e
+HOST_UID=<UID>
+-e
+HOST_GID=<GID>
+-w
+<PROJ>
+--mount
+type=bind,src=<HOME>/.claude-contained/claude,dst=<HOME>/.claude
+--mount
+type=bind,src=<HOME>/.codex,dst=<HOME>/.codex
+--mount
+type=bind,src=<HOME>/.copilot,dst=<HOME>/.copilot
+--mount
+type=bind,src=<HOME>/.gemini,dst=<HOME>/.gemini
+--mount
+type=bind,src=<HOME>/.vibe,dst=<HOME>/.vibe
+--mount
+type=bind,src=<HOME>/.m2,dst=<HOME>/.m2
+--mount
+type=bind,src=<HOME>/.vaadin,dst=<HOME>/.vaadin
+--mount
+type=bind,src=<PROJ>,dst=<PROJ>
+-e
+TZ=UTC
+--mount
+type=bind,src=<HOME>/.claude/skills,dst=<HOME>/.claude/skills
+--mount
+type=bind,src=<HOME>/.claude/agents,dst=<HOME>/.claude/agents
+--mount
+type=bind,src=<HOME>/.claude/commands,dst=<HOME>/.claude/commands
+--mount
+type=bind,src=<HOME>/.claude/plugins,dst=<HOME>/.claude/plugins
+-e
+GIT_PROTECT_DIRS=<PROJ>
+--dns
+9.9.9.9
+--dns
+8.8.8.8
+--mount
+type=bind,src=<HOME>/.claude-contained,dst=<HOME>/.claude-contained
+claude-contained:latest
+/usr/local/bin/shell-run
+
+--- stdout ---
+(empty)
+--- stderr ---
+(empty)
+--- filesystem ---
+HOME dir 755
+HOME/.claude dir 755
+HOME/.claude-contained dir 755
+HOME/.claude-contained/claude dir 755
+HOME/.claude-contained/claude/agents dir 755
+HOME/.claude-contained/claude/commands dir 755
+HOME/.claude-contained/claude/plugins dir 755
+HOME/.claude-contained/claude/skills dir 755
+HOME/.claude/agents dir 755
+HOME/.claude/commands dir 755
+HOME/.claude/plugins dir 755
+HOME/.claude/skills dir 755
+HOME/.codex dir 755
+HOME/.copilot dir 755
+HOME/.gemini dir 755
+HOME/.m2 dir 755
+HOME/.vaadin dir 755
+HOME/.vibe dir 755
+PROJ dir 755

@@ -1,0 +1,17 @@
+# case: 28-env-zellij-attach-refusal
+# desc: --env cannot be combined with --zellij --attach; rejected before any runtime argument is built
+# config: apple-darwin
+--- exit ---
+2
+--- runtime-args ---
+(empty)
+--- stdout ---
+(empty)
+--- stderr ---
+error: --env cannot be combined with --zellij --attach
+       Attaching starts a Zellij client; the pane keeps the environment it was
+       created with, so the variable would silently never reach the tool.
+       Set it when the session is created instead.
+--- filesystem ---
+HOME dir 755
+PROJ dir 755

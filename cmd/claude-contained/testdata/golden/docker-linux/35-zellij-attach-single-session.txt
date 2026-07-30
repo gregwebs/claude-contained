@@ -1,0 +1,28 @@
+# case: 35-zellij-attach-single-session
+# desc: --zellij --attach reconnects directly when exactly one Zellij session is live
+# config: docker-linux
+--- exit ---
+0
+--- runtime-args ---
+== docker exec ==
+-it
+-u
+dev
+-e
+HOME=<HOME>
+-e
+JAVA_HOME=/opt/jbr
+-e
+PATH=/opt/claude:/home/dev/.sdkman/candidates/maven/current/bin:/home/dev/.sdkman/candidates/jbang/current/bin:/opt/jbr/bin:<HOME>/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+aic-live1
+srt-run
+/usr/local/bin/zellij-attach
+my-session
+
+--- stdout ---
+(empty)
+--- stderr ---
+(empty)
+--- filesystem ---
+HOME dir 755
+PROJ dir 755

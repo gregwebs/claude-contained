@@ -1,0 +1,27 @@
+# case: 38-attach-by-name-hit
+# desc: -a NAME attaches directly when a matching container is running
+# config: docker-linux
+--- exit ---
+0
+--- runtime-args ---
+== docker exec ==
+-it
+-u
+dev
+-e
+HOME=<HOME>
+-e
+JAVA_HOME=/opt/jbr
+-e
+PATH=/opt/claude:/home/dev/.sdkman/candidates/maven/current/bin:/home/dev/.sdkman/candidates/jbang/current/bin:/opt/jbr/bin:<HOME>/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+aic-myproject
+srt-run
+/opt/claude/claude
+
+--- stdout ---
+(empty)
+--- stderr ---
+(empty)
+--- filesystem ---
+HOME dir 755
+PROJ dir 755

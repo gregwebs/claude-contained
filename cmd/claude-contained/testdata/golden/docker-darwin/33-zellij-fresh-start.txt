@@ -1,0 +1,100 @@
+# case: 33-zellij-fresh-start
+# desc: --zellij starts a fresh named Zellij session
+# config: docker-darwin
+--- exit ---
+0
+--- runtime-args ---
+== docker run ==
+--rm
+-it
+--memory
+8g
+--name
+aic-project-<TIME>
+-e
+HOST_HOME=<HOME>
+-e
+HOST_UID=<UID>
+-e
+HOST_GID=<GID>
+-w
+<PROJ>
+--mount
+type=bind,src=<HOME>/.claude-contained/claude,dst=<HOME>/.claude
+--mount
+type=bind,src=<HOME>/.codex,dst=<HOME>/.codex
+--mount
+type=bind,src=<HOME>/.copilot,dst=<HOME>/.copilot
+--mount
+type=bind,src=<HOME>/.gemini,dst=<HOME>/.gemini
+--mount
+type=bind,src=<HOME>/.vibe,dst=<HOME>/.vibe
+--mount
+type=bind,src=<HOME>/.m2,dst=<HOME>/.m2
+--mount
+type=bind,src=<HOME>/.vaadin,dst=<HOME>/.vaadin
+--mount
+type=bind,src=<PROJ>,dst=<PROJ>
+-e
+TZ=UTC
+--mount
+type=bind,src=<HOME>/.claude/skills,dst=<HOME>/.claude/skills
+--mount
+type=bind,src=<HOME>/.claude/agents,dst=<HOME>/.claude/agents
+--mount
+type=bind,src=<HOME>/.claude/commands,dst=<HOME>/.claude/commands
+--mount
+type=bind,src=<HOME>/.claude/plugins,dst=<HOME>/.claude/plugins
+-e
+GIT_PROTECT_DIRS=<PROJ>
+-e
+CLAUDE_CONTAINED_ZELLIJ=1
+-e
+CLAUDE_CONTAINED_ZELLIJ_SESSION=cc-project-<PHASH>
+--label
+claude-contained.zellij=1
+--label
+claude-contained.zellij.session=cc-project-<PHASH>
+--mount
+type=bind,src=<HOME>/.claude-contained,dst=<HOME>/.claude-contained
+claude-contained:latest
+bash
+-lc
+if ! command -v "$0" >/dev/null 2>&1; then
+       echo "error: claude-contained image is missing Zellij support (zellij-run)." >&2
+       echo "       Rebuild it with: claude-contained --rebuild=full" >&2
+       exit 127
+     fi
+     exec "$0" "$@"
+zellij-run
+cc-project-<PHASH>
+--
+bash
+
+--- stdout ---
+(empty)
+--- stderr ---
+(empty)
+--- filesystem ---
+HOME dir 755
+HOME/.claude dir 755
+HOME/.claude-contained dir 755
+HOME/.claude-contained/claude dir 755
+HOME/.claude-contained/claude/agents dir 755
+HOME/.claude-contained/claude/commands dir 755
+HOME/.claude-contained/claude/plugins dir 755
+HOME/.claude-contained/claude/skills dir 755
+HOME/.claude-contained/zellij dir 755
+HOME/.claude-contained/zellij/cache dir 755
+HOME/.claude-contained/zellij/data dir 755
+HOME/.claude/agents dir 755
+HOME/.claude/commands dir 755
+HOME/.claude/plugins dir 755
+HOME/.claude/skills dir 755
+HOME/.codex dir 755
+HOME/.copilot dir 755
+HOME/.gemini dir 755
+HOME/.m2 dir 755
+HOME/.vaadin dir 755
+HOME/.vibe dir 755
+PROJ dir 755

@@ -1,0 +1,15 @@
+# case: 31-zellij-session-name-invalid
+# desc: an invalid --session name is rejected before any runtime argument is built
+# config: apple-darwin
+--- exit ---
+2
+--- runtime-args ---
+(empty)
+--- stdout ---
+(empty)
+--- stderr ---
+error: invalid Zellij session name: bad/name
+       Use only letters, numbers, '_', '.', and '-'; do not start with '-'.
+--- filesystem ---
+HOME dir 755
+PROJ dir 755
