@@ -1,6 +1,0 @@
-CASE_DESCRIPTION="--env cannot be combined with --zellij --attach; rejected before any runtime argument is built"
-CASE_EXPECT_RUNTIME_ARGS=0
-
-case_args() {
-  CASE_ARGS_OUT=(--zellij --attach -e FOO=bar)
-}

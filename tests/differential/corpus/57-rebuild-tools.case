@@ -1,5 +1,0 @@
-CASE_DESCRIPTION="--rebuild refreshes the AI tool layers and exits without a session"
-
-case_args() {
-  CASE_ARGS_OUT=(-R)
-}

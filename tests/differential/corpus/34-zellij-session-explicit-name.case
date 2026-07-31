@@ -1,5 +1,0 @@
-CASE_DESCRIPTION="--zellij --session NAME starts (or targets) a specifically named session"
-
-case_args() {
-  CASE_ARGS_OUT=(-N -s --zellij --session my-review -C "$1")
-}

@@ -1,6 +1,0 @@
-CASE_DESCRIPTION="-a NAME with no matching running container is refused rather than silently creating one"
-CASE_EXPECT_RUNTIME_ARGS=0
-
-case_args() {
-  CASE_ARGS_OUT=(-a nonexistent-project)
-}

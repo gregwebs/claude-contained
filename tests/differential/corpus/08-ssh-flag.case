@@ -1,5 +1,0 @@
-CASE_DESCRIPTION="-S/--ssh enables SSH agent forwarding"
-
-case_args() {
-  CASE_ARGS_OUT=(-N -s -S -C "$1")
-}

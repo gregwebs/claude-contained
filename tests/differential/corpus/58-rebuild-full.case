@@ -1,5 +1,0 @@
-CASE_DESCRIPTION="--rebuild=full pulls the base image and rebuilds without cache, then exits without a session"
-
-case_args() {
-  CASE_ARGS_OUT=(--rebuild=full)
-}

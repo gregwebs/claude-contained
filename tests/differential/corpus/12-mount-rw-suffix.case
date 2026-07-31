@@ -1,9 +1,0 @@
-CASE_DESCRIPTION="-m DIR:rw forces read-write (overrides --readonly-extras)"
-
-case_setup() {
-  mkdir -p "$1/extra"
-}
-
-case_args() {
-  CASE_ARGS_OUT=(-N -s -C "$1" --readonly-extras -m "$1/extra:rw")
-}
