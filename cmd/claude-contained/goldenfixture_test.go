@@ -1,8 +1,8 @@
 package main
 
-// goldenfixture_test.go builds the per-case fixture (§5.7), the on-PATH
-// runtime stubs (§5.7), the clearEnv helper (§5.6), the filesystem manifest
-// walk (§5.4) and the textual normalizer (§5.6) that golden_test.go's driver
+// goldenfixture_test.go builds the per-case fixture, the on-PATH
+// runtime stubs, the clearEnv helper, the filesystem manifest
+// walk and the textual normalizer that golden_test.go's driver
 // composes into one pipeline per case. See golden_test.go for the pipeline
 // itself and goldencase_test.go for the 59-case table.
 
@@ -187,7 +187,7 @@ func mustSymlink(t *testing.T, target, link string) {
 	}
 }
 
-// --- the filesystem manifest (§5.4) ----------------------------------------
+// --- the filesystem manifest ------------------------------------------------
 
 // gitRelativePath reports whether path lies at or under a ".git" directory
 // component beneath root, and if so, path's location relative to that .git
@@ -208,7 +208,7 @@ func gitRelativePath(root, path string) (gitRel string, ok bool) {
 	return "", false
 }
 
-// retainedUnderGit is D8's narrowed manifest scope (plan §5.4): everything
+// retainedUnderGit is the narrowed manifest scope: everything
 // under a .git directory is pruned from the walk except
 // .git/worktrees/*/locked, .git/claude-contained-worktree-locks.lock/** and
 // any *.mid-run-snapshot anywhere. This is deliberately narrower than
@@ -281,7 +281,7 @@ func rewriteSymlinkTarget(root, label, target string) string {
 }
 
 // goldenManifest is a direct port of lib/manifest.sh's capture_manifest, with
-// the D8 .git narrowing above. Two passes, deliberately not one: bash's
+// the .git narrowing above. Two passes, deliberately not one: bash's
 // `find root ... | sort` sorts full path *strings* flatly, which disagrees
 // with filepath.Walk's per-directory (hierarchical) order whenever a
 // filename containing '.' sorts differently against a sibling directory than
@@ -338,7 +338,7 @@ func goldenManifest(root, label string) []string {
 			// macOS-generated goldens and CI's Linux runner for a reason
 			// that has nothing to do with the launcher -- so it is
 			// normalized at the source, the same way N8-N10 exist because a
-			// committed golden is compared across machines (§5.6's "an
+			// committed golden is compared across machines ("an
 			// eleventh is an obvious addition, not a guess").
 			lines = append(lines, fmt.Sprintf("%s symlink <LMODE> -> %s", rel, rewriteSymlinkTarget(root, label, target)))
 		case info.IsDir():
@@ -358,7 +358,7 @@ func goldenManifest(root, label string) []string {
 	return lines
 }
 
-// --- normalization (§5.6) --------------------------------------------------
+// --- normalization -----------------------------------------------------------
 
 // normContext is everything normalizeText needs to neutralize one case's
 // host-variance. arch and the two numeric substitutions (N8/N9) are read
@@ -381,10 +381,10 @@ var (
 	rePIDEpoch = regexp.MustCompile(`(?m)^[0-9]+ [0-9]+$`)
 )
 
-// normalizeText applies every named substitution from plan §5.6, in the
-// order that keeps N3 (the fixture root) from cannibalizing the more
-// specific PROJ/HOME substitutions that must run first: N1, N2, then N4-N10,
-// then N3 last.
+// normalizeText applies every named substitution. Order is load-bearing: the
+// fixture root is a prefix of both the project and home paths, so it must be
+// substituted LAST or it would swallow them and every golden would read
+// <ROOT>/project instead of <PROJ>.
 func normalizeText(s string, n normContext) string {
 	s = strings.ReplaceAll(s, n.proj, "<PROJ>")
 	s = strings.ReplaceAll(s, n.home, "<HOME>")

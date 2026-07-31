@@ -1,13 +1,13 @@
 package main
 
-// golden_test.go is the driver (plan §5.2): for every case in goldencase_test.go,
-// across the three configurations D4 names, it builds an isolated fixture
+// golden_test.go is the driver: for every case in goldencase_test.go,
+// across the three runtime/platform configurations, it builds an isolated fixture
 // (goldenfixture_test.go), drives runWith directly -- in-process, with `plat`
-// injected (D1) -- through an injected runner and a swapped replaceProcess,
+// injected -- through an injected runner and a swapped replaceProcess,
 // and compares the normalized, five-section result against
 // testdata/golden/<tree>/<slug>.txt.
 //
-// D1's whole point: internal/runtime.Select only chooses Apple Containers
+// Injecting the platform is the whole point: internal/runtime.Select only chooses Apple Containers
 // when plat == Darwin (runtime.go:222-223), and ValidateSelection refuses an
 // apple selection off Darwin (runtime.go:271-275) -- so a subprocess built
 // from the real GOOS could never select Apple on Linux CI. Injecting plat
@@ -32,20 +32,24 @@ import (
 
 var updateGolden = flag.Bool("update", false, "regenerate golden test data (cmd/claude-contained/testdata/golden)")
 
-// goldenTreeConfig is one of the three D4 configurations: apple-darwin,
+// goldenTreeConfig is one of the three configurations: apple-darwin,
 // docker-darwin, docker-linux. Selected purely by the injected plat and
 // (for the Docker trees) CLAUDE_CONTAINED_RUNTIME=docker -- never a flag,
-// which would perturb every case's own argv (D5).
+// which would perturb every case's own argv.
 type goldenTreeConfig struct {
 	tree      string
 	plat      runtime.Platform
 	dockerEnv bool
+	// sshAgent seeds SSH_AUTH_SOCK. Docker reads the real agent socket only
+	// off Darwin (internal/runtime/docker.go's sshArgs); the Darwin arm uses a
+	// fixed bridged path and ignores the variable entirely.
+	sshAgent bool
 }
 
 var goldenTrees = []goldenTreeConfig{
 	{tree: "apple-darwin", plat: runtime.Darwin, dockerEnv: false},
 	{tree: "docker-darwin", plat: runtime.Darwin, dockerEnv: true},
-	{tree: "docker-linux", plat: runtime.Linux, dockerEnv: true},
+	{tree: "docker-linux", plat: runtime.Linux, dockerEnv: true, sshAgent: true},
 }
 
 func TestGolden(t *testing.T) {
@@ -61,7 +65,7 @@ func TestGolden(t *testing.T) {
 }
 
 func runGoldenCase(t *testing.T, tc goldenCase, gc goldenTreeConfig) {
-	// A host skip, not a tree skip (§6.1): case 49's node_modules overlay
+	// A host skip, not a tree skip: case 49's node_modules overlay
 	// gates on runtime.GOOS at compile time (probe.go:70), which does not
 	// vary with the injected plat. Skipped identically in all three trees
 	// when this test binary was not built for HostGOOS.
@@ -69,7 +73,7 @@ func runGoldenCase(t *testing.T, tc goldenCase, gc goldenTreeConfig) {
 		t.Skipf("%s is %s-only by construction: probe.go:70 gates the node_modules overlay on the compile-time GOOS, which the injected plat does not change", tc.Slug, tc.HostGOOS)
 	}
 
-	// The controlled environment (§5.6): every variable the launcher reads
+	// The controlled environment: every variable the launcher reads
 	// must be explicit, nothing inherited from the developer's shell.
 	clearEnv(t, launcherEnvVars...)
 
@@ -83,7 +87,7 @@ func runGoldenCase(t *testing.T, tc goldenCase, gc goldenTreeConfig) {
 	if gc.dockerEnv {
 		t.Setenv("CLAUDE_CONTAINED_RUNTIME", "docker")
 	}
-	if gc.tree == "docker-linux" {
+	if gc.sshAgent {
 		// Only case 08 (-S/--ssh) renders anything from this; every other
 		// case ignores it, so it is safe to set unconditionally rather than
 		// threading a per-case flag through the table.
@@ -110,7 +114,7 @@ func runGoldenCase(t *testing.T, tc goldenCase, gc goldenTreeConfig) {
 
 	var log strings.Builder
 	captureRun := func(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
-		// The mid-run window (§5.8): copy every declared snapshot path that
+		// The mid-run window: copy every declared snapshot path that
 		// exists right now, before returning -- the only point at which the
 		// worktree lock is observable, since it is released again in the
 		// launcher's own deferred cleanup immediately after this returns.
@@ -139,15 +143,15 @@ func runGoldenCase(t *testing.T, tc goldenCase, gc goldenTreeConfig) {
 	post := fullManifest(fx.home, fx.proj)
 	argvLog := log.String()
 
-	// G1 (§5.5): a case that produced literally nothing distinguishable from
+	// Liveness guard 1: a case that produced literally nothing distinguishable from
 	// doing nothing is a harness error, not a pass.
-	if sideIsEmpty(stdout.String(), stderr.String(), argvLog, exitCode, baseline, post) {
+	if resultIsEmpty(stdout.String(), stderr.String(), argvLog, exitCode, baseline, post) {
 		t.Fatalf("case %s/%s produced no observable result at all (empty stdout/stderr, exit 0, "+
 			"no runtime args, unchanged filesystem): this case didn't reach the behavior it claims to exercise",
 			gc.tree, tc.Slug)
 	}
 
-	// G2 (§5.5), bidirectional.
+	// Liveness guard 2, bidirectional.
 	if tc.NoRuntimeArgs && argvLog != "" {
 		t.Fatalf("case %s declares NoRuntimeArgs but built some: the case declares it exits before "+
 			"building runtime arguments, but built some:\n%s", tc.Slug, argvLog)
@@ -177,8 +181,8 @@ func fullManifest(home, proj string) []string {
 	return append(goldenManifest(home, "HOME"), goldenManifest(proj, "PROJ")...)
 }
 
-// sideIsEmpty is a direct port of harness.sh's side_is_empty (G1, §5.5).
-func sideIsEmpty(stdout, stderr, argvLog string, exitCode int, baseline, post []string) bool {
+// resultIsEmpty is a direct port of the retired harness.sh's side_is_empty.
+func resultIsEmpty(stdout, stderr, argvLog string, exitCode int, baseline, post []string) bool {
 	if stdout != "" || stderr != "" || argvLog != "" || exitCode != 0 {
 		return false
 	}
@@ -230,7 +234,7 @@ func renderInvocation(argv []string) string {
 	return b.String()
 }
 
-// renderGoldenFile assembles the five fixed sections (D3, §5.3), each
+// renderGoldenFile assembles the five fixed sections, each
 // normalized independently, in a fixed order, with "(empty)" standing in for
 // a section with no content so a truncated file can never read as a
 // legitimately empty one.
@@ -265,7 +269,7 @@ func renderGoldenFile(tc goldenCase, gc goldenTreeConfig, exitCode int, argvLog,
 
 // compareOrUpdateGolden is D7: -update regenerates and prints a per-file diff
 // of what it changed; ordinary runs fail loudly when the golden is missing
-// (V7) or diverges.
+// or diverges.
 func compareOrUpdateGolden(t *testing.T, path, rendered string) {
 	t.Helper()
 	existing, err := os.ReadFile(path)

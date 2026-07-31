@@ -67,12 +67,19 @@ GitHub Actions runs `make quality` for pull requests and pushes to `main`.
 
 ### Golden tests
 
-`cmd/claude-contained`'s golden suite drives the built binary in-process
-(`runWith`, with the platform injected) against a stubbed container runtime,
-across three configurations -- `apple-darwin`, `docker-darwin`,
-`docker-linux` -- and asserts the full observable result against committed
-data under `cmd/claude-contained/testdata/golden/`: runtime argv, stdout,
-stderr, exit status, and a filesystem manifest.
+`cmd/claude-contained`'s golden suite calls `runWith` in-process with the host
+platform injected -- **not** a subprocess against the built binary -- and drives
+it against a stubbed container runtime across three configurations:
+`apple-darwin`, `docker-darwin`, `docker-linux`. It asserts the full observable
+result against committed data under `cmd/claude-contained/testdata/golden/`:
+runtime argv, stdout, stderr, exit status, and a filesystem manifest.
+
+Injecting the platform is what makes all three configurations reachable from
+either host. A subprocess reads the real `GOOS`, and Apple Containers is
+unselectable off macOS, so a subprocess suite could never cover `apple-darwin`
+on CI at all. See [ADR-0004](docs/adr/0004-go-launcher-rewrite.md) before
+changing this. The shell suites under `tests/` are what exercise the shipped
+binary end to end.
 
 - `go test ./cmd/claude-contained -run TestGolden` runs it; it is part of
   `make test` / `make quality`.
@@ -97,7 +104,7 @@ stderr, exit status, and a filesystem manifest.
 
 - **Go launcher**: `cmd/claude-contained` is the entry point. `internal/cli` parses flags, `internal/host` inspects and prepares host state, `internal/plan` builds a resumable execution plan, and `internal/runtime` is the container-runtime seam.
 - **Container image**: `Dockerfile` assembles the image. Production helpers and configuration live under `image/`; each script documents its purpose at the top of the file.
-- **Tests**: Go unit tests live beside their packages. Golden tests in `cmd/claude-contained` drive the built binary against a stubbed container runtime and assert the full observable result (runtime argv, stdout, stderr, exit status, filesystem manifest) against `testdata/golden/` -- see "Golden tests" above. Shell suites under `tests/` exercise the shipped build outputs (`make test-shell` runs every `tests/*.test.sh` against both build outputs).
+- **Tests**: Go unit tests live beside their packages. Golden tests in `cmd/claude-contained` call `runWith` in-process against a stubbed container runtime and assert the full observable result (runtime argv, stdout, stderr, exit status, filesystem manifest) against `testdata/golden/` -- see "Golden tests" above. Shell suites under `tests/` exercise the shipped build outputs (`make test-shell` runs every `tests/*.test.sh` against both build outputs), and are the only place the built binary itself is under test.
 - **Design records**: [CONTEXT.md](CONTEXT.md) defines project vocabulary. Architectural decisions live under [`docs/adr/`](docs/adr/).
 
 The VS Code template has separate implementation notes in [devcontainer/CLAUDE.md](devcontainer/CLAUDE.md).

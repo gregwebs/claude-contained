@@ -1,10 +1,14 @@
 package main
 
 // goldencase_test.go is the mechanical transcription of the retired
-// tests/differential/corpus/*.case files (plan §7 P1 step 2) into a Go table.
+// tests/differential/corpus/*.case files into a Go table.
 // Each entry's Slug matches its corpus basename minus the .case extension, so
-// a reviewer can diff this file against `git show <pre-P5 commit>:tests/differential/corpus/NN-slug.case`
-// case by case.
+// a reviewer can check this file against the originals case by case:
+//
+//	git show 20e85cb:tests/differential/corpus/24-env-reserved-always-exact.case
+//
+// 20e85cb is the last commit before the conversion; the corpus was deleted a
+// few commits later, so nothing after it resolves.
 
 import (
 	"fmt"
@@ -20,7 +24,7 @@ import (
 // goldenExtras is everything a case's Setup may hand back to the driver
 // besides the filesystem state it wrote directly: the runtime-liveness stub
 // fixtures (ListOutput/InspectEnv, replacing DIFF_LIST_OUTPUT/DIFF_INSPECT_DIR),
-// the mid-run snapshot paths (replacing DIFF_SNAPSHOT_PATHS, §5.8), and any
+// the mid-run snapshot paths (replacing DIFF_SNAPSHOT_PATHS), and any
 // environment variable the case itself needs set (replacing case_setup's own
 // `export ...` lines).
 type goldenExtras struct {
@@ -32,7 +36,7 @@ type goldenExtras struct {
 	InspectEnv map[string][]string
 	// Snapshot are absolute paths that, if they exist, are copied to
 	// <path>.mid-run-snapshot by the injected runner just before it returns
-	// -- the only window in which the worktree lock is observable (§5.8).
+	// -- the only window in which the worktree lock is observable.
 	Snapshot []string
 	// Env is set via t.Setenv after Setup returns, for the handful of cases
 	// that exist to exercise an ambient variable (CLAUDE_DNS, the rebuild
@@ -49,14 +53,14 @@ type goldenCase struct {
 	Args func(proj, home string) []string
 	// Setup seeds fixtures and returns whatever the driver needs to install
 	// before invoking the launcher. nil means nothing beyond the base
-	// fixture (§5.7).
+	// fixture.
 	Setup func(t *testing.T, proj, home string) goldenExtras
 	// Stdin scripts an answer for a prompt the case deliberately exercises.
 	// "" (the default) means /dev/null-equivalent: an empty reader.
 	Stdin string
 	// NoRuntimeArgs is CASE_EXPECT_RUNTIME_ARGS=0's Go name -- the zero value
 	// must be the common case, and 48 of 59 entries expect runtime args
-	// (plan §5.5, G2).
+	// (liveness guard 2 in golden_test.go).
 	NoRuntimeArgs bool
 	// HostGOOS restricts the case to hosts whose compile-time GOOS matches
 	// (only "darwin", for case 49 -- see its own comment). Empty means no

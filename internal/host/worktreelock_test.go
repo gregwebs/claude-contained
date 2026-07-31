@@ -384,10 +384,10 @@ func TestReleaseWorktreeLocksSurvivesOtherOwner(t *testing.T) {
 	}
 }
 
-// --- §3.2 U1-U8: the genuinely uncovered paths -------------------------
+// --- the paths no other test covered ----------------------------------
 //
-// These are characterization tests for code that already exists (plan §3.2):
-// each of U1-U4 was watched to fail once, against a deliberately broken
+// These are characterization tests for code that already exists:
+// each of the first four was watched to fail once, against a deliberately broken
 // production line, before being left in its passing form. What was broken
 // and observed to fail is recorded on each test below rather than left in
 // the code, per the plan's instruction not to leave debug scaffolding
