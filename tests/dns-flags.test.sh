@@ -36,62 +36,84 @@ for rt in container docker; do
   chmod +x "${stub_dir}/${rt}"
 done
 
-echo "== claude-contained DNS =="
+# Unlike the other suites, this one cannot loop over targets: the two runtimes
+# are asserted to behave *differently* here, since Apple Containers forces a
+# resolver and Docker does not. So the override supplies one name per runtime,
+# positionally, and the Docker half is skipped rather than run against the Apple
+# binary when only one target is given -- which would fail spuriously.
+read -ra targets <<< "${CLAUDE_CONTAINED_TEST_TARGETS:-bin/claude-contained bin/claude-contained-docked}"
+apple_target="${targets[0]}"
+docker_target="${targets[1]:-}"
+
+echo "== ${apple_target} DNS =="
 
 out="$(
   unset CLAUDE_DNS
-  launcher_argv claude-contained
+  launcher_argv "$apple_target"
 )"
 line_has "$out" "--dns" && line_has "$out" "1.1.1.1"
 _check "Apple Containers defaults to a stable resolver" $?
 
 out="$(
   export CLAUDE_DNS=system
-  launcher_argv claude-contained
+  launcher_argv "$apple_target"
 )"
-[[ "$(line_count "$out" "--dns")" -eq 0 ]]
-_check "CLAUDE_DNS=system opts claude-contained back into runtime DNS" $?
+if [[ "$(line_count "$out" "--dns")" -eq 0 ]]; then check_rc=0; else check_rc=1; fi
+_check "CLAUDE_DNS=system opts ${apple_target} back into runtime DNS" "$check_rc"
 
 out="$(
   export CLAUDE_DNS=9.9.9.9,8.8.8.8
-  launcher_argv claude-contained
+  launcher_argv "$apple_target"
 )"
 [[ "$(line_count "$out" "--dns")" -eq 2 ]] && line_has "$out" "9.9.9.9" && line_has "$out" "8.8.8.8"
-_check "CLAUDE_DNS list is expanded for claude-contained" $?
+_check "CLAUDE_DNS list is expanded for ${apple_target}" $?
 
 out="$(
   unset CLAUDE_DNS
-  launcher_argv claude-contained --dns 4.4.4.4
+  launcher_argv "$apple_target" --dns 4.4.4.4
 )"
 [[ "$(line_count "$out" "--dns")" -eq 1 ]] && line_has "$out" "4.4.4.4" && ! line_has "$out" "1.1.1.1"
-_check "explicit --dns overrides claude-contained default" $?
+_check "explicit --dns overrides ${apple_target} default" $?
 
-echo "== claude-docked DNS =="
+if [[ -z "$docker_target" ]]; then
+  echo "== Docker DNS: SKIP (no second target given) =="
+  rm -rf "$stub_dir" "$proj" "$home"
+  if [[ "$fails" -gt 0 ]]; then
+    echo
+    echo "${fails} DNS flag test(s) failed."
+    exit 1
+  fi
+  echo
+  echo "All DNS flag tests passed."
+  exit 0
+fi
+
+echo "== ${docker_target} DNS =="
 
 out="$(
   unset CLAUDE_DNS
-  launcher_argv claude-docked
+  launcher_argv "$docker_target"
 )"
-[[ "$(line_count "$out" "--dns")" -eq 0 ]]
-_check "Docker keeps runtime DNS by default" $?
+if [[ "$(line_count "$out" "--dns")" -eq 0 ]]; then check_rc=0; else check_rc=1; fi
+_check "Docker keeps runtime DNS by default" "$check_rc"
 
 out="$(
   export CLAUDE_DNS=9.9.9.9,8.8.8.8
-  launcher_argv claude-docked
+  launcher_argv "$docker_target"
 )"
 [[ "$(line_count "$out" "--dns")" -eq 2 ]] && line_has "$out" "9.9.9.9" && line_has "$out" "8.8.8.8"
-_check "CLAUDE_DNS list is expanded for claude-docked" $?
+_check "CLAUDE_DNS list is expanded for ${docker_target}" $?
 
 out="$(
   export CLAUDE_DNS=system
-  launcher_argv claude-docked
+  launcher_argv "$docker_target"
 )"
-[[ "$(line_count "$out" "--dns")" -eq 0 ]]
-_check "CLAUDE_DNS=system keeps Docker runtime DNS" $?
+if [[ "$(line_count "$out" "--dns")" -eq 0 ]]; then check_rc=0; else check_rc=1; fi
+_check "CLAUDE_DNS=system keeps Docker runtime DNS" "$check_rc"
 
 out="$(
   export CLAUDE_DNS=9.9.9.9
-  launcher_argv claude-docked --dns 4.4.4.4
+  launcher_argv "$docker_target" --dns 4.4.4.4
 )"
 [[ "$(line_count "$out" "--dns")" -eq 1 ]] && line_has "$out" "4.4.4.4" && ! line_has "$out" "9.9.9.9"
 _check "explicit --dns overrides CLAUDE_DNS" $?

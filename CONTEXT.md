@@ -16,6 +16,10 @@ _Avoid_: extra dir, volume, bind
 The engine that executes contained sessions — either Apple Containers or Docker.
 _Avoid_: backend, engine, driver, provider
 
+**Build context**:
+The directory handed to the container runtime's build command — the repository checkout root, which holds the Dockerfile and `image/`.
+_Avoid_: build dir, source dir, Docker context
+
 **Host Claude profile**:
 The user's normal Claude Code profile directory at `~/.claude`, used by uncontained Claude Code.
 _Avoid_: Host Claude config

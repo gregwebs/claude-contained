@@ -75,8 +75,12 @@ suite() {
     _check "default shares host Claude ${resource}" $?
   done
 
-  [[ ! -e "${home}/.claude-contained/claude/settings.json" ]]
-  _check "default does not copy host Claude settings.json into contained profile" $?
+  if [[ ! -e "${home}/.claude-contained/claude/settings.json" ]]; then
+    check_rc=0
+  else
+    check_rc=1
+  fi
+  _check "default does not copy host Claude settings.json into contained profile" "$check_rc"
   ! grep -Fq "${home}/.claude/settings.json" <<<"$out"
   _check "default does not mount host Claude settings.json directly" $?
 
@@ -97,7 +101,8 @@ suite() {
 }
 
 total=0
-for target in claude-contained claude-docked; do
+read -ra targets <<< "${CLAUDE_CONTAINED_TEST_TARGETS:-bin/claude-contained bin/claude-contained-docked}"
+for target in "${targets[@]}"; do
   echo "== ${target} =="
   suite "$target"
   total=$((total + $?))

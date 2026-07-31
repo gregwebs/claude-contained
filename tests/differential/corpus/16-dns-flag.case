@@ -1,5 +1,0 @@
-CASE_DESCRIPTION="--dns overrides the default resolver (repeatable)"
-
-case_args() {
-  CASE_ARGS_OUT=(-N -s -C "$1" --dns 9.9.9.9 --dns 8.8.8.8)
-}

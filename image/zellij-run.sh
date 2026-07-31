@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Start a contained Zellij session and keep the container alive while it remains live.
 set -euo pipefail
 
 session="${1:-}"

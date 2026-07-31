@@ -1,5 +1,0 @@
-CASE_DESCRIPTION="-e KEY=VALUE passes an env var to the tool process"
-
-case_args() {
-  CASE_ARGS_OUT=(-N -s -C "$1" -e API_URL=http://host.local:8080 -e FOO=bar)
-}

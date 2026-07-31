@@ -1,0 +1,14 @@
+# case: 32-readonly-project-dir-rejected
+# desc: a :ro suffix on the project directory itself is rejected before any runtime argument is built
+# config: docker-linux
+--- exit ---
+2
+--- runtime-args ---
+(empty)
+--- stdout ---
+(empty)
+--- stderr ---
+error: project directory cannot be read-only
+--- filesystem ---
+HOME dir 755
+PROJ dir 755

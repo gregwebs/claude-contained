@@ -1,5 +1,0 @@
-CASE_DESCRIPTION="-y/--yolo skips permission prompts"
-
-case_args() {
-  CASE_ARGS_OUT=(-N -y -C "$1")
-}

@@ -1,0 +1,30 @@
+# case: 40-attach-picker
+# desc: bare -a with multiple running containers prompts a picker (scripted stdin choice)
+# config: apple-darwin
+--- exit ---
+0
+--- runtime-args ---
+== container exec ==
+-it
+-u
+dev
+-e
+HOME=<HOME>
+-e
+JAVA_HOME=/opt/jbr
+-e
+PATH=/opt/claude:/home/dev/.sdkman/candidates/maven/current/bin:/home/dev/.sdkman/candidates/jbang/current/bin:/opt/jbr/bin:<HOME>/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+aic-beta
+srt-run
+/opt/claude/claude
+
+--- stdout ---
+Running containers:
+  1) alpha
+  2) beta
+
+--- stderr ---
+(empty)
+--- filesystem ---
+HOME dir 755
+PROJ dir 755

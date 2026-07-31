@@ -1,0 +1,143 @@
+package plan
+
+import "claude-contained/internal/env"
+
+// AccountStateFacts mirrors, one predicate per field, the exact stat tests the
+// bash migration performs (claude-contained:1827-1841).
+//
+// They are kept as separate predicates rather than collapsed into one enum
+// because bash deliberately mixes following and non-following tests, and on
+// both files: `-f` and `-e` follow symlinks while `-L` does not, and the two
+// checks on the shared file are not the same test (`-e` in the repair branch,
+// `-f` in the link branch). Collapsing any pair of them is how a careless port
+// either renames a symlink over its own target or deletes a healthy one --
+// either way taking the user's credentials with it.
+type AccountStateFacts struct {
+	// Exists is `-e ~/.claude.json`: follows symlinks, so a dangling symlink
+	// reports false even though something is there.
+	Exists bool
+	// IsRegularFile is `-f ~/.claude.json`: also follows symlinks.
+	IsRegularFile bool
+	// IsSymlink is `-L ~/.claude.json`: does not follow.
+	IsSymlink bool
+	// SharedExists is `-e ~/.claude-contained/.claude.json`, of any file type.
+	SharedExists bool
+	// SharedIsRegularFile is `-f` on the same path. Distinct from SharedExists:
+	// a directory there satisfies one and not the other.
+	SharedIsRegularFile bool
+}
+
+// Facts is everything about the filesystem that plan building needs but is not
+// allowed to look up itself. Probing happens once, in the impure layer; Build
+// is then a pure function of Config, host.State, Facts, Profile and Answers.
+type Facts struct {
+	// ProjectDir is the resolved project directory.
+	ProjectDir string
+	// ExtraMounts are the resolved extra mount paths, parallel to ExtraModes.
+	ExtraMounts []string
+	// ExtraModes is "rw" or "ro" per extra mount.
+	ExtraModes []string
+
+	// WorktreeMainRepo is the main repository root when the project directory
+	// is a linked worktree, else empty.
+	WorktreeMainRepo string
+
+	// GitConfigExists reports whether the host has a ~/.gitconfig to copy.
+	GitConfigExists bool
+	// AccountState is the stat picture of the Claude account state file.
+	AccountState AccountStateFacts
+
+	// NodeOverlayDirs are the mount roots that look like Node projects, in the
+	// order bash checks them. Empty on a Linux host, where the overlay is
+	// unnecessary.
+	NodeOverlayDirs []string
+	// NodeOverlayTargetEmpty reports, per NodeOverlayDirs entry, whether the
+	// overlay directory will be empty once created. Captured before any mkdir,
+	// because creating it changes the answer.
+	NodeOverlayTargetEmpty map[string]bool
+
+	// RunningContainers are the names the runtime currently reports, used to
+	// deduplicate the generated container name.
+	RunningContainers []string
+
+	// Env is the finished tool-process environment, in emission order, with
+	// every key already deduplicated and validated. Precedence between the
+	// command line, the project env file and the launcher's built-ins is
+	// settled before planning, so Build only has to emit this list.
+	Env []env.Pair
+
+	// SharedSkills is the result of the --share-skills symlink scan. Its Dir
+	// is empty when the flag was not given, in which case Build does nothing
+	// with it at all.
+	SharedSkills SharedSkills
+
+	// WorktreeLocks is the auto-lock offer's candidate set for the case where
+	// the PromptWorktreeGit question was declined or never asked (or there was
+	// no worktree question at all). WorktreeLocksWithGitMount is the candidate
+	// set for the case where it was accepted, or -w/--worktree-mode was given.
+	//
+	// The two are not derivable from one another: accepting the prompt both
+	// changes which repository is at risk (worktree_lock_repo falls back to
+	// get_main_worktree_repo_root only when there is no worktree repo at all)
+	// and enlarges the mounted roots the hidden-worktree scan runs against (the
+	// main repository's .git becomes visible), so Build cannot compute one from
+	// the other -- both must be probed up front.
+	WorktreeLocks             WorktreeLockCandidates
+	WorktreeLocksWithGitMount WorktreeLockCandidates
+
+	// ZellijSession is the resolved Zellij session name, or "" when --zellij was
+	// not given. Resolved (and validated, and gated against live sessions) by the
+	// driver before Build runs, because the gate needs the container runtime and
+	// Build must stay pure (claude-contained:1439-1471).
+	ZellijSession string
+}
+
+// WorktreeLockCandidates is the auto-lock offer's input for one of the two
+// possible answers to PromptWorktreeGit (or for the no-prompt case, where
+// both fields carry the same value).
+type WorktreeLockCandidates struct {
+	// Repo is the repository whose linked worktrees are at risk, "" when
+	// there is nothing to protect.
+	Repo string
+	// Hidden are its linked worktrees the container cannot see, in git's
+	// order.
+	Hidden []string
+}
+
+// SharedSkillLink is one symlink processed by the --share-skills scan, in
+// exactly the order scan_shared_skill_symlink_tree (claude-contained:1716-1743)
+// would visit it -- including its recursion into directory targets, which is
+// filesystem I/O and therefore already flattened here by the probe rather than
+// performed by Build.
+type SharedSkillLink struct {
+	// Path is the symlink itself, as the find-order scan reports it.
+	Path string
+	// Resolved is the realpath of Path's target.
+	Resolved string
+	// Missing means Resolved does not exist. Bash exits 2 at exactly this
+	// point, after everything gathered before it has already been mutated;
+	// the replay matches that by stopping here too.
+	Missing bool
+	// IsDir is meaningful only when !Missing: Resolved is a directory, so the
+	// mount targets Resolved itself, and the Links produced by recursing into
+	// it follow immediately afterward in the same slice.
+	IsDir bool
+	// ParentDir is Resolved's resolved dirname, used as the mount when !IsDir.
+	ParentDir string
+}
+
+// SharedSkills is everything --share-skills needs that requires filesystem
+// access, probed once so Build stays pure.
+type SharedSkills struct {
+	// Dir is the resolved --share-skills directory, or "" when the flag was
+	// not given.
+	Dir string
+	// CodexSystemDir reports whether <codex dir>/skills/.system is a
+	// directory -- the one case where a tool's built-in skills stay visible
+	// underneath the shared mount (claude-contained:1754-1757).
+	CodexSystemDir bool
+	// Links is the flattened, ordered result of scanning .system (if present)
+	// and then Dir, sharing one seen-directories set across both -- matching
+	// bash's single global array.
+	Links []SharedSkillLink
+}

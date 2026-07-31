@@ -7,11 +7,21 @@
 *.swp
 *~
 
-# Launcher scripts and tests run on the host, never inside the image.
-# Keeping them out of the context also keeps every file Apple Containers
-# has to transfer under its 16k-per-file limit.
-claude-contained
-claude-docked
+# Tests and the devcontainer template run on the host, never inside the
+# image. Keeping them out of the context also keeps every file Apple
+# Containers has to transfer under its 16k-per-file limit.
 tests
 devcontainer
 .claude
+
+# The Go launcher: sources build on the host, and bin/ holds a multi-megabyte
+# binary that has no business being shipped to the builder. Note that the
+# top-level `*.md` above does not match nested paths, so .scratch needs its own
+# entry.
+go.mod
+go.sum
+Makefile
+cmd
+internal
+bin
+.scratch

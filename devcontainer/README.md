@@ -88,7 +88,7 @@ The image includes JetBrains Runtime 25. To use a different JDK, you would need 
 
 1. **Image must be pre-built**: Unlike Dockerfile-based devcontainers, this references a pre-built image
 
-2. **Don't run simultaneously with standalone**: Avoid running this devcontainer while also running `claude-contained` or `claude-docked` against the same contained Claude profile
+2. **Don't run simultaneously with standalone**: Avoid running this devcontainer while also running `claude-contained` against the same contained Claude profile
 
 3. **UID/GID differences**: The devcontainer runs as the `dev` user. File permissions are generally handled well by VS Code, but you may see different ownership than on host
 

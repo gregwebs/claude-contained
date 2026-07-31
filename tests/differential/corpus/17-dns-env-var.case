@@ -1,9 +1,0 @@
-CASE_DESCRIPTION="CLAUDE_DNS supplies a per-user resolver list when --dns is absent"
-
-case_setup() {
-  export CLAUDE_DNS="9.9.9.9,8.8.8.8"
-}
-
-case_args() {
-  CASE_ARGS_OUT=(-N -s -C "$1")
-}

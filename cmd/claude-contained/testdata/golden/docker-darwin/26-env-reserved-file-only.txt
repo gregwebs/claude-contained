@@ -1,0 +1,18 @@
+# case: 26-env-reserved-file-only
+# desc: a file-only-reserved key (LD_PRELOAD) from the project env file is rejected before any runtime argument is built; the same key via -e is fine
+# config: docker-darwin
+--- exit ---
+2
+--- runtime-args ---
+(empty)
+--- stdout ---
+(empty)
+--- stderr ---
+error: .claude-contained/env:1: LD_PRELOAD cannot be set from a project env file
+       It is read by the sandbox wrapper itself; pass -e LD_PRELOAD=... if you mean it.
+--- filesystem ---
+HOME dir 755
+PROJ dir 755
+PROJ/.claude-contained dir 755
+PROJ/.claude-contained/env file 644
+  | LD_PRELOAD=/tmp/evil.so

@@ -1,0 +1,113 @@
+Usage:
+  claude-contained [options] [-- <tool args...>]
+
+Description:
+  Runs AI coding assistants inside an Apple Containers sandbox.
+
+Options:
+  -C, --dir DIR      Project directory (default: current directory)
+  -m, --mount DIR[:ro|:rw]  Mount an extra directory (can be repeated)
+  -t, --tool TOOL    AI tool to run: claude (default), codex, copilot, gemini, vibe
+  -R, --rebuild[=MODE]  Rebuild image and exit: tools (default) or full
+  -H PORT[:HOSTPORT] Forward host port to container localhost (can be repeated)
+  -p HOST:CONTAINER  Publish container port to host (can be repeated)
+  -e, --env KEY=VALUE  Set an env var for the tool process (can be repeated)
+  --no-project-env   Ignore the project's .claude-contained/env file
+  --dns IP           Use IP as a DNS resolver (default: 1.1.1.1; repeatable)
+  --allow-host HOST  Allow sandbox egress to HOST (can be repeated)
+  --no-sandbox       Disable the srt sandbox (debugging escape hatch)
+  -s, --shell        Start a bash shell instead of the AI tool (for debugging)
+  -S, --ssh          Enable SSH agent forwarding (for git push)
+  -w, --worktree     Auto-include git worktree's main repository (skip prompt)
+  -W, --lock-worktrees  Auto-lock hidden linked worktrees (skip prompt)
+  -y, --yolo         Skip all permission prompts (tool-specific flag)
+  -N, --contained-node-modules  Use container-specific node_modules (skip prompt)
+  --share-skills DIR  Mount shared skill folders from DIR read-only (opt-in)
+  --share-host-claude  Mount host ~/.claude directly as container ~/.claude
+  --readonly-extras  Mount all extra mounts read-only (suffix overrides per-path)
+  -a, --attach [NAME]  Attach to a running container; errors if none matches
+  --name NAME        Name for a new container (mutually exclusive with --attach)
+  --zellij           Run the tool inside a persistent Zellij workspace
+  --session NAME     With --zellij, the Zellij session to start or attach to
+  --new-session      With --zellij, start even when another session is live
+  --container-runtime NAME  Container runtime: apple or docker (default: per host)
+  --build-context DIR  Checkout holding the Dockerfile for --rebuild
+  -h, --help         Show this help message
+
+Behavior:
+  - There are no positional arguments. The project directory comes from -C
+    (default: the current directory) and extra mounts from -m; everything after
+    the first -- is passed to the tool verbatim.
+  - Directories are mounted at their original host paths for full path parity.
+  - Extra mounts are automatically added via --add-dir (claude, codex only).
+  - Append :ro to an extra mount to mount it read-only (or :rw to force
+    read-write). The project directory cannot be read-only.
+  - Claude uses ~/.claude-contained/claude as container ~/.claude by default.
+    Account state remains shared through ~/.claude-contained/.claude.json, and
+    host ~/.claude skills, agents, commands, and plugins are mounted into the
+    contained profile. Use --share-host-claude or
+    CLAUDE_CONTAINED_SHARE_HOST_CLAUDE=1 to mount host ~/.claude directly.
+  - Other tool configs (~/.codex, ~/.copilot, ~/.gemini, ~/.vibe), Maven cache
+    (~/.m2), and Vaadin state (~/.vaadin) are bind-mounted.
+  - --share-skills DIR mounts DIR read-only as each tool's skills directory.
+    DIR itself and symlink targets under it are also mounted read-only at
+    path-parity locations so absolute symlinks keep resolving. For Codex,
+    ~/.codex/skills/.system is mounted back read-only over DIR/.system so
+    built-in skills remain visible.
+  - SSH agent forwarding is disabled by default; use --ssh to enable (for git push).
+  - -H reaches host services listening on 0.0.0.0, but Apple Containers cannot
+    reach services bound only to 127.0.0.1; use the Docker runtime for those.
+  - The container runtime is selected by --container-runtime, else
+    CLAUDE_CONTAINED_RUNTIME, else an argv[0] basename containing "dock" (a
+    compat affordance for a "docked" symlink from before), else the host default
+    (Apple Containers on macOS, Docker elsewhere).
+  - --rebuild finds the Dockerfile via --build-context, else
+    CLAUDE_CONTAINED_BUILD_CONTEXT, else this executable's own directory or the
+    Git repository containing it.
+  - Apple Containers defaults the container's resolver to the vmnet gateway, which
+    often cannot resolve. The launcher uses --dns 1.1.1.1 by default. Explicit
+    --dns wins; set CLAUDE_DNS=system to use the runtime default, or
+    CLAUDE_DNS=1.1.1.1,8.8.8.8 for a per-user list.
+  - -e/--env passes env vars to the tool. KEY=VALUE lines in the project
+    directory's .claude-contained/env are also applied (--env wins; --no-project-env skips the
+    file). That file is writable from inside the container, so keys that would
+    subvert the sandbox are refused from it. Neither applies when attaching to an
+    existing container, and --env is refused with --zellij --attach, where the
+    pane keeps the environment it was created with.
+  - Egress is sandboxed with srt: only allowlisted hosts are reachable. Edit
+    ~/.claude-contained/srt-settings.json for a persistent policy, --allow-host for
+    one run, or --no-sandbox to turn it off while debugging.
+  - Git worktrees are detected; main repository's .git directory is mounted for full git access.
+  - Linked worktrees hidden from the container can be auto-locked while the container runs.
+  - --zellij starts a named Zellij session and keeps the container alive after detach.
+    Use --zellij --attach [--session NAME] to reconnect to a live Zellij session.
+
+Examples:
+  claude-contained                     # Run claude in current directory
+  claude-contained -t codex            # Run codex instead
+  claude-contained -t copilot          # Run copilot instead
+  claude-contained -t gemini           # Run gemini instead
+  claude-contained -t vibe             # Run vibe instead
+  claude-contained -C ~/code/my-app    # Run in a specific project directory
+  claude-contained -m ../other/project # Mount an extra directory
+  claude-contained -m ../lib:ro        # Mount ../lib read-only
+  claude-contained --readonly-extras -m ../a -m ../b  # All extra mounts read-only
+  claude-contained -- --model sonnet   # Pass args to tool
+  claude-contained -y -t codex         # Codex with --yolo
+  claude-contained -S                  # Enable SSH agent (for git push)
+  claude-contained -s                  # Debug shell in current directory
+  claude-contained --rebuild           # Refresh AI tools, then exit
+  claude-contained --rebuild=full      # Full fresh rebuild, then exit
+  claude-contained -p 8080:8080        # Expose port 8080
+  claude-contained -H 3845             # Forward host:3845 to container localhost:3845
+  claude-contained -e API_URL=http://host.local:8080  # Set an env var
+  claude-contained --dns 1.1.1.1       # Fix DNS when the vmnet resolver fails
+  claude-contained --allow-host example.com  # Permit one extra egress host
+  claude-contained --no-sandbox -s     # Debug shell with the sandbox off
+  claude-contained --share-skills /Users/me/Projects/skills
+  claude-contained -a                  # List and attach to running container
+  claude-contained -a myproject        # Attach to container aic-myproject
+  claude-contained --name myproject    # Create a container named aic-myproject
+  claude-contained --zellij            # Start this project in Zellij
+  claude-contained --zellij --attach   # Attach to a live Zellij-backed container
+  claude-contained --zellij --new-session --session=review

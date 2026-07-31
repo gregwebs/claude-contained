@@ -1,0 +1,42 @@
+# case: 43-share-skills-writable-mount-conflict
+# desc: --share-skills conflicts with an overlapping writable extra mount
+# config: docker-darwin
+--- exit ---
+2
+--- runtime-args ---
+(empty)
+--- stdout ---
+(empty)
+--- stderr ---
+Sharing skills: <PROJ>/skills-src -> <HOME>/.claude/skills (read-only)
+Sharing skills: <PROJ>/skills-src -> <HOME>/.codex/skills (read-only)
+Sharing skills: <PROJ>/skills-src -> <HOME>/.agents/skills (read-only)
+Sharing skills: <PROJ>/skills-src -> <HOME>/.copilot/skills (read-only)
+Sharing skills: <PROJ>/skills-src -> <HOME>/.gemini/skills (read-only)
+Sharing skills: <PROJ>/skills-src -> <HOME>/.vibe/skills (read-only)
+error: --share-skills read-only mount conflicts with writable mount: <PROJ>/skills-src
+       remove the duplicate -m or mark it :ro
+--- filesystem ---
+HOME dir 755
+HOME/.agents dir 755
+HOME/.claude dir 755
+HOME/.claude-contained dir 755
+HOME/.claude-contained/claude dir 755
+HOME/.claude-contained/claude/agents dir 755
+HOME/.claude-contained/claude/commands dir 755
+HOME/.claude-contained/claude/plugins dir 755
+HOME/.claude-contained/claude/skills dir 755
+HOME/.claude/agents dir 755
+HOME/.claude/commands dir 755
+HOME/.claude/plugins dir 755
+HOME/.claude/skills dir 755
+HOME/.codex dir 755
+HOME/.copilot dir 755
+HOME/.gemini dir 755
+HOME/.m2 dir 755
+HOME/.vaadin dir 755
+HOME/.vibe dir 755
+PROJ dir 755
+PROJ/skills-src dir 755
+PROJ/skills-src/example.md file 644
+  | skill

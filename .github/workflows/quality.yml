@@ -1,0 +1,65 @@
+name: quality
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: quality
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version: "1.24.3"
+          check-latest: false
+          cache: false
+
+      - name: Install pinned quality tools
+        env:
+          GOLANGCI_LINT_VERSION: "2.12.2"
+          GOLANGCI_LINT_SHA256: "8df580d2670fed8fa984aac0507099af8df275e665215f5c7a2ae3943893a553"
+          SHELLCHECK_VERSION: "0.11.0"
+          SHELLCHECK_SHA256: "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198"
+        run: |
+          set -euo pipefail
+
+          tools_dir="${RUNNER_TEMP}/quality-tools"
+          mkdir -p "${tools_dir}"
+
+          shellcheck_archive="${RUNNER_TEMP}/shellcheck.tar.xz"
+          curl --fail --location --silent --show-error \
+            --output "${shellcheck_archive}" \
+            "https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz"
+          echo "${SHELLCHECK_SHA256}  ${shellcheck_archive}" | sha256sum --check -
+          tar -xJf "${shellcheck_archive}" -C "${RUNNER_TEMP}"
+          install -m 0755 \
+            "${RUNNER_TEMP}/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" \
+            "${tools_dir}/shellcheck"
+
+          golangci_archive="${RUNNER_TEMP}/golangci-lint.tar.gz"
+          curl --fail --location --silent --show-error \
+            --output "${golangci_archive}" \
+            "https://github.com/golangci/golangci-lint/releases/download/v${GOLANGCI_LINT_VERSION}/golangci-lint-${GOLANGCI_LINT_VERSION}-linux-amd64.tar.gz"
+          echo "${GOLANGCI_LINT_SHA256}  ${golangci_archive}" | sha256sum --check -
+          tar -xzf "${golangci_archive}" -C "${RUNNER_TEMP}"
+          install -m 0755 \
+            "${RUNNER_TEMP}/golangci-lint-${GOLANGCI_LINT_VERSION}-linux-amd64/golangci-lint" \
+            "${tools_dir}/golangci-lint"
+
+          echo "${tools_dir}" >> "${GITHUB_PATH}"
+
+      - name: Run quality gate
+        run: make quality

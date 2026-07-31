@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# Create the native-shaped Claude launcher link expected by Claude Code.
 set -euo pipefail
 
 home="${1:-${HOST_HOME:-${HOME:-/home/dev}}}"

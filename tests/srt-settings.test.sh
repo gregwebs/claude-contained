@@ -140,8 +140,8 @@ echo 'this is not json {{{' > "${home}/.claude-contained/srt-settings.json"
 rm -f "$out"
 gen_settings GIT_PROTECT_DIRS="/p" >/dev/null 2>&1
 rc=$?
-[[ $rc -ne 0 && ! -e "$out" ]]
-_check "malformed user file fails closed" $?
+if [[ $rc -ne 0 && ! -e "$out" ]]; then check_rc=0; else check_rc=1; fi
+_check "malformed user file fails closed" "$check_rc"
 rm -f "${home}/.claude-contained/srt-settings.json"
 
 echo "== ssh agent =="

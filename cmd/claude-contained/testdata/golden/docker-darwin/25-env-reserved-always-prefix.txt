@@ -1,0 +1,14 @@
+# case: 25-env-reserved-always-prefix
+# desc: an always-reserved namespace prefix (-e HOST_*) is rejected before any runtime argument is built
+# config: docker-darwin
+--- exit ---
+2
+--- runtime-args ---
+(empty)
+--- stdout ---
+(empty)
+--- stderr ---
+error: --env: HOST_ANYTHING is reserved by claude-contained and cannot be set
+--- filesystem ---
+HOME dir 755
+PROJ dir 755

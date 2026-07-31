@@ -9,9 +9,8 @@
 # which bypass the entrypoint, since `container exec` does not run ENTRYPOINT --
 # must route through the srt-run wrapper instead.
 #
-# The scripts are sourced with CLAUDE_CONTAINED_LIB_ONLY=1, which defines the
-# helper functions and returns before any container is launched, so no container
-# runtime is required.
+# The attach-argv checks run black-box against every target: they stub the
+# runtime to report a running container and assert on the emitted exec argv.
 #
 # Usage: tests/srt-flags.test.sh
 set -uo pipefail
@@ -29,10 +28,31 @@ launcher_argv() { # launcher_argv <target> <flags...>
 stub_dir="$(mktemp -d)"
 proj="$(mktemp -d)"
 home="$(mktemp -d)"
+
+# Stub runtime: reports the (optional) SRT_TEST_LIST fixture for `list`/`ps`
+# so the attach paths have something to reconnect to, and otherwise echoes its
+# argv one element per line, as before.
 for rt in container docker; do
-  printf '#!/bin/bash\nprintf "%%s\\n" "$@"\n' > "${stub_dir}/${rt}"
+  cat > "${stub_dir}/${rt}" <<'STUB'
+#!/usr/bin/env bash
+set -uo pipefail
+case "${1:-}" in
+  system|info) exit 0 ;;
+  list|ps) [[ -n "${SRT_TEST_LIST:-}" ]] && printf '%s\n' "${SRT_TEST_LIST}"; exit 0 ;;
+  inspect) exit 0 ;;
+esac
+printf '%s\n' "$@"
+STUB
   chmod +x "${stub_dir}/${rt}"
 done
+
+# Emitted container argv, flattened to one line, for the black-box attach
+# checks below -- these run against every target, not just the bash launchers.
+attach_argv() { # attach_argv <target> <flags...>
+  local target="$1"; shift
+  SRT_TEST_LIST="aic-live" HOME="$home" PATH="${stub_dir}:$PATH" \
+    "${repo_root}/${target}" "$@" </dev/null 2>/dev/null | tr '\n' ' '
+}
 
 suite() {
   set +e
@@ -77,69 +97,49 @@ suite() {
   grep -qx '1.1.1.1' <<<"$out" && grep -qx 'SRT_ALLOW_HOSTS=c.example' <<<"$out"
   _check "--dns and --allow-host coexist" $?
 
-  # 6-9. Attach builders. `container exec` skips the entrypoint, so the wrapper
-  #      has to be prepended here or the attached process runs unsandboxed.
-  (
-    export CLAUDE_CONTAINED_LIB_ONLY=1
-    # shellcheck disable=SC1090
-    source "${repo_root}/${target}" -C . >/dev/null 2>&1
+  # 6-11. Black-box attach checks, run against every target (bash or Go): the
+  # attached process is exec'd straight into the runtime, bypassing the
+  # entrypoint, so the sandbox wrapper and yolo placement have to come from
+  # the launcher's attach path itself.
+  out="$(attach_argv "$target" -a live)"
+  grep -Fq 'aic-live srt-run /opt/claude/claude' <<<"$out"
+  _check "attach by name runs the tool behind the sandbox wrapper" $?
 
-    tool="claude"; yolo_mode=0; srt_disable=0
-    build_attach_cmd
-    [[ "${attach_cmd[0]}" == "srt-run" && "${attach_cmd[1]}" == "/opt/claude/claude" ]]
-  )
-  _check "attach tool command is prefixed with srt-run" $?
+  out="$(attach_argv "$target" -a live --no-sandbox)"
+  grep -Fq 'aic-live /opt/claude/claude' <<<"$out" && ! grep -Fq 'srt-run' <<<"$out"
+  _check "--no-sandbox drops the wrapper on attach" $?
 
-  (
-    export CLAUDE_CONTAINED_LIB_ONLY=1
-    # shellcheck disable=SC1090
-    source "${repo_root}/${target}" -C . >/dev/null 2>&1
+  out="$(attach_argv "$target" -a live -s)"
+  grep -Fq 'aic-live srt-run /usr/local/bin/shell-run' <<<"$out"
+  _check "attach debug shell runs behind the sandbox wrapper" $?
 
-    tool="claude"; yolo_mode=0; srt_disable=1
-    build_attach_cmd
-    [[ "${attach_cmd[0]}" == "/opt/claude/claude" ]]
-  )
-  _check "attach tool command drops srt-run under --no-sandbox" $?
+  out="$(attach_argv "$target" -a live -s --no-sandbox)"
+  grep -Fq 'aic-live /usr/local/bin/shell-run' <<<"$out" && ! grep -Fq 'srt-run' <<<"$out"
+  _check "--no-sandbox drops the wrapper on attach debug shell" $?
 
-  (
-    export CLAUDE_CONTAINED_LIB_ONLY=1
-    # shellcheck disable=SC1090
-    source "${repo_root}/${target}" -C . >/dev/null 2>&1
+  out="$(attach_argv "$target" -a live -y)"
+  grep -Fq 'srt-run /opt/claude/claude --dangerously-skip-permissions' <<<"$out"
+  _check "attach yolo flag lands after the tool, behind the wrapper" $?
 
-    srt_disable=0
-    build_attach_shell_cmd
-    [[ "${attach_cmd[0]}" == "srt-run" && "${attach_cmd[1]}" == "/usr/local/bin/shell-run" ]]
-  )
-  _check "attach debug shell is prefixed with srt-run" $?
+  out="$(attach_argv "$target" -a live -y -t codex)"
+  grep -Fq 'srt-run codex --yolo' <<<"$out"
+  _check "attach yolo flag for a non-claude tool" $?
 
-  (
-    export CLAUDE_CONTAINED_LIB_ONLY=1
-    # shellcheck disable=SC1090
-    source "${repo_root}/${target}" -C . >/dev/null 2>&1
-
-    srt_disable=1
-    build_attach_shell_cmd
-    [[ "${attach_cmd[0]}" == "/usr/local/bin/shell-run" && ${#attach_cmd[@]} -eq 1 ]]
-  )
-  _check "attach debug shell drops srt-run under --no-sandbox" $?
-
-  # 10. Yolo flags must still land after the tool, not before the wrapper.
-  (
-    export CLAUDE_CONTAINED_LIB_ONLY=1
-    # shellcheck disable=SC1090
-    source "${repo_root}/${target}" -C . >/dev/null 2>&1
-
-    tool="claude"; yolo_mode=1; srt_disable=0
-    build_attach_cmd
-    [[ "${attach_cmd[*]}" == "srt-run /opt/claude/claude --dangerously-skip-permissions" ]]
-  )
-  _check "yolo flag stays after the tool, behind the wrapper" $?
+  # Attach builders (`build_attach_cmd`/`build_attach_shell_cmd`, which prefix
+  # srt-run because `container exec`/`docker exec` skip the entrypoint) used to
+  # be additionally unit-tested here by sourcing a bash launcher's shell
+  # functions directly with CLAUDE_CONTAINED_LIB_ONLY=1. A compiled binary
+  # cannot be sourced, so that block is gone now that both launchers are Go;
+  # the Go equivalents are ticket 07's own unit tests
+  # (internal/attach/attach_test.go), and the black-box attach-argv checks
+  # above already exercise the same four shapes end to end.
 
   return "$fails"
 }
 
 total=0
-for target in claude-contained claude-docked; do
+read -ra targets <<< "${CLAUDE_CONTAINED_TEST_TARGETS:-bin/claude-contained bin/claude-contained-docked}"
+for target in "${targets[@]}"; do
   echo "== ${target} =="
   suite "$target"
   total=$((total + $?))

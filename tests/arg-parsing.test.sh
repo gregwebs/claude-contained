@@ -19,6 +19,10 @@ set -uo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(dirname "$here")"
 
+# A developer's exported build-context override must not change any result
+# here, the same way an ambient CLAUDE_CONTAINED_RUNTIME must not.
+unset CLAUDE_CONTAINED_BUILD_CONTEXT
+
 stub_dir="$(mktemp -d)"
 # The launcher resolves paths through realpath, and on macOS /var is a symlink to
 # /private/var, so mktemp paths must be resolved here too or the emitted mount
@@ -156,17 +160,77 @@ suite() {
   [[ $rc -ne 0 ]] && file_has "$err" "rebuild mode"
   _check "-R rejects an unknown rebuild mode" $?
 
+  # 12b. A rebuild emits a build, not a run, and exits without a session.
+  run "$target" -R
+  rc=$?
+  [[ $rc -eq 0 ]] && line_has "$out" "build" && file_has "$out" "AI_TOOLS_CACHE_BUST=" \
+    && line_has "$out" "claude-contained:latest" && ! line_has "$out" "run"
+  _check "-R builds the image and does not start a session" $?
+
+  run "$target" -R full
+  rc=$?
+  [[ $rc -eq 0 ]] && line_has "$out" "--pull" && line_has "$out" "--no-cache"
+  _check "-R full pulls and rebuilds without cache" $?
+
   # 13. --session is meaningless without --zellij; say so rather than ignoring it.
   run "$target" -N -s -C "$proj" --session review
   rc=$?
   [[ $rc -eq 2 ]] && file_has "$err" "--session is valid only with --zellij"
   _check "--session requires --zellij" $?
 
+  # --- the container-runtime flag ------------------------------------------
+  #
+  # The discriminator is --ssh, not the Docker socket mount: Apple emits `--ssh`
+  # on every platform and Docker emits it on none, so these assertions hold on a
+  # Linux host too. Asserting the macOS bridged-socket mount would pass here and
+  # fail in CI.
+  run "$target" --container-runtime
+  rc=$?
+  [[ $rc -eq 2 ]] && file_has "$err" "--container-runtime requires apple or docker"
+  _check "--container-runtime reports a missing value" $?
+
+  run "$target" --container-runtime=bogus
+  rc=$?
+  [[ $rc -eq 2 ]] && file_has "$err" "must be apple or docker"
+  _check "--container-runtime rejects an unknown runtime" $?
+
+  run "$target" -N -s -S -C "$proj" --container-runtime=docker
+  rc=$?
+  [[ $rc -eq 0 ]] && ! line_has "$out" "--ssh"
+  _check "--container-runtime=docker selects the Docker runtime" $?
+
+  run "$target" -N -s -S -C "$proj" --container-runtime=apple
+  rc=$?
+  [[ $rc -eq 0 ]] && line_has "$out" "--ssh"
+  _check "--container-runtime=apple selects Apple Containers" $?
+
+  CLAUDE_CONTAINED_RUNTIME=docker run "$target" -N -s -S -C "$proj"
+  rc=$?
+  [[ $rc -eq 0 ]] && ! line_has "$out" "--ssh"
+  _check "CLAUDE_CONTAINED_RUNTIME selects the runtime" $?
+
+  CLAUDE_CONTAINED_RUNTIME=docker run "$target" -N -s -S -C "$proj" --container-runtime=apple
+  rc=$?
+  [[ $rc -eq 0 ]] && line_has "$out" "--ssh"
+  _check "the flag beats CLAUDE_CONTAINED_RUNTIME" $?
+
+  # --- the build-context flag ---------------------------------------------
+  run "$target" --build-context
+  rc=$?
+  [[ $rc -eq 2 ]] && file_has "$err" "--build-context requires a directory"
+  _check "--build-context reports a missing value" $?
+
+  run "$target" -R --build-context "$extra"
+  rc=$?
+  [[ $rc -eq 2 ]] && file_has "$err" "--build-context has no Dockerfile"
+  _check "--build-context without a Dockerfile is refused by name" $?
+
   return "$fails"
 }
 
 total=0
-for target in claude-contained claude-docked; do
+read -ra targets <<< "${CLAUDE_CONTAINED_TEST_TARGETS:-bin/claude-contained bin/claude-contained-docked}"
+for target in "${targets[@]}"; do
   echo "== ${target} =="
   suite "$target"
   total=$((total + $?))

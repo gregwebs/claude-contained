@@ -1,5 +1,0 @@
-CASE_DESCRIPTION="tool selection: vibe"
-
-case_args() {
-  CASE_ARGS_OUT=(-N -C "$1" -t vibe)
-}

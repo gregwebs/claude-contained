@@ -1,5 +1,0 @@
-CASE_DESCRIPTION="--allow-host permits one extra sandbox egress host"
-
-case_args() {
-  CASE_ARGS_OUT=(-N -s -C "$1" --allow-host example.com --allow-host example.org)
-}

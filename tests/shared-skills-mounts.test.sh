@@ -66,8 +66,8 @@ suite() {
 
   run_launcher "$target" "$home" "$proj" "$share"
   rc=$?
-  [[ $rc -eq 0 ]]
-  _check "--share-skills run succeeds with symlinked skill entries" $?
+  if [[ $rc -eq 0 ]]; then check_rc=0; else check_rc=1; fi
+  _check "--share-skills run succeeds with symlinked skill entries" "$check_rc"
 
   for dst in \
     "${home}/.claude/skills" \
@@ -96,8 +96,8 @@ suite() {
   done
 
   count="$(line_count "$out" "type=bind,src=${dir_target},dst=${dir_target},readonly")"
-  [[ "$count" -eq 1 ]]
-  _check "duplicate symlink targets emit one read-only mount" $?
+  if [[ "$count" -eq 1 ]]; then check_rc=0; else check_rc=1; fi
+  _check "duplicate symlink targets emit one read-only mount" "$check_rc"
 
   run_launcher "$target" "$home" "$proj" "$share" -m "${share}:rw"
   rc=$?
@@ -106,8 +106,8 @@ suite() {
 
   run_launcher "$target" "$home" "$proj" "$share" -m "${share}:ro"
   rc=$?
-  [[ $rc -eq 0 ]]
-  _check "read-only exact extra mount can satisfy shared skills source" $?
+  if [[ $rc -eq 0 ]]; then check_rc=0; else check_rc=1; fi
+  _check "read-only exact extra mount can satisfy shared skills source" "$check_rc"
 
   conflict_dir="$(cd "$(mktemp -d)" && pwd -P)"
   rm -rf "$share"
@@ -121,8 +121,8 @@ suite() {
 
   run_launcher "$target" "$home" "$proj" "$share" -m "${conflict_dir}:ro"
   rc=$?
-  [[ $rc -eq 0 ]]
-  _check "read-only exact extra mount can satisfy symlink target" $?
+  if [[ $rc -eq 0 ]]; then check_rc=0; else check_rc=1; fi
+  _check "read-only exact extra mount can satisfy symlink target" "$check_rc"
 
   rm -rf "$share"
   share="$(cd "$(mktemp -d)" && pwd -P)"
@@ -137,7 +137,8 @@ suite() {
 }
 
 total=0
-for target in claude-contained claude-docked; do
+read -ra targets <<< "${CLAUDE_CONTAINED_TEST_TARGETS:-bin/claude-contained bin/claude-contained-docked}"
+for target in "${targets[@]}"; do
   echo "== ${target} =="
   suite "$target"
   total=$((total + $?))

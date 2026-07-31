@@ -1,0 +1,14 @@
+# case: 24-env-reserved-always-exact
+# desc: an always-reserved exact-name key (-e) is rejected before any runtime argument is built
+# config: apple-darwin
+--- exit ---
+2
+--- runtime-args ---
+(empty)
+--- stdout ---
+(empty)
+--- stderr ---
+error: --env: STAY_ROOT is reserved by claude-contained and cannot be set
+--- filesystem ---
+HOME dir 755
+PROJ dir 755

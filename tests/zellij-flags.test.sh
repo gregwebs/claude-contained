@@ -8,6 +8,12 @@
 # never falls back to creation, and the top-level container command is the
 # repo-owned zellij-run wrapper.
 #
+# The launcher cases in suite() run against every target -- bin/claude-contained
+# and the bin/claude-contained-docked symlink alike, selected via
+# CLAUDE_CONTAINED_TEST_TARGETS. The in-container Zellij scripts
+# (zellij-pane-command.sh, zellij-run.sh, zellij-attach.sh) are covered
+# separately, target-independent, in tests/zellij-image-scripts.test.sh.
+#
 # Usage: tests/zellij-flags.test.sh
 set -uo pipefail
 
@@ -110,6 +116,10 @@ line_has() { # line_has <file> <exact-line>
   grep -Fqx -- "$2" "$1"
 }
 
+target_is_docker() { # target_is_docker <target>
+  [[ "$1" == *dock* ]]
+}
+
 file_has() { # file_has <file> <fixed-string>
   grep -Fq -- "$2" "$1"
 }
@@ -142,9 +152,9 @@ suite() {
   _check "--session=NAME accepts valid names and emits env markers" $?
   line_has "$out" "zellij-run" && line_has "$out" "Good_1.2-3" && line_has "$out" "bash" && ! line_has "$out" "/usr/local/bin/shell-run"
   _check "--zellij --shell launches bash inside zellij-run" $?
-  file_has "$out" "missing Zellij support" && file_has "$out" "${target} --rebuild=full"
+  file_has "$out" "missing Zellij support" && file_has "$out" "claude-contained --rebuild=full"
   _check "--zellij command includes stale-image rebuild hint" $?
-  if [[ "$target" == "claude-docked" ]]; then
+  if target_is_docker "$target"; then
     line_has "$out" "claude-contained.zellij=1" && line_has "$out" "claude-contained.zellij.session=Good_1.2-3"
     _check "Docker run emits Zellij labels" $?
   fi
@@ -191,6 +201,15 @@ suite() {
   [[ $rc -eq 0 ]] && line_has "$out" "zellij-run"
   _check "bare --new-session allows another live Zellij container" $?
 
+  # --new-session forces past "another session is live", never past "this
+  # session is live": the target check (claude-contained:1457) runs first and
+  # does not consult the flag. Refusing here is what stops a second Zellij
+  # server from being started for a session that already has one.
+  ZELLIJ_STUB_MODE=one launcher_run "$target" "$out" "$err" --zellij --session=alpha --new-session -N -s -C "$proj"
+  rc=$?
+  [[ $rc -eq 1 ]] && file_has "$err" "already live" && file_missing "$out" "zellij-run"
+  _check "--new-session does not override a live target session" $?
+
   ZELLIJ_STUB_MODE=none launcher_run "$target" "$out" "$err" --zellij --attach --session alpha
   rc=$?
   [[ $rc -eq 1 ]] && file_has "$err" "No live Zellij session named alpha" && file_missing "$out" "run"
@@ -236,187 +255,13 @@ suite() {
   return "$fails"
 }
 
-xdg_suite() {
-  set +e
-  local fails=0
-  local out path_out restored_path
-
-  _check() {
-    if [[ "$2" -eq 0 ]]; then
-      echo "  PASS: $1"
-    else
-      echo "  FAIL: $1"
-      fails=$((fails + 1))
-    fi
-  }
-
-  restored_path="${home}/.local/bin:/opt/claude:/home/dev/.sdkman/candidates/maven/current/bin:/home/dev/.sdkman/candidates/jbang/current/bin:/opt/jbr/bin:/usr/local/bin:/usr/bin:/bin"
-  out="$(
-    env \
-      HOME="$home" \
-      PATH=/usr/bin:/bin \
-      XDG_CACHE_HOME=/zellij/cache \
-      XDG_DATA_HOME=/zellij/data \
-      XDG_RUNTIME_DIR=/zellij/run \
-      TMPDIR=/tmp \
-      CLAUDE_CONTAINED_PRE_ZELLIJ_XDG_CACHE_HOME_SET=1 \
-      CLAUDE_CONTAINED_PRE_ZELLIJ_XDG_CACHE_HOME=/before/cache \
-      CLAUDE_CONTAINED_PRE_ZELLIJ_XDG_DATA_HOME_SET=0 \
-      CLAUDE_CONTAINED_PRE_ZELLIJ_XDG_RUNTIME_DIR_SET=1 \
-      CLAUDE_CONTAINED_PRE_ZELLIJ_XDG_RUNTIME_DIR=/before/run \
-      CLAUDE_CONTAINED_PRE_ZELLIJ_TMPDIR_SET=1 \
-      CLAUDE_CONTAINED_PRE_ZELLIJ_TMPDIR=/tmp/claude \
-      CLAUDE_CONTAINED_PRE_ZELLIJ_PATH_SET=1 \
-      CLAUDE_CONTAINED_PRE_ZELLIJ_PATH="$restored_path" \
-      CLAUDE_CONTAINED_PRE_ZELLIJ_SHELL_SET=1 \
-      CLAUDE_CONTAINED_PRE_ZELLIJ_SHELL=/bin/bash \
-      CLAUDE_CONTAINED_ZELLIJ_CONFIG=/etc/claude-contained/zellij/config.kdl \
-      CLAUDE_CONTAINED_ZELLIJ_SOCKET=/tmp/claude-contained-zellij-runtime/zellij/contract_version_1/test \
-      CLAUDE_CONTAINED_ZELLIJ_LAYOUT_DIR=/tmp/claude-contained-zellij-runtime/layouts \
-      CLAUDE_CONTAINED_ZELLIJ_TMP_DIR=/tmp/zellij-501 \
-      "${repo_root}/image/zellij-pane-command.sh" env
-  )"
-
-  grep -Fqx "XDG_CACHE_HOME=/before/cache" <<<"$out" && grep -Fqx "XDG_RUNTIME_DIR=/before/run" <<<"$out" && grep -Fqx "TMPDIR=/tmp/claude" <<<"$out"
-  _check "pane command restores previously-set XDG/TMPDIR vars" $?
-  grep -Fqx "PATH=${restored_path}" <<<"$out" && grep -Fqx "SHELL=/bin/bash" <<<"$out"
-  _check "pane command restores pre-Zellij PATH and SHELL" $?
-  ! grep -Fq "XDG_DATA_HOME=" <<<"$out"
-  _check "pane command unsets previously-unset XDG vars" $?
-  ! grep -Fq "CLAUDE_CONTAINED_PRE_ZELLIJ_PATH=" <<<"$out"
-  _check "pane command removes pre-Zellij helper env" $?
-  ! grep -Fq "CLAUDE_CONTAINED_ZELLIJ_CONFIG=" <<<"$out"
-  _check "pane command removes Zellij-only helper env" $?
-  ! grep -Fq "CLAUDE_CONTAINED_ZELLIJ_TMP_DIR=" <<<"$out"
-  _check "pane command removes Zellij temp helper env" $?
-  ! grep -Fq "CLAUDE_CONTAINED_ZELLIJ_SOCKET=" <<<"$out"
-  _check "pane command removes Zellij socket helper env" $?
-  ! grep -Fq "CLAUDE_CONTAINED_ZELLIJ_LAYOUT_DIR=" <<<"$out"
-  _check "pane command removes Zellij layout helper env" $?
-
-  path_out="$(
-    env HOME="$home" PATH=/usr/bin:/bin \
-      "${repo_root}/image/zellij-pane-command.sh" /usr/bin/env
-  )"
-  grep -E "^PATH=" <<<"$path_out" >/dev/null && grep -F "/opt/claude" <<<"$path_out" >/dev/null
-  _check "pane command includes contained tool paths when PATH was not stashed" $?
-
-  return "$fails"
-}
-
-wrapper_suite() {
-  set +e
-  local fails=0
-  local zbin zhome zlog session layout launch_path saved_state
-
-  _check() {
-    if [[ "$2" -eq 0 ]]; then
-      echo "  PASS: $1"
-    else
-      echo "  FAIL: $1"
-      fails=$((fails + 1))
-    fi
-  }
-
-  zbin="$(mktemp -d)"
-  zhome="$(mktemp -d)"
-  zlog="$(mktemp)"
-  session="test-$$"
-
-  cat > "${zbin}/zellij" <<'EOF'
-#!/usr/bin/env bash
-set -uo pipefail
-printf '%s\n' "$*" >> "${ZELLIJ_STUB_LOG}"
-printf 'PRE_PATH_SET=%s\n' "${CLAUDE_CONTAINED_PRE_ZELLIJ_PATH_SET:-}" >> "${ZELLIJ_STUB_LOG}"
-printf 'PRE_PATH=%s\n' "${CLAUDE_CONTAINED_PRE_ZELLIJ_PATH:-}" >> "${ZELLIJ_STUB_LOG}"
-printf 'PRE_SHELL_SET=%s\n' "${CLAUDE_CONTAINED_PRE_ZELLIJ_SHELL_SET:-}" >> "${ZELLIJ_STUB_LOG}"
-printf 'PRE_SHELL=%s\n' "${CLAUDE_CONTAINED_PRE_ZELLIJ_SHELL:-}" >> "${ZELLIJ_STUB_LOG}"
-for arg in "$@"; do
-  if [[ "$arg" == "list-sessions" ]]; then
-    if [[ "${ZELLIJ_STUB_LIST_MODE:-exited}" == "exited" ]]; then
-      printf '%s (EXITED)\n' "${ZELLIJ_STUB_SESSION}"
-    elif [[ "${ZELLIJ_STUB_LIST_MODE:-exited}" == "live" ]]; then
-      printf '%s\n' "${ZELLIJ_STUB_SESSION}"
-    fi
-    exit 0
-  fi
-done
-exit 0
-EOF
-  chmod +x "${zbin}/zellij"
-
-  launch_path="${zbin}:/opt/claude:/usr/local/bin:/usr/bin:/bin"
-  saved_state="${zhome}/.claude-contained/zellij/cache/zellij/contract_version_1/session_info/${session}"
-  mkdir -p "$saved_state"
-  : > "${saved_state}/session-metadata.kdl"
-  ZELLIJ_STUB_LOG="$zlog" ZELLIJ_STUB_LIST_MODE=empty ZELLIJ_STUB_SESSION="$session" HOME="$zhome" PATH="$launch_path" SHELL=/bin/bash \
-    CLAUDE_CONTAINED_ZELLIJ_WAIT_SECONDS=0 \
-    "${repo_root}/image/zellij-run.sh" "$session" -- echo "hello world" >/dev/null 2>&1
-  _check "zellij-run starts a fresh session when none is listed" $?
-  [[ ! -e "$saved_state" ]]
-  _check "zellij-run removes saved cache state before fresh startup" $?
-
-  grep -Fq -- "--config /etc/claude-contained/zellij/config.kdl --data-dir ${zhome}/.claude-contained/zellij/data attach --forget --create ${session} options --default-layout ${session}" "$zlog"
-  _check "zellij-run forgets stale saved state and uses named layout startup" $?
-  ! grep -Fq -- "--server" "$zlog"
-  _check "zellij-run lets XDG_RUNTIME_DIR control the Zellij socket" $?
-  grep -Fqx "PRE_PATH_SET=1" "$zlog" && grep -Fqx "PRE_PATH=${launch_path}" "$zlog" && grep -Fqx "PRE_SHELL_SET=1" "$zlog" && grep -Fqx "PRE_SHELL=/bin/bash" "$zlog"
-  _check "zellij-run stashes launch PATH and SHELL for command panes" $?
-
-  layout="/tmp/claude-contained-zellij-runtime/layouts/${session}.kdl"
-  grep -Fq 'args "echo" "hello world"' "$layout"
-  _check "zellij-run writes the initial pane command into the layout" $?
-
-  [[ -d "/tmp/zellij-$(id -u)/zellij-log" ]]
-  _check "zellij-run pre-creates Zellij's temp log directory" $?
-  [[ -d "/tmp/claude-contained-zellij-runtime/zellij/contract_version_1" ]]
-  _check "zellij-run pre-creates Zellij's runtime socket directory" $?
-  [[ -d "/tmp/claude-contained-zellij-runtime/layouts" ]]
-  _check "zellij-run pre-creates Zellij's runtime layout directory" $?
-  [[ -d "${zhome}/.claude-contained/zellij/cache/org/Zellij-Contributors/Zellij" ]]
-  _check "zellij-run pre-creates Zellij's project cache directory" $?
-
-  : > "$zlog"
-  ZELLIJ_STUB_LOG="$zlog" ZELLIJ_STUB_LIST_MODE=exited ZELLIJ_STUB_SESSION="$session" HOME="$zhome" PATH="${zbin}:$PATH" \
-    CLAUDE_CONTAINED_ZELLIJ_WAIT_SECONDS=0 \
-    "${repo_root}/image/zellij-run.sh" "$session" -- echo "hello world" >/dev/null 2>&1
-  _check "zellij-run treats (EXITED) list-sessions output as not live" $?
-  grep -Fq -- "--config /etc/claude-contained/zellij/config.kdl --data-dir ${zhome}/.claude-contained/zellij/data attach --forget --create ${session} options --default-layout ${session}" "$zlog"
-  _check "zellij-run replaces exited saved sessions with the requested layout" $?
-
-  mkdir -p "$saved_state"
-  : > "${saved_state}/session-metadata.kdl"
-  ZELLIJ_STUB_LOG="$zlog" ZELLIJ_STUB_LIST_MODE=live ZELLIJ_STUB_SESSION="$session" HOME="$zhome" PATH="${zbin}:$PATH" \
-    "${repo_root}/image/zellij-run.sh" "$session" -- echo "hello world" >/dev/null 2>&1
-  rc=$?
-  [[ $rc -eq 1 && -e "$saved_state" ]]
-  _check "zellij-run refuses live sessions without deleting their saved state" $?
-
-  ZELLIJ_STUB_LOG="$zlog" ZELLIJ_STUB_SESSION="$session" HOME="$zhome" PATH="${zbin}:$PATH" \
-    "${repo_root}/image/zellij-attach.sh" "$session" >/dev/null 2>&1
-  rc=$?
-  [[ $rc -eq 1 ]]
-  _check "zellij-attach refuses an exited saved session" $?
-
-  rm -rf "$zbin" "$zhome"
-  rm -f "$zlog" "$layout"
-  return "$fails"
-}
-
 total=0
-for target in claude-contained claude-docked; do
+read -ra targets <<< "${CLAUDE_CONTAINED_TEST_TARGETS:-bin/claude-contained bin/claude-contained-docked}"
+for target in "${targets[@]}"; do
   echo "== ${target} =="
   suite "$target"
   total=$((total + $?))
 done
-
-echo "== zellij-pane-command =="
-xdg_suite
-total=$((total + $?))
-
-echo "== zellij wrappers =="
-wrapper_suite
-total=$((total + $?))
 
 rm -rf "$stub_dir" "$proj" "$home"
 

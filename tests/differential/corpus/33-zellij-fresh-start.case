@@ -1,5 +1,0 @@
-CASE_DESCRIPTION="--zellij starts a fresh named Zellij session"
-
-case_args() {
-  CASE_ARGS_OUT=(-N -s --zellij -C "$1")
-}

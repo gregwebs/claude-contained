@@ -1,6 +1,0 @@
-CASE_DESCRIPTION="an always-reserved namespace prefix (-e HOST_*) is rejected before any runtime argument is built"
-CASE_EXPECT_RUNTIME_ARGS=0
-
-case_args() {
-  CASE_ARGS_OUT=(-N -s -C "$1" -e HOST_ANYTHING=1)
-}

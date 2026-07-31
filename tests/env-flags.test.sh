@@ -259,68 +259,13 @@ ALSO=\`touch ${canary}\`
   return "$fails"
 }
 
-unit_suite() {
-  set +e
-  local fails=0
-  local rc
-
-  _check() {
-    if [[ "$2" -eq 0 ]]; then
-      echo "  PASS: $1"
-    else
-      echo "  FAIL: $1"
-      fails=$((fails + 1))
-    fi
-  }
-
-  # Sourced helpers: the launcher stops at the CLAUDE_CONTAINED_LIB_ONLY hook
-  # before any container work, so these run with no runtime present. Each case
-  # is a subshell because a rejection calls exit.
-  for target in claude-contained claude-docked; do
-    (
-      export CLAUDE_CONTAINED_LIB_ONLY=1
-      # shellcheck disable=SC1090
-      source "${repo_root}/${target}" >/dev/null 2>&1
-      env_set "A=1" "--env" flag >/dev/null 2>&1 || exit 1
-      env_set "B=2" "--env" flag >/dev/null 2>&1 || exit 1
-      env_default "A=ignored" "file" file >/dev/null 2>&1 || exit 1
-      [[ "${#user_env[@]}" -eq 2 ]] || exit 1
-      [[ "${user_env[0]}" == "A=1" ]] || exit 1
-      build_user_env_args
-      [[ "${#user_env_args[@]}" -eq 4 && "${user_env_args[0]}" == "-e" ]] || exit 1
-    )
-    rc=$?
-    _check "${target}: env_default yields to an existing key, args are -e pairs" $rc
-
-    (
-      export CLAUDE_CONTAINED_LIB_ONLY=1
-      # shellcheck disable=SC1090
-      source "${repo_root}/${target}" >/dev/null 2>&1
-      env_key_reserved_always HOST_ANYTHING || exit 1
-      env_key_reserved_always SRT_ANYTHING || exit 1
-      env_key_reserved_always CLAUDE_CONTAINED_ANYTHING || exit 1
-      env_key_reserved_always FOO && exit 1
-      env_key_reserved_in_file LD_PRELOAD || exit 1
-      env_key_reserved_in_file FOO && exit 1
-      exit 0
-    )
-    rc=$?
-    _check "${target}: reserved namespaces match by prefix, ordinary keys do not" $rc
-  done
-
-  return "$fails"
-}
-
 total=0
-for target in claude-contained claude-docked; do
+read -ra targets <<< "${CLAUDE_CONTAINED_TEST_TARGETS:-bin/claude-contained bin/claude-contained-docked}"
+for target in "${targets[@]}"; do
   echo "== ${target} =="
   suite "$target"
   total=$((total + $?))
 done
-
-echo "== helpers =="
-unit_suite
-total=$((total + $?))
 
 rm -rf "$stub_dir" "$proj" "$home" "$(dirname "$canary")"
 

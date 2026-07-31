@@ -268,13 +268,14 @@ COPY image/srt-settings.sh /usr/local/bin/srt-settings.sh
 COPY image/srt-run.sh /usr/local/bin/srt-run
 COPY image/shell-run.sh /usr/local/bin/shell-run
 COPY image/claude-native-link.sh /usr/local/bin/claude-native-link
+COPY image/host-forward.sh /usr/local/bin/host-forward
 COPY image/zellij/ /etc/claude-contained/zellij/
 COPY image/zellij-run.sh /usr/local/bin/zellij-run
 COPY image/zellij-attach.sh /usr/local/bin/zellij-attach
 COPY image/zellij-pane-command.sh /usr/local/bin/zellij-pane-command
 RUN chmod +x /usr/local/bin/srt-settings.sh /usr/local/bin/srt-run \
     /usr/local/bin/shell-run \
-    /usr/local/bin/claude-native-link \
+    /usr/local/bin/claude-native-link /usr/local/bin/host-forward \
     /usr/local/bin/zellij-run /usr/local/bin/zellij-attach \
     /usr/local/bin/zellij-pane-command
 
