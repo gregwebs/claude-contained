@@ -27,6 +27,32 @@ func selectionProject(t *testing.T) string {
 	return host.ResolvePath(t.TempDir())
 }
 
+func installRuntimeMarkers(t *testing.T, stubDir string) []string {
+	t.Helper()
+	markers := []string{
+		filepath.Join(stubDir, "container.called"),
+		filepath.Join(stubDir, "docker.called"),
+	}
+	for i, bin := range []string{"container", "docker"} {
+		script := "#!/bin/sh\ntouch " + markers[i] + "\nexit 0\n"
+		if err := os.WriteFile(filepath.Join(stubDir, bin), []byte(script), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return markers
+}
+
+func assertNoRuntimeMarkers(t *testing.T, markers []string) {
+	t.Helper()
+	for _, marker := range markers {
+		if _, err := os.Stat(marker); err == nil {
+			t.Errorf("runtime operation created marker %s", marker)
+		} else if !os.IsNotExist(err) {
+			t.Errorf("stat runtime marker %s: %v", marker, err)
+		}
+	}
+}
+
 // Selection end to end, through the argv actually emitted. -W is omitted because
 // the project directory is not a git repository here; -s and -N skip the prompts.
 func TestRuntimeSelectedByFlagAndEnv(t *testing.T) {
@@ -76,13 +102,7 @@ func TestRuntimeSelectedByFlagAndEnv(t *testing.T) {
 func TestAppleRuntimeRefusedOffMacOS(t *testing.T) {
 	stubDir := withStubbedHostAndPath(t)
 	project := selectionProject(t)
-
-	// Replace the stub with one that records having been called at all.
-	marker := filepath.Join(stubDir, "container.called")
-	script := "#!/bin/sh\ntouch " + marker + "\nexit 0\n"
-	if err := os.WriteFile(filepath.Join(stubDir, "container"), []byte(script), 0o755); err != nil {
-		t.Fatal(err)
-	}
+	markers := installRuntimeMarkers(t, stubDir)
 
 	var stdout, stderr bytes.Buffer
 	argv := []string{"claude-contained", "--container-runtime=apple", "-s", "-N", "-C", project}
@@ -96,9 +116,7 @@ func TestAppleRuntimeRefusedOffMacOS(t *testing.T) {
 	if got := stderr.String(); got != want {
 		t.Errorf("stderr = %q, want %q", got, want)
 	}
-	if _, err := os.Stat(marker); err == nil {
-		t.Error("a container command ran under a runtime that was about to be refused")
-	}
+	assertNoRuntimeMarkers(t, markers)
 }
 
 func TestInvalidRuntimeValueIsRefused(t *testing.T) {
@@ -119,7 +137,7 @@ func TestInvalidRuntimeValueIsRefused(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			withStubbedHostAndPath(t)
+			stubDir := withStubbedHostAndPath(t)
 			t.Setenv("CLAUDE_CONTAINED_RUNTIME", tc.env)
 			project := selectionProject(t)
 
@@ -134,19 +152,26 @@ func TestInvalidRuntimeValueIsRefused(t *testing.T) {
 				}
 				return
 			}
+			markers := installRuntimeMarkers(t, stubDir)
+			got = nil
+			stdout.Reset()
+			stderr.Reset()
+			code = runWith(failRunner(t), runtime.Darwin, argv, strings.NewReader(""), &stdout, &stderr)
 			if code != 2 {
 				t.Errorf("exit %d, want 2", code)
 			}
 			if stderr.String() != tc.want {
 				t.Errorf("stderr = %q, want %q", stderr.String(), tc.want)
 			}
+			assertNoRuntimeMarkers(t, markers)
 		})
 	}
 }
 
 // -h wins wherever it appears, exactly as in bash, so validation runs after it.
 func TestHelpWinsOverInvalidRuntime(t *testing.T) {
-	withStubbedHostAndPath(t)
+	stubDir := withStubbedHostAndPath(t)
+	markers := installRuntimeMarkers(t, stubDir)
 
 	var stdout, stderr bytes.Buffer
 	argv := []string{"claude-contained", "--container-runtime=bogus", "--help"}
@@ -159,6 +184,7 @@ func TestHelpWinsOverInvalidRuntime(t *testing.T) {
 	if stderr.Len() != 0 {
 		t.Errorf("stderr = %q, want empty", stderr.String())
 	}
+	assertNoRuntimeMarkers(t, markers)
 }
 
 // The help text belongs to the *selected* runtime, so an apple selection off
@@ -168,20 +194,133 @@ func TestHelpWinsOverInvalidRuntime(t *testing.T) {
 // ticket 11 gave both runtimes the same name (internal/runtime.ProgName), so
 // the name is no longer a valid way to tell which runtime's help was printed.
 func TestHelpDescribesTheSelectedRuntime(t *testing.T) {
-	withStubbedHostAndPath(t)
-
-	for _, tc := range []struct{ flag, want string }{
-		{"--container-runtime=docker", "Docker container"},
-		{"--container-runtime=apple", "Apple Containers sandbox"},
+	for _, tc := range []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"docker before help", []string{"--container-runtime=docker", "--help"}, "Docker container"},
+		{"docker after help", []string{"--help", "--container-runtime=docker"}, "Docker container"},
+		{"apple before help", []string{"--container-runtime=apple", "--help"}, "Apple Containers sandbox"},
+		{"apple after help", []string{"--help", "--container-runtime=apple"}, "Apple Containers sandbox"},
 	} {
-		var stdout, stderr bytes.Buffer
-		argv := []string{"claude-contained", tc.flag, "--help"}
-		if code := runWith(failRunner(t), runtime.Darwin, argv, strings.NewReader(""), &stdout, &stderr); code != 0 {
-			t.Fatalf("exit %d; stderr: %s", code, stderr.String())
-		}
-		if !strings.Contains(stdout.String(), tc.want) {
-			t.Errorf("%s printed help that never mentions %q", tc.flag, tc.want)
-		}
+		t.Run(tc.name, func(t *testing.T) {
+			stubDir := withStubbedHostAndPath(t)
+			t.Setenv("CLAUDE_CONTAINED_RUNTIME", "")
+			markers := installRuntimeMarkers(t, stubDir)
+			var stdout, stderr bytes.Buffer
+			argv := append([]string{"claude-contained"}, tc.args...)
+			if code := runWith(failRunner(t), runtime.Darwin, argv, strings.NewReader(""), &stdout, &stderr); code != 0 {
+				t.Fatalf("exit %d; stderr: %s", code, stderr.String())
+			}
+			if !strings.Contains(stdout.String(), tc.want) {
+				t.Errorf("args %q printed help that never mentions %q", tc.args, tc.want)
+			}
+			if stderr.Len() != 0 {
+				t.Errorf("stderr = %q, want empty", stderr.String())
+			}
+			assertNoRuntimeMarkers(t, markers)
+		})
+	}
+}
+
+func TestHelpUsesMergedRuntimeSelectionGrammar(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"required value masks runtime", []string{"--help", "-e", "--container-runtime=docker"}, "Apple Containers sandbox"},
+		{"malformed runtime leaves following runtime flag", []string{"--help", "--container-runtime", "--container-runtime=docker"}, "Docker container"},
+		{"malformed runtime leaves tool boundary", []string{"--help", "--container-runtime", "--", "--container-runtime=docker"}, "Apple Containers sandbox"},
+		{"consumed boundary does not stop parsing", []string{"--help", "-e", "--", "--container-runtime=docker"}, "Docker container"},
+		{"empty inline runtime overwrites docker", []string{"--help", "--container-runtime=docker", "--container-runtime="}, "Apple Containers sandbox"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stubDir := withStubbedHostAndPath(t)
+			t.Setenv("CLAUDE_CONTAINED_RUNTIME", "")
+			markers := installRuntimeMarkers(t, stubDir)
+			var stdout, stderr bytes.Buffer
+			argv := append([]string{"claude-contained"}, tc.args...)
+			code := runWith(failRunner(t), runtime.Darwin, argv, strings.NewReader(""), &stdout, &stderr)
+			if code != 0 {
+				t.Fatalf("exit %d, want 0; stderr: %s", code, stderr.String())
+			}
+			if !strings.Contains(stdout.String(), tc.want) {
+				t.Errorf("stdout does not contain %q", tc.want)
+			}
+			if stderr.Len() != 0 {
+				t.Errorf("stderr = %q, want empty", stderr.String())
+			}
+			assertNoRuntimeMarkers(t, markers)
+		})
+	}
+}
+
+func TestFrontEndFailureAndHelpPrecedence(t *testing.T) {
+	cases := []struct {
+		name     string
+		env      string
+		args     []string
+		platform runtime.Platform
+		wantCode int
+		wantOut  string
+		wantErr  string
+	}{
+		{
+			"syntax failure before help",
+			"", []string{"--container-runtime", "--help"}, runtime.Darwin, 2, "",
+			"error: --container-runtime requires apple or docker\n",
+		},
+		{
+			"help wins over invalid runtime flag",
+			"", []string{"--help", "--container-runtime=bogus"}, runtime.Darwin, 0, "Apple Containers sandbox", "",
+		},
+		{
+			"help wins over invalid runtime environment",
+			"bogus", []string{"--help"}, runtime.Darwin, 0, "Apple Containers sandbox", "",
+		},
+		{
+			"apple help wins over non macOS refusal",
+			"", []string{"--container-runtime=apple", "--help"}, runtime.Linux, 0, "Apple Containers sandbox", "",
+		},
+		{
+			"semantic failure outranks invalid runtime",
+			"", []string{"--container-runtime=bogus", "--new-session"}, runtime.Darwin, 2, "",
+			"error: --new-session is valid only with --zellij\n",
+		},
+		{
+			"syntax failure outranks invalid runtime",
+			"", []string{"--wat", "--container-runtime=bogus"}, runtime.Darwin, 2, "",
+			"error: unknown flag: --wat\n       run 'claude-contained --help' for the supported flags\n",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stubDir := withStubbedHostAndPath(t)
+			t.Setenv("CLAUDE_CONTAINED_RUNTIME", tc.env)
+			markers := installRuntimeMarkers(t, stubDir)
+			var stdout, stderr bytes.Buffer
+			argv := append([]string{"claude-contained"}, tc.args...)
+			code := runWith(failRunner(t), tc.platform, argv, strings.NewReader(""), &stdout, &stderr)
+			if code != tc.wantCode {
+				t.Errorf("exit %d, want %d", code, tc.wantCode)
+			}
+			if tc.wantOut == "" {
+				if stdout.Len() != 0 {
+					t.Errorf("stdout = %q, want empty", stdout.String())
+				}
+			} else if !strings.Contains(stdout.String(), tc.wantOut) {
+				t.Errorf("stdout does not contain %q", tc.wantOut)
+			}
+			if stderr.String() != tc.wantErr {
+				t.Errorf("stderr = %q, want %q", stderr.String(), tc.wantErr)
+			}
+			assertNoRuntimeMarkers(t, markers)
+		})
 	}
 }
 

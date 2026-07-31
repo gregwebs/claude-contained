@@ -48,67 +48,28 @@ const RuntimeFlag = "--container-runtime"
 // tests/arg-parsing.test.sh rather than left accidental.
 const BuildContextFlag = "--build-context"
 
-// valueTakingFlags are the flags that consume the *following* token as their
-// value. ScanRuntime skips those tokens, so that `-e --container-runtime=docker`
-// is an environment assignment (which Parse then rejects) rather than a runtime
-// selection. Without the skip, the pre-scan and Parse would disagree, and Parse's
-// rejection would name the wrong program in its "run '%s --help'" line.
-//
-// -R and -a are absent deliberately: their values are optional and are only
-// consumed when the next token does not start with a dash, which
-// --container-runtime always does.
-var valueTakingFlags = map[string]bool{
-	"-C": true, "--dir": true,
-	"-m": true, "--mount": true,
-	"--name":         true,
-	"--session":      true,
-	"--share-skills": true,
-	"-t":             true,
-	"--tool":         true,
-	"-e":             true,
-	"--env":          true,
-	"-p":             true,
-	"-H":             true,
-	"--dns":          true,
-	"--allow-host":   true,
-	RuntimeFlag:      true,
-	BuildContextFlag: true,
+type syntaxFailureKind uint8
+
+const (
+	syntaxRequiredValue syntaxFailureKind = iota
+	syntaxNewSessionValue
+	syntaxUnknownFlag
+	syntaxPositional
+)
+
+// syntaxFailure keeps only the source facts needed to render a diagnosis.
+// Rendering belongs to Validate so Parse cannot write before the diagnostic
+// stream is configured.
+type syntaxFailure struct {
+	kind  syntaxFailureKind
+	flag  string
+	what  string
+	value string
 }
 
-// ScanRuntime extracts the container-runtime flag before Parse runs.
-//
-// Two scans of argv exist because the runtime has to be chosen *before* the
-// command line is parsed -- Parse's error messages embed the program name and
-// --help prints the selected runtime's own literal text -- while validation of
-// the value belongs after parsing, so that -h/--help still wins. Selection uses
-// this scan; the diagnosis uses Config.ContainerRuntime from the real parse.
-// TestScanRuntimeAgreesWithParse pins them together.
-//
-// Last occurrence wins, matching Parse. A missing or dash-leading value yields
-// "" and leaves the report to Parse. Nothing after `--` is examined, so a tool
-// argument can never select a runtime.
-func ScanRuntime(args []string) string {
-	value := ""
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		switch {
-		case arg == "--":
-			return value
-		case arg == RuntimeFlag:
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
-				value = args[i+1]
-				i++
-			}
-		case strings.HasPrefix(arg, RuntimeFlag+"="):
-			value = strings.TrimPrefix(arg, RuntimeFlag+"=")
-		case valueTakingFlags[arg]:
-			// Skip unconditionally, even when the next token looks like a flag:
-			// Parse consumes it as a value or rejects the whole command line, and
-			// either way it is not a runtime selection.
-			i++
-		}
-	}
-	return value
+type parseState struct {
+	progName string
+	failures []syntaxFailure
 }
 
 // Config is the parsed command line.
@@ -150,45 +111,51 @@ type Config struct {
 	NoProjectEnv         bool
 	// HelpRequested short-circuits everything else.
 	HelpRequested bool
+	parse         parseState
 }
 
-// Parse mirrors claude-contained:604-878: the flag loop, then the post-parse
-// validation block, in that order. Messages are written verbatim, because the
-// golden tests compare stderr byte for byte.
+// Parse is the silent syntactic recording pass. It consumes launcher tokens,
+// records ordered failures, and continues far enough to derive the final
+// runtime selection. Validate is the sole owner of parser and semantic
+// reporting.
 //
-// Bash also has a pre-loop shortcut for a leading -h/--help (:553-556). It is
-// not reproduced because it is unobservable: the loop's own -h/--help arm
-// handles the same input identically, and anything earlier in argv already
-// short-circuits in both.
-//
-// progName is the runtime-specific program name; it appears only in the two
-// error arms that embed it. shareHostClaudeEnv carries
-// CLAUDE_CONTAINED_SHARE_HOST_CLAUDE.
-func Parse(args []string, progName string, shareHostClaudeEnv bool, stderr io.Writer) (Config, error) {
+// progName is the single installed launcher name used later in deferred fix-it
+// hints. shareHostClaudeEnv carries CLAUDE_CONTAINED_SHARE_HOST_CLAUDE.
+func Parse(args []string, progName string, shareHostClaudeEnv bool) Config {
 	cfg := Config{
 		RebuildMode:     "none",
 		Tool:            "claude",
 		ShareHostClaude: shareHostClaudeEnv,
+		parse:           parseState{progName: progName},
 	}
 
-	requireValue := func(flag, value, what string) error {
+	// Callers for ordinary separate required-value flags advance past any
+	// present token, including a dash-leading attempted value. RuntimeFlag has
+	// its own arm below because a dash-leading attempted runtime value is the
+	// one exception to that consumption rule.
+	recordRequiredValue := func(flag, value, what string) bool {
 		if value == "" || strings.HasPrefix(value, "-") {
 			if what == "" {
 				what = "a value"
 			}
-			_, _ = fmt.Fprintf(stderr, "error: %s requires %s\n", flag, what)
-			return exitWith(ExitUsage)
+			cfg.parse.failures = append(cfg.parse.failures, syntaxFailure{
+				kind: syntaxRequiredValue,
+				flag: flag,
+				what: what,
+			})
+			return false
 		}
-		return nil
+		return true
 	}
 
-	// requireInline covers the `--flag=` forms that carry their own empty check.
-	requireInline := func(flag, value, what string) error {
+	recordInlineValue := func(flag, value, what string) {
 		if value == "" {
-			_, _ = fmt.Fprintf(stderr, "error: %s requires %s\n", flag, what)
-			return exitWith(ExitUsage)
+			cfg.parse.failures = append(cfg.parse.failures, syntaxFailure{
+				kind: syntaxRequiredValue,
+				flag: flag,
+				what: what,
+			})
 		}
-		return nil
 	}
 
 	for i := 0; i < len(args); i++ {
@@ -202,111 +169,114 @@ func Parse(args []string, progName string, shareHostClaudeEnv bool, stderr io.Wr
 			break
 		}
 
+		hasNext := i+1 < len(args)
 		next := ""
-		if i+1 < len(args) {
+		if hasNext {
 			next = args[i+1]
 		}
 
 		switch {
 		case arg == "-h" || arg == "--help":
-			cfg.HelpRequested = true
-			return cfg, nil
+			// Help is effective only when reached before the first syntax failure.
+			// Parsing continues because later tokens can still select the runtime
+			// profile whose help text the front end prints.
+			if len(cfg.parse.failures) == 0 {
+				cfg.HelpRequested = true
+			}
 
 		case arg == "-C" || arg == "--dir":
-			if err := requireValue("-C/--dir", next, ""); err != nil {
-				return cfg, err
+			if recordRequiredValue("-C/--dir", next, "") {
+				cfg.ProjectDir = next
 			}
-			cfg.ProjectDir = next
-			i++
+			if hasNext {
+				i++
+			}
 		case strings.HasPrefix(arg, "--dir="):
 			v := strings.TrimPrefix(arg, "--dir=")
-			if err := requireInline("--dir", v, "a non-empty directory"); err != nil {
-				return cfg, err
-			}
 			cfg.ProjectDir = v
+			recordInlineValue("--dir", v, "a non-empty directory")
 
 		case arg == "-m" || arg == "--mount":
-			if err := requireValue("-m/--mount", next, ""); err != nil {
-				return cfg, err
+			if recordRequiredValue("-m/--mount", next, "") {
+				cfg.ExtraMounts = append(cfg.ExtraMounts, next)
 			}
-			cfg.ExtraMounts = append(cfg.ExtraMounts, next)
-			i++
+			if hasNext {
+				i++
+			}
 		case strings.HasPrefix(arg, "--mount="):
 			v := strings.TrimPrefix(arg, "--mount=")
-			if err := requireInline("--mount", v, "a non-empty directory"); err != nil {
-				return cfg, err
-			}
 			cfg.ExtraMounts = append(cfg.ExtraMounts, v)
+			recordInlineValue("--mount", v, "a non-empty directory")
 
 		case arg == "--name":
-			if err := requireValue("--name", next, ""); err != nil {
-				return cfg, err
+			if recordRequiredValue("--name", next, "") {
+				cfg.CustomContainerName = next
 			}
-			cfg.CustomContainerName = next
-			i++
+			if hasNext {
+				i++
+			}
 		case strings.HasPrefix(arg, "--name="):
 			v := strings.TrimPrefix(arg, "--name=")
-			if err := requireInline("--name", v, "a non-empty name"); err != nil {
-				return cfg, err
-			}
 			cfg.CustomContainerName = v
+			recordInlineValue("--name", v, "a non-empty name")
 
 		case arg == "--session":
-			if err := requireValue("--session", next, ""); err != nil {
-				return cfg, err
+			if recordRequiredValue("--session", next, "") {
+				cfg.ZellijSessionName = next
+				cfg.ZellijSessionNameSet = true
 			}
-			cfg.ZellijSessionName = next
-			cfg.ZellijSessionNameSet = true
-			i++
+			if hasNext {
+				i++
+			}
 		case strings.HasPrefix(arg, "--session="):
 			v := strings.TrimPrefix(arg, "--session=")
 			cfg.ZellijSessionName = v
 			cfg.ZellijSessionNameSet = true
-			if err := requireInline("--session", v, "a non-empty name"); err != nil {
-				return cfg, err
-			}
+			recordInlineValue("--session", v, "a non-empty name")
 
 		case arg == RuntimeFlag:
-			if err := requireValue(RuntimeFlag, next, "apple or docker"); err != nil {
-				return cfg, err
+			// Unlike every other required-value flag, a malformed separate
+			// runtime occurrence leaves a dash-leading token for normal parsing.
+			// This preserves the scanner grammar that made a following help,
+			// boundary, or runtime flag visible.
+			if !hasNext || strings.HasPrefix(next, "-") {
+				recordRequiredValue(RuntimeFlag, next, "apple or docker")
+				break
 			}
 			cfg.ContainerRuntime = next
+			recordRequiredValue(RuntimeFlag, next, "apple or docker")
 			i++
 		case strings.HasPrefix(arg, RuntimeFlag+"="):
 			v := strings.TrimPrefix(arg, RuntimeFlag+"=")
-			if err := requireInline(RuntimeFlag, v, "apple or docker"); err != nil {
-				return cfg, err
-			}
 			cfg.ContainerRuntime = v
+			recordInlineValue(RuntimeFlag, v, "apple or docker")
 
 		case arg == BuildContextFlag:
-			if err := requireValue(BuildContextFlag, next, "a directory"); err != nil {
-				return cfg, err
+			if recordRequiredValue(BuildContextFlag, next, "a directory") {
+				cfg.BuildContext = next
 			}
-			cfg.BuildContext = next
-			i++
+			if hasNext {
+				i++
+			}
 		case strings.HasPrefix(arg, BuildContextFlag+"="):
 			v := strings.TrimPrefix(arg, BuildContextFlag+"=")
-			if err := requireInline(BuildContextFlag, v, "a non-empty directory"); err != nil {
-				return cfg, err
-			}
 			cfg.BuildContext = v
+			recordInlineValue(BuildContextFlag, v, "a non-empty directory")
 
 		case arg == "--readonly-extras":
 			cfg.ReadonlyExtras = true
 
 		case arg == "--share-skills":
-			if err := requireValue("--share-skills", next, ""); err != nil {
-				return cfg, err
+			if recordRequiredValue("--share-skills", next, "") {
+				cfg.ShareSkillsDir = next
 			}
-			cfg.ShareSkillsDir = next
-			i++
+			if hasNext {
+				i++
+			}
 		case strings.HasPrefix(arg, "--share-skills="):
 			v := strings.TrimPrefix(arg, "--share-skills=")
-			if err := requireInline("--share-skills", v, "a non-empty directory"); err != nil {
-				return cfg, err
-			}
 			cfg.ShareSkillsDir = v
+			recordInlineValue("--share-skills", v, "a non-empty directory")
 
 		case arg == "--share-host-claude":
 			cfg.ShareHostClaude = true
@@ -343,20 +313,20 @@ func Parse(args []string, progName string, shareHostClaudeEnv bool, stderr io.Wr
 		case arg == "-t" || arg == "--tool":
 			// Note: there is no --tool= form; it falls through to the
 			// unknown-flag arm, as in bash.
-			if err := requireValue("-t/--tool", next, ""); err != nil {
-				return cfg, err
+			if recordRequiredValue("-t/--tool", next, "") {
+				cfg.Tool = next
 			}
-			cfg.Tool = next
-			i++
+			if hasNext {
+				i++
+			}
 
 		case arg == "-e" || arg == "--env":
-			// A leading dash can never be a valid assignment, so treat it as a
-			// missing value rather than swallowing the next flag.
-			if err := requireValue("-e/--env", next, "KEY=VALUE"); err != nil {
-				return cfg, err
+			if recordRequiredValue("-e/--env", next, "KEY=VALUE") {
+				cfg.EnvFlagArgs = append(cfg.EnvFlagArgs, next)
 			}
-			cfg.EnvFlagArgs = append(cfg.EnvFlagArgs, next)
-			i++
+			if hasNext {
+				i++
+			}
 		case strings.HasPrefix(arg, "--env="):
 			// Deliberately no empty check: bash lets `--env=` through to the
 			// assignment validator.
@@ -366,33 +336,37 @@ func Parse(args []string, progName string, shareHostClaudeEnv bool, stderr io.Wr
 			cfg.NoProjectEnv = true
 
 		case arg == "-p":
-			if err := requireValue("-p", next, ""); err != nil {
-				return cfg, err
+			if recordRequiredValue("-p", next, "") {
+				cfg.PortMaps = append(cfg.PortMaps, next)
 			}
-			cfg.PortMaps = append(cfg.PortMaps, next)
-			i++
+			if hasNext {
+				i++
+			}
 		case arg == "-H":
-			if err := requireValue("-H", next, ""); err != nil {
-				return cfg, err
+			if recordRequiredValue("-H", next, "") {
+				cfg.HostForwards = append(cfg.HostForwards, next)
 			}
-			cfg.HostForwards = append(cfg.HostForwards, next)
-			i++
+			if hasNext {
+				i++
+			}
 
 		case arg == "--dns":
-			if err := requireValue("--dns", next, ""); err != nil {
-				return cfg, err
+			if recordRequiredValue("--dns", next, "") {
+				cfg.DNSServers = append(cfg.DNSServers, next)
 			}
-			cfg.DNSServers = append(cfg.DNSServers, next)
-			i++
+			if hasNext {
+				i++
+			}
 		case strings.HasPrefix(arg, "--dns="):
 			cfg.DNSServers = append(cfg.DNSServers, strings.TrimPrefix(arg, "--dns="))
 
 		case arg == "--allow-host":
-			if err := requireValue("--allow-host", next, ""); err != nil {
-				return cfg, err
+			if recordRequiredValue("--allow-host", next, "") {
+				cfg.SrtAllowHosts = append(cfg.SrtAllowHosts, next)
 			}
-			cfg.SrtAllowHosts = append(cfg.SrtAllowHosts, next)
-			i++
+			if hasNext {
+				i++
+			}
 		case strings.HasPrefix(arg, "--allow-host="):
 			cfg.SrtAllowHosts = append(cfg.SrtAllowHosts, strings.TrimPrefix(arg, "--allow-host="))
 
@@ -404,8 +378,7 @@ func Parse(args []string, progName string, shareHostClaudeEnv bool, stderr io.Wr
 			// Force flag only: --session NAME carries the name.
 			cfg.ZellijNewSession = true
 		case strings.HasPrefix(arg, "--new-session="):
-			_, _ = fmt.Fprintln(stderr, "error: --new-session no longer takes a name; use --session=NAME")
-			return cfg, exitWith(ExitUsage)
+			cfg.parse.failures = append(cfg.parse.failures, syntaxFailure{kind: syntaxNewSessionValue})
 
 		case arg == "-a" || arg == "--attach":
 			cfg.AttachMode = true
@@ -417,23 +390,19 @@ func Parse(args []string, progName string, shareHostClaudeEnv bool, stderr io.Wr
 			}
 
 		case strings.HasPrefix(arg, "-"):
-			_, _ = fmt.Fprintf(stderr, "error: unknown flag: %s\n", arg)
-			_, _ = fmt.Fprintf(stderr, "       run '%s --help' for the supported flags\n", progName)
-			return cfg, exitWith(ExitUsage)
+			cfg.parse.failures = append(cfg.parse.failures, syntaxFailure{
+				kind:  syntaxUnknownFlag,
+				value: arg,
+			})
 
 		default:
-			_, _ = fmt.Fprintf(stderr, "error: positional arguments are no longer accepted: %s\n", arg)
-			_, _ = fmt.Fprintf(stderr, "       use -C/--dir for the project directory:  %s -C %s\n", progName, arg)
-			_, _ = fmt.Fprintf(stderr, "       use -m/--mount for extra directories:    %s -m %s\n", progName, arg)
-			_, _ = fmt.Fprintf(stderr, "       (bare '%s' uses the current directory)\n", progName)
-			return cfg, exitWith(ExitUsage)
+			cfg.parse.failures = append(cfg.parse.failures, syntaxFailure{
+				kind:  syntaxPositional,
+				value: arg,
+			})
 		}
 	}
-
-	if err := validate(&cfg, stderr); err != nil {
-		return cfg, err
-	}
-	return cfg, nil
+	return cfg
 }
 
 var zellijSessionNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
@@ -453,10 +422,36 @@ func ValidateZellijSessionName(name string, stderr io.Writer) error {
 	return nil
 }
 
-// validate mirrors claude-contained:826-878. Order matters: each check's
-// message and exit status is observable, and the --name rewrite happens here
-// rather than at use.
-func validate(cfg *Config, stderr io.Writer) error {
+// Validate is the sole reporting pass for deferred parser failures and CLI
+// semantics. Order matters: each check's message and exit status is observable,
+// and the --name rewrite happens here rather than at use.
+func Validate(cfg *Config, stderr io.Writer) error {
+	// Effective help short-circuits both deferred syntax failures encountered
+	// later in argv and semantic validation. The front end prints the selected
+	// runtime profile's help before calling Validate; this guard keeps the seam's
+	// behavior complete when it is used directly.
+	if cfg.HelpRequested {
+		return nil
+	}
+	if len(cfg.parse.failures) > 0 {
+		failure := cfg.parse.failures[0]
+		switch failure.kind {
+		case syntaxRequiredValue:
+			_, _ = fmt.Fprintf(stderr, "error: %s requires %s\n", failure.flag, failure.what)
+		case syntaxNewSessionValue:
+			_, _ = fmt.Fprintln(stderr, "error: --new-session no longer takes a name; use --session=NAME")
+		case syntaxUnknownFlag:
+			_, _ = fmt.Fprintf(stderr, "error: unknown flag: %s\n", failure.value)
+			_, _ = fmt.Fprintf(stderr, "       run '%s --help' for the supported flags\n", cfg.parse.progName)
+		case syntaxPositional:
+			_, _ = fmt.Fprintf(stderr, "error: positional arguments are no longer accepted: %s\n", failure.value)
+			_, _ = fmt.Fprintf(stderr, "       use -C/--dir for the project directory:  %s -C %s\n", cfg.parse.progName, failure.value)
+			_, _ = fmt.Fprintf(stderr, "       use -m/--mount for extra directories:    %s -m %s\n", cfg.parse.progName, failure.value)
+			_, _ = fmt.Fprintf(stderr, "       (bare '%s' uses the current directory)\n", cfg.parse.progName)
+		}
+		return exitWith(ExitUsage)
+	}
+
 	if cfg.ZellijNewSession && !cfg.ZellijMode {
 		_, _ = fmt.Fprintln(stderr, "error: --new-session is valid only with --zellij")
 		return exitWith(ExitUsage)

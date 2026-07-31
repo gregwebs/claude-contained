@@ -205,11 +205,11 @@ type Selection struct {
 // on a host that has none.
 //
 // Select is total -- an unrecognized Flag or Env value falls through to the next
-// source rather than failing here. It has to run *before* the command line is
-// parsed at all, because cli.Parse's error messages name the program and --help
-// prints the selected runtime's own literal text, so a runtime must exist on
-// every path including the one about to exit 2. Diagnosing a bad value is
-// ValidateSelection's job, called after parsing so that -h/--help still wins.
+// source rather than failing here. It runs after the silent permissive CLI parse
+// and before help or validation, so every path has a profile whose literal help
+// can be printed, including a path carrying an invalid requested value.
+// Diagnosing that value is ValidateSelection's job, called only after help and
+// CLI validation.
 func Select(s Selection) Runtime {
 	if rt, ok := byName(s.Flag, s.Platform); ok {
 		return rt
@@ -249,7 +249,8 @@ func byName(name string, p Platform) (Runtime, bool) {
 //
 // Only the source actually *used* is checked: a valid --container-runtime
 // rescues a broken environment variable, which is what "the flag wins" has to
-// mean to be useful.
+// mean to be useful. The front end calls this after help and CLI validation so
+// those outcomes retain priority.
 func ValidateSelection(s Selection, stderr io.Writer) error {
 	if s.Flag != "" {
 		return validateRuntimeName("--container-runtime", s.Flag, s.Platform, stderr)

@@ -2,155 +2,24 @@ package cli
 
 import (
 	"bytes"
-	"io"
-	"reflect"
 	"strings"
 	"testing"
 )
 
-func TestScanRuntime(t *testing.T) {
-	cases := []struct {
-		name string
-		args []string
-		want string
-	}{
-		{"absent", []string{"-s", "-N"}, ""},
-		{"separate value", []string{"--container-runtime", "docker"}, "docker"},
-		{"inline value", []string{"--container-runtime=docker"}, "docker"},
-		{"repeated: last wins", []string{"--container-runtime=apple", "--container-runtime=docker"}, "docker"},
-		{"repeated across forms", []string{"--container-runtime", "docker", "--container-runtime=apple"}, "apple"},
-		{"final argument with no value", []string{"-s", "--container-runtime"}, ""},
-		{"dash-leading value", []string{"--container-runtime", "--shell"}, ""},
-		{"after --", []string{"--", "--container-runtime=docker"}, ""},
-		{"after -- among tool args", []string{"-s", "--", "-p", "--container-runtime=docker"}, ""},
+const testProgName = "claude-contained"
 
-		// The flag name appearing *inside* another flag's value is not a
-		// selection. Parse rejects the dash-leading value, and if the pre-scan
-		// disagreed, that rejection would name the wrong program.
-		{"as an -e value", []string{"-e", "--container-runtime=docker"}, ""},
-		{"as a --dns value", []string{"--dns", "--container-runtime=docker"}, ""},
-		{"inside an inline --dns value", []string{"--dns=--container-runtime=docker"}, ""},
-		{"as a -C value", []string{"-C", "--container-runtime=docker"}, ""},
-
-		// A value-taking flag consuming a *legitimate* value must not hide a later
-		// selection.
-		{"after a consumed value", []string{"-C", "/tmp", "--container-runtime=docker"}, "docker"},
-		{"between other flags", []string{"-s", "--container-runtime", "apple", "-N"}, "apple"},
-	}
-
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := ScanRuntime(tc.args); got != tc.want {
-				t.Errorf("ScanRuntime(%q) = %q, want %q", tc.args, got, tc.want)
-			}
-		})
-	}
-}
-
-// The pre-scan exists only because selection has to happen before parsing. For
-// every command line Parse *accepts*, the two must agree -- otherwise the runtime
-// driving the run is not the one the flag named.
-//
-// Restricting the property to accepted inputs is deliberate: when Parse rejects,
-// no runtime command ever runs, so a disagreement is unobservable.
-func TestScanRuntimeAgreesWithParse(t *testing.T) {
-	argvs := [][]string{
-		{},
-		{"-s"},
-		{"--container-runtime", "docker"},
-		{"--container-runtime=apple"},
-		{"--container-runtime=apple", "--container-runtime", "docker"},
-		{"-C", "/tmp", "--container-runtime=docker", "-N"},
-		{"-e", "K=V", "--container-runtime=docker"},
-		{"--dns", "1.1.1.1", "--container-runtime=apple"},
-		{"-t", "codex", "--container-runtime=docker"},
-		{"-s", "--", "--container-runtime=apple"},
-		{"--container-runtime=docker", "--", "-p", "80:80"},
-		{"-p", "80:80", "--container-runtime=docker"},
-		{"-H", "3845", "--container-runtime=docker"},
-		{"-m", "/tmp", "--container-runtime=docker"},
-		{"--share-skills", "/tmp", "--container-runtime=docker"},
-		{"--allow-host", "example.com", "--container-runtime=docker"},
-		{"-R", "--container-runtime=docker"},
-		{"-a", "--container-runtime=docker"},
-	}
-
-	for _, argv := range argvs {
-		t.Run(strings.Join(argv, " "), func(t *testing.T) {
-			cfg, err := Parse(argv, "claude-contained", false, io.Discard)
-			if err != nil {
-				t.Skipf("Parse rejects %q; the property covers accepted input only", argv)
-			}
-			if got, want := ScanRuntime(argv), cfg.ContainerRuntime; got != want {
-				t.Errorf("ScanRuntime(%q) = %q but Parse recorded %q", argv, got, want)
-			}
-		})
-	}
-}
-
-func TestContainerRuntimeRequiresValue(t *testing.T) {
-	for _, argv := range [][]string{
-		{"--container-runtime"},
-		{"--container-runtime="},
-		{"--container-runtime", "--shell"},
-	} {
-		t.Run(strings.Join(argv, " "), func(t *testing.T) {
-			var stderr bytes.Buffer
-			_, err := Parse(argv, "claude-contained", false, &stderr)
-
-			var exit *ExitError
-			if !asExitError(err, &exit) || exit.Code != ExitUsage {
-				t.Fatalf("Parse(%q) error = %v, want exit %d", argv, err, ExitUsage)
-			}
-			if want := "error: --container-runtime requires apple or docker\n"; stderr.String() != want {
-				t.Errorf("stderr = %q, want %q", stderr.String(), want)
-			}
-		})
-	}
-}
-
-// Parse records the value without judging it. The accepted names live in
-// internal/runtime, which reports a bad one only after --help has had its chance
-// -- so nobody should "helpfully" add a second check here.
-func TestContainerRuntimeValueIsNotValidatedByParse(t *testing.T) {
+func validateArgs(args ...string) (Config, string, error) {
+	cfg := Parse(args, testProgName, false)
 	var stderr bytes.Buffer
-	cfg, err := Parse([]string{"--container-runtime=bogus"}, "claude-contained", false, &stderr)
-	if err != nil {
-		t.Fatalf("Parse should accept an unknown value: %v", err)
-	}
-	if cfg.ContainerRuntime != "bogus" {
-		t.Errorf("ContainerRuntime = %q, want %q", cfg.ContainerRuntime, "bogus")
-	}
-	if stderr.Len() != 0 {
-		t.Errorf("stderr = %q, want empty", stderr.String())
-	}
+	err := Validate(&cfg, &stderr)
+	return cfg, stderr.String(), err
 }
 
-// -h wins wherever it appears, exactly as in bash, so an invalid runtime value
-// must not pre-empt it. The ordering is enforced in cmd/claude-contained; this pins the
-// parser half.
-func TestHelpIsRecognizedAlongsideARuntimeValue(t *testing.T) {
-	cfg, err := Parse([]string{"--container-runtime=bogus", "--help"}, "claude-contained", false, io.Discard)
-	if err != nil {
-		t.Fatalf("Parse: %v", err)
-	}
-	if !cfg.HelpRequested {
-		t.Error("HelpRequested = false, want true")
-	}
-}
-
-// The flag's error message lists the accepted values, which are defined in
-// internal/runtime. A test rather than an import, so no production coupling is
-// created just to keep one string honest.
-func TestFlagErrorNamesTheAcceptedRuntimes(t *testing.T) {
-	var stderr bytes.Buffer
-	_, _ = Parse([]string{"--container-runtime"}, "claude-contained", false, &stderr)
-
-	// Kept in sync with internal/runtime.NameApple / NameDocker.
-	for _, name := range []string{"apple", "docker"} {
-		if !strings.Contains(stderr.String(), name) {
-			t.Errorf("the --container-runtime error should name %q: %q", name, stderr.String())
-		}
+func requireUsageError(t *testing.T, err error) {
+	t.Helper()
+	var exit *ExitError
+	if !asExitError(err, &exit) || exit.Code != ExitUsage {
+		t.Fatalf("error = %v, want exit %d", err, ExitUsage)
 	}
 }
 
@@ -162,90 +31,428 @@ func asExitError(err error, target **ExitError) bool {
 	return ok
 }
 
-// Guards the table above against a silent rename of the flag.
+func TestParseDefersRequiredValueDiagnosticsToValidate(t *testing.T) {
+	cases := []struct {
+		name string
+		flag string
+		want string
+	}{
+		{"short dir", "-C", "error: -C/--dir requires a value\n"},
+		{"long dir", "--dir", "error: -C/--dir requires a value\n"},
+		{"short mount", "-m", "error: -m/--mount requires a value\n"},
+		{"long mount", "--mount", "error: -m/--mount requires a value\n"},
+		{"name", "--name", "error: --name requires a value\n"},
+		{"session", "--session", "error: --session requires a value\n"},
+		{"container runtime", "--container-runtime", "error: --container-runtime requires apple or docker\n"},
+		{"build context", "--build-context", "error: --build-context requires a directory\n"},
+		{"share skills", "--share-skills", "error: --share-skills requires a value\n"},
+		{"short tool", "-t", "error: -t/--tool requires a value\n"},
+		{"long tool", "--tool", "error: -t/--tool requires a value\n"},
+		{"short env", "-e", "error: -e/--env requires KEY=VALUE\n"},
+		{"long env", "--env", "error: -e/--env requires KEY=VALUE\n"},
+		{"publish", "-p", "error: -p requires a value\n"},
+		{"host forward", "-H", "error: -H requires a value\n"},
+		{"dns", "--dns", "error: --dns requires a value\n"},
+		{"allow host", "--allow-host", "error: --allow-host requires a value\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, stderr, err := validateArgs(tc.flag)
+			requireUsageError(t, err)
+			if stderr != tc.want {
+				t.Errorf("stderr = %q, want %q", stderr, tc.want)
+			}
+			if cfg.RebuildMode != "none" || cfg.Tool != "claude" {
+				t.Errorf("Parse did not return its configuration: %+v", cfg)
+			}
+		})
+	}
+}
+
+func TestParseDefersInlineValueDiagnosticsToValidate(t *testing.T) {
+	cases := []struct {
+		arg  string
+		want string
+	}{
+		{"--dir=", "error: --dir requires a non-empty directory\n"},
+		{"--mount=", "error: --mount requires a non-empty directory\n"},
+		{"--name=", "error: --name requires a non-empty name\n"},
+		{"--session=", "error: --session requires a non-empty name\n"},
+		{"--container-runtime=", "error: --container-runtime requires apple or docker\n"},
+		{"--build-context=", "error: --build-context requires a non-empty directory\n"},
+		{"--share-skills=", "error: --share-skills requires a non-empty directory\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.arg, func(t *testing.T) {
+			_, stderr, err := validateArgs(tc.arg)
+			requireUsageError(t, err)
+			if stderr != tc.want {
+				t.Errorf("stderr = %q, want %q", stderr, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseDefersOtherSyntaxDiagnosticsToValidate(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{
+			"new session with name",
+			[]string{"--new-session=NAME"},
+			"error: --new-session no longer takes a name; use --session=NAME\n",
+		},
+		{
+			"new session with empty name",
+			[]string{"--new-session="},
+			"error: --new-session no longer takes a name; use --session=NAME\n",
+		},
+		{
+			"unknown flag",
+			[]string{"--wat"},
+			"error: unknown flag: --wat\n" +
+				"       run 'claude-contained --help' for the supported flags\n",
+		},
+		{
+			"positional argument",
+			[]string{"project"},
+			"error: positional arguments are no longer accepted: project\n" +
+				"       use -C/--dir for the project directory:  claude-contained -C project\n" +
+				"       use -m/--mount for extra directories:    claude-contained -m project\n" +
+				"       (bare 'claude-contained' uses the current directory)\n",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, stderr, err := validateArgs(tc.args...)
+			requireUsageError(t, err)
+			if stderr != tc.want {
+				t.Errorf("stderr = %q, want %q", stderr, tc.want)
+			}
+		})
+	}
+}
+
+func TestSyntacticallyAcceptedEmptyInlineFormsRemainAccepted(t *testing.T) {
+	cases := []struct {
+		arg   string
+		check func(Config) bool
+	}{
+		{"--env=", func(cfg Config) bool { return len(cfg.EnvFlagArgs) == 1 && cfg.EnvFlagArgs[0] == "" }},
+		{"--dns=", func(cfg Config) bool { return len(cfg.DNSServers) == 1 && cfg.DNSServers[0] == "" }},
+		{"--allow-host=", func(cfg Config) bool { return len(cfg.SrtAllowHosts) == 1 && cfg.SrtAllowHosts[0] == "" }},
+		{"--rebuild=", func(cfg Config) bool { return cfg.RebuildMode == "" }},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.arg, func(t *testing.T) {
+			cfg, stderr, err := validateArgs(tc.arg)
+			if err != nil {
+				t.Fatalf("Validate: %v", err)
+			}
+			if stderr != "" {
+				t.Errorf("stderr = %q, want empty", stderr)
+			}
+			if !tc.check(cfg) {
+				t.Errorf("Parse did not record %q: %+v", tc.arg, cfg)
+			}
+		})
+	}
+}
+
+func TestInlineToolRemainsUnknown(t *testing.T) {
+	_, stderr, err := validateArgs("--tool=")
+	requireUsageError(t, err)
+	want := "error: unknown flag: --tool=\n" +
+		"       run 'claude-contained --help' for the supported flags\n"
+	if stderr != want {
+		t.Errorf("stderr = %q, want %q", stderr, want)
+	}
+}
+
+func TestValidatePreservesSemanticDiagnosticOrderAndText(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"new session requires zellij", []string{"--new-session"},
+			"error: --new-session is valid only with --zellij\n"},
+		{"session requires zellij", []string{"--session", "name"},
+			"error: --session is valid only with --zellij\n"},
+		{"zellij attach rejects shell", []string{"--zellij", "--attach", "--shell"},
+			"error: --zellij --attach cannot be combined with --shell\n"},
+		{"zellij attach rejects attach name", []string{"--zellij", "--attach", "name"},
+			"error: -a/--attach takes no name with --zellij; use --session=NAME\n"},
+		{"name rejects attach", []string{"--attach", "--name", "name"},
+			"error: --name cannot be combined with -a/--attach\n" +
+				"       --name names a new container; --attach reconnects to an existing one.\n"},
+		{"empty zellij session", []string{"--zellij", "--session="},
+			"error: --session requires a non-empty name\n"},
+		{"invalid zellij session", []string{"--zellij", "--session", "bad/name"},
+			"error: invalid Zellij session name: bad/name\n" +
+				"       Use only letters, numbers, '_', '.', and '-'; do not start with '-'.\n"},
+		{"zellij attach rejects env", []string{"--zellij", "--attach", "--env", "K=V"},
+			"error: --env cannot be combined with --zellij --attach\n" +
+				"       Attaching starts a Zellij client; the pane keeps the environment it was\n" +
+				"       created with, so the variable would silently never reach the tool.\n" +
+				"       Set it when the session is created instead.\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, stderr, err := validateArgs(tc.args...)
+			requireUsageError(t, err)
+			if stderr != tc.want {
+				t.Errorf("stderr = %q, want %q", stderr, tc.want)
+			}
+		})
+	}
+}
+
+func TestValidateRejectsAnEmptyZellijSessionName(t *testing.T) {
+	cfg := Config{
+		ZellijMode:           true,
+		ZellijSessionNameSet: true,
+		parse:                parseState{progName: testProgName},
+	}
+	var stderr bytes.Buffer
+	err := Validate(&cfg, &stderr)
+	requireUsageError(t, err)
+	if want := "error: Zellij session name cannot be empty\n"; stderr.String() != want {
+		t.Errorf("stderr = %q, want %q", stderr.String(), want)
+	}
+}
+
+func TestValidateNormalizesCustomContainerName(t *testing.T) {
+	cfg, stderr, err := validateArgs("--name", "aic-My Project")
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q, want empty", stderr)
+	}
+	if cfg.CustomContainerName != "aic-my-project" {
+		t.Errorf("CustomContainerName = %q, want %q", cfg.CustomContainerName, "aic-my-project")
+	}
+}
+
+func TestValidateReportsOnlyTheFirstSyntaxFailure(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"unknown first", []string{"--wat", "project"},
+			"error: unknown flag: --wat\n       run 'claude-contained --help' for the supported flags\n"},
+		{"positional first", []string{"project", "--wat"},
+			"error: positional arguments are no longer accepted: project\n" +
+				"       use -C/--dir for the project directory:  claude-contained -C project\n" +
+				"       use -m/--mount for extra directories:    claude-contained -m project\n" +
+				"       (bare 'claude-contained' uses the current directory)\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, stderr, err := validateArgs(tc.args...)
+			requireUsageError(t, err)
+			if stderr != tc.want {
+				t.Errorf("stderr = %q, want %q", stderr, tc.want)
+			}
+		})
+	}
+}
+
+func TestSyntaxFailureOutranksSemanticFailure(t *testing.T) {
+	_, stderr, err := validateArgs("--new-session", "--wat")
+	requireUsageError(t, err)
+	want := "error: unknown flag: --wat\n" +
+		"       run 'claude-contained --help' for the supported flags\n"
+	if stderr != want {
+		t.Errorf("stderr = %q, want %q", stderr, want)
+	}
+}
+
+func TestParseContinuesAfterSyntaxFailureToRecordRuntimeSelection(t *testing.T) {
+	cfg := Parse([]string{"--wat", "--container-runtime=docker"}, testProgName, false)
+	if cfg.ContainerRuntime != "docker" {
+		t.Errorf("ContainerRuntime = %q, want docker", cfg.ContainerRuntime)
+	}
+	var stderr bytes.Buffer
+	err := Validate(&cfg, &stderr)
+	requireUsageError(t, err)
+	want := "error: unknown flag: --wat\n" +
+		"       run 'claude-contained --help' for the supported flags\n"
+	if stderr.String() != want {
+		t.Errorf("stderr = %q, want %q", stderr.String(), want)
+	}
+}
+
+func TestEffectiveHelpPrecedence(t *testing.T) {
+	cases := []struct {
+		name     string
+		args     []string
+		wantHelp bool
+		wantErr  string
+	}{
+		{"help before syntax failure", []string{"--help", "--wat"}, true, ""},
+		{"syntax failure before help", []string{"--wat", "--help"}, false,
+			"error: unknown flag: --wat\n       run 'claude-contained --help' for the supported flags\n"},
+		{"help before semantic failure", []string{"--help", "--new-session"}, true, ""},
+		{"consumed help is not help", []string{"-e", "--help"}, false,
+			"error: -e/--env requires KEY=VALUE\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg, stderr, err := validateArgs(tc.args...)
+			if cfg.HelpRequested != tc.wantHelp {
+				t.Errorf("HelpRequested = %v, want %v", cfg.HelpRequested, tc.wantHelp)
+			}
+			if tc.wantErr == "" {
+				if err != nil {
+					t.Fatalf("Validate: %v", err)
+				}
+			} else {
+				requireUsageError(t, err)
+			}
+			if stderr != tc.wantErr {
+				t.Errorf("stderr = %q, want %q", stderr, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestParsePreservesMergedRuntimeSelectionGrammar(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"required value masks runtime", []string{"--help", "-e", "--container-runtime=docker"}, ""},
+		{"malformed runtime leaves following runtime flag", []string{"--help", "--container-runtime", "--container-runtime=docker"}, "docker"},
+		{"malformed runtime leaves tool boundary", []string{"--help", "--container-runtime", "--", "--container-runtime=docker"}, ""},
+		{"consumed boundary does not stop parsing", []string{"--help", "-e", "--", "--container-runtime=docker"}, "docker"},
+		{"empty inline runtime overwrites valid runtime", []string{"--help", "--container-runtime=docker", "--container-runtime="}, ""},
+		{"malformed runtime preserves prior runtime", []string{"--help", "--container-runtime=docker", "--container-runtime", "--shell"}, "docker"},
+		{"real boundary hides runtime", []string{"--help", "--", "--container-runtime=docker"}, ""},
+		{"repeated valid runtime last wins", []string{"--container-runtime=apple", "--help", "--container-runtime=docker"}, "docker"},
+		{"runtime after help", []string{"--help", "--container-runtime=docker"}, "docker"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Parse(tc.args, testProgName, false)
+			if cfg.ContainerRuntime != tc.want {
+				t.Errorf("ContainerRuntime = %q, want %q", cfg.ContainerRuntime, tc.want)
+			}
+			if !cfg.HelpRequested {
+				t.Error("HelpRequested = false, want true")
+			}
+			var stderr bytes.Buffer
+			if err := Validate(&cfg, &stderr); err != nil {
+				t.Errorf("effective help should suppress deferred validation: %v", err)
+			}
+			if stderr.Len() != 0 {
+				t.Errorf("stderr = %q, want empty", stderr.String())
+			}
+		})
+	}
+}
+
+func TestParseForwardsToolArgumentsAfterTheFirstRealBoundary(t *testing.T) {
+	cfg := Parse([]string{"-s", "--", "--", "--container-runtime=docker", "arg"}, testProgName, false)
+	want := []string{"--", "--container-runtime=docker", "arg"}
+	if strings.Join(cfg.ToolArgs, "\x00") != strings.Join(want, "\x00") {
+		t.Errorf("ToolArgs = %q, want %q", cfg.ToolArgs, want)
+	}
+	if cfg.ContainerRuntime != "" {
+		t.Errorf("ContainerRuntime = %q, want empty", cfg.ContainerRuntime)
+	}
+}
+
+func TestParsePreservesOptionalValueConsumption(t *testing.T) {
+	cases := []struct {
+		name        string
+		args        []string
+		wantRebuild string
+		wantAttach  string
+		wantRuntime string
+	}{
+		{"rebuild consumes value", []string{"-R", "full", "--container-runtime=docker"}, "full", "", "docker"},
+		{"rebuild leaves flag", []string{"-R", "--container-runtime=docker"}, "tools", "", "docker"},
+		{"attach consumes value", []string{"-a", "named", "--container-runtime=docker"}, "none", "named", "docker"},
+		{"attach leaves flag", []string{"-a", "--container-runtime=docker"}, "none", "", "docker"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := Parse(tc.args, testProgName, false)
+			if cfg.RebuildMode != tc.wantRebuild || cfg.AttachName != tc.wantAttach || cfg.ContainerRuntime != tc.wantRuntime {
+				t.Errorf("Parse = rebuild %q, attach %q, runtime %q; want %q, %q, %q",
+					cfg.RebuildMode, cfg.AttachName, cfg.ContainerRuntime,
+					tc.wantRebuild, tc.wantAttach, tc.wantRuntime)
+			}
+		})
+	}
+}
+
+func TestContainerRuntimeValueIsNotValidatedByCLI(t *testing.T) {
+	cfg, stderr, err := validateArgs("--container-runtime=bogus")
+	if err != nil {
+		t.Fatalf("Validate should accept a runtime name owned by internal/runtime: %v", err)
+	}
+	if cfg.ContainerRuntime != "bogus" {
+		t.Errorf("ContainerRuntime = %q, want %q", cfg.ContainerRuntime, "bogus")
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q, want empty", stderr)
+	}
+}
+
 func TestRuntimeFlagName(t *testing.T) {
 	if RuntimeFlag != "--container-runtime" {
 		t.Errorf("RuntimeFlag = %q; the shell suites and USAGE.md name --container-runtime", RuntimeFlag)
 	}
-	if !reflect.DeepEqual(valueTakingFlags[RuntimeFlag], true) {
-		t.Error("RuntimeFlag must be listed in valueTakingFlags, or ScanRuntime will misread its value")
+}
+
+func TestFlagErrorNamesTheAcceptedRuntimes(t *testing.T) {
+	_, stderr, _ := validateArgs("--container-runtime")
+	for _, name := range []string{"apple", "docker"} {
+		if !strings.Contains(stderr, name) {
+			t.Errorf("the --container-runtime error should name %q: %q", name, stderr)
+		}
 	}
 }
 
-// --build-context, both forms, and last occurrence wins -- the same shape
-// --container-runtime already has.
-func TestBuildContextFlagForms(t *testing.T) {
-	cfg, err := Parse([]string{"--build-context", "/a"}, "claude-contained", false, io.Discard)
+func TestBuildContextFlagFormsAndLastOccurrence(t *testing.T) {
+	cfg, stderr, err := validateArgs("--build-context", "/a", "--build-context=/b")
 	if err != nil {
-		t.Fatalf("Parse (space form): %v", err)
+		t.Fatalf("Validate: %v", err)
 	}
-	if cfg.BuildContext != "/a" {
-		t.Errorf("BuildContext = %q, want %q", cfg.BuildContext, "/a")
-	}
-
-	cfg, err = Parse([]string{"--build-context=/b"}, "claude-contained", false, io.Discard)
-	if err != nil {
-		t.Fatalf("Parse (= form): %v", err)
-	}
-	if cfg.BuildContext != "/b" {
-		t.Errorf("BuildContext = %q, want %q", cfg.BuildContext, "/b")
-	}
-
-	cfg, err = Parse([]string{"--build-context", "/a", "--build-context=/b"}, "claude-contained", false, io.Discard)
-	if err != nil {
-		t.Fatalf("Parse (repeated): %v", err)
+	if stderr != "" {
+		t.Errorf("stderr = %q, want empty", stderr)
 	}
 	if cfg.BuildContext != "/b" {
 		t.Errorf("BuildContext = %q, want the last occurrence %q", cfg.BuildContext, "/b")
 	}
 }
 
-func TestBuildContextRequiresValue(t *testing.T) {
-	for _, argv := range [][]string{
-		{"--build-context"},
-		{"--build-context="},
-	} {
-		t.Run(strings.Join(argv, " "), func(t *testing.T) {
-			var stderr bytes.Buffer
-			_, err := Parse(argv, "claude-contained", false, &stderr)
-
-			var exit *ExitError
-			if !asExitError(err, &exit) || exit.Code != ExitUsage {
-				t.Fatalf("Parse(%q) error = %v, want exit %d", argv, err, ExitUsage)
-			}
-			if !strings.Contains(stderr.String(), "requires") {
-				t.Errorf("stderr = %q, want it to mention \"requires\"", stderr.String())
-			}
-		})
-	}
-}
-
-// Validation belongs to the rebuild step (internal/host.FindBuildContext), not
-// to Parse: a nonexistent directory must parse fine.
-func TestBuildContextValueIsNotValidatedByParse(t *testing.T) {
-	cfg, err := Parse([]string{"--build-context", "/definitely/does/not/exist"}, "claude-contained", false, io.Discard)
+func TestBuildContextValueIsNotValidatedByCLI(t *testing.T) {
+	cfg, stderr, err := validateArgs("--build-context", "/definitely/does/not/exist")
 	if err != nil {
-		t.Fatalf("Parse should accept an unvalidated directory: %v", err)
+		t.Fatalf("Validate should accept an unvalidated directory: %v", err)
 	}
 	if cfg.BuildContext != "/definitely/does/not/exist" {
 		t.Errorf("BuildContext = %q, want the raw value", cfg.BuildContext)
 	}
-}
-
-// The pre-scan and Parse must agree on where --build-context's value ends, or
-// a later flag inside it could be read as a runtime selection by one and not
-// the other.
-func TestScanRuntimeSkipsBuildContextValue(t *testing.T) {
-	args := []string{"--build-context", "--container-runtime=docker"}
-	if got := ScanRuntime(args); got != "" {
-		t.Errorf("ScanRuntime(%q) = %q, want \"\": the token is --build-context's value", args, got)
-	}
-
-	var stderr bytes.Buffer
-	_, err := Parse(args, "claude-contained", false, &stderr)
-	var exit *ExitError
-	if !asExitError(err, &exit) || exit.Code != ExitUsage {
-		t.Fatalf("Parse(%q) error = %v, want exit %d (a dash-leading --build-context value)", args, err, ExitUsage)
+	if stderr != "" {
+		t.Errorf("stderr = %q, want empty", stderr)
 	}
 }
 
@@ -263,10 +470,7 @@ func TestRebuildModeDefaults(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			cfg, err := Parse(tc.argv, "claude-contained", false, io.Discard)
-			if err != nil {
-				t.Fatalf("Parse(%q): %v", tc.argv, err)
-			}
+			cfg := Parse(tc.argv, testProgName, false)
 			if cfg.RebuildMode != tc.want {
 				t.Errorf("RebuildMode = %q, want %q", cfg.RebuildMode, tc.want)
 			}

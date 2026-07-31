@@ -42,8 +42,9 @@ func runWith(exec runner, plat runtime.Platform, argv []string, stdin io.Reader,
 	// itself is unobservable here -- it reads env, `uname -m` and /etc/localtime.
 	h := host.Probe()
 
+	cfg := cli.Parse(argv[1:], runtime.ProgName, h.ShareHostClaude)
 	sel := runtime.Selection{
-		Flag:     cli.ScanRuntime(argv[1:]),
+		Flag:     cfg.ContainerRuntime,
 		Env:      h.ContainerRuntime,
 		Argv0:    argv[0],
 		Platform: plat,
@@ -51,22 +52,19 @@ func runWith(exec runner, plat runtime.Platform, argv []string, stdin io.Reader,
 	rt := runtime.Select(sel)
 	prof := rt.Profile()
 
-	cfg, err := cli.Parse(argv[1:], prof.Name, h.ShareHostClaude, stderr)
-	if err != nil {
-		return exitCode(err)
-	}
 	if cfg.HelpRequested {
 		_, _ = fmt.Fprint(stdout, prof.Help)
 		return cli.ExitOK
 	}
 
-	// After --help, so that -h wins wherever it appears exactly as in bash, and
-	// before anything touches the host, so no container command can run under a
-	// runtime the user is about to be told is impossible. That ordering is also
-	// what lets Apple.EnsureUp assume a macOS host. The value comes from the real
-	// parse rather than the pre-scan, so a disagreement between the two could
-	// only mis-select, never mis-report.
-	sel.Flag = cfg.ContainerRuntime
+	err := cli.Validate(&cfg, stderr)
+	if err != nil {
+		return exitCode(err)
+	}
+
+	// After help and CLI validation, and before anything interacts with the
+	// selected runtime. That ordering lets Apple.EnsureUp assume a macOS host
+	// and preserves CLI diagnostics ahead of runtime-selection diagnostics.
 	if err := runtime.ValidateSelection(sel, stderr); err != nil {
 		return cli.ExitUsage
 	}
