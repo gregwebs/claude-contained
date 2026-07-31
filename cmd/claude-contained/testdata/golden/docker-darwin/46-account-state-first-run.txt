@@ -70,7 +70,7 @@ HOME/.claude-contained/claude/agents dir 755
 HOME/.claude-contained/claude/commands dir 755
 HOME/.claude-contained/claude/plugins dir 755
 HOME/.claude-contained/claude/skills dir 755
-HOME/.claude.json symlink 755 -> HOME/.claude-contained/.claude.json
+HOME/.claude.json symlink <LMODE> -> HOME/.claude-contained/.claude.json
 HOME/.claude/agents dir 755
 HOME/.claude/commands dir 755
 HOME/.claude/plugins dir 755

@@ -325,7 +325,22 @@ func goldenManifest(root, label string) []string {
 			if err != nil {
 				target = ""
 			}
-			lines = append(lines, fmt.Sprintf("%s symlink %s -> %s", rel, modeString(info), rewriteSymlinkTarget(root, label, target)))
+			// A symlink's own mode bits are not portable and not meaningful:
+			// no production code path ever sets or depends on one (a
+			// symlink's target is what governs access, never the link
+			// itself), and the two platforms don't even agree on what value
+			// to report. Confirmed empirically running this suite under
+			// linux/arm64 (Apple's `container` CLI, golang:1.24): the kernel
+			// always reports a freshly created symlink as 777 regardless of
+			// umask, while macOS/BSD reports the umask-masked value (755
+			// under the standard 022). Rendering the real, OS-reported value
+			// here would make every symlink line disagree between the
+			// macOS-generated goldens and CI's Linux runner for a reason
+			// that has nothing to do with the launcher -- so it is
+			// normalized at the source, the same way N8-N10 exist because a
+			// committed golden is compared across machines (§5.6's "an
+			// eleventh is an obvious addition, not a guess").
+			lines = append(lines, fmt.Sprintf("%s symlink <LMODE> -> %s", rel, rewriteSymlinkTarget(root, label, target)))
 		case info.IsDir():
 			lines = append(lines, fmt.Sprintf("%s dir %s", rel, modeString(info)))
 		case info.Mode().IsRegular():

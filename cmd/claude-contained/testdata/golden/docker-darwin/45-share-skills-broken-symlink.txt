@@ -38,4 +38,4 @@ HOME/.vaadin dir 755
 HOME/.vibe dir 755
 PROJ dir 755
 PROJ/skills-src dir 755
-PROJ/skills-src/broken-link symlink 755 -> PROJ/skills-src/does-not-exist
+PROJ/skills-src/broken-link symlink <LMODE> -> PROJ/skills-src/does-not-exist

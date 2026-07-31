@@ -107,8 +107,8 @@ PROJ/nested-target dir 755
 PROJ/nested-target/file.md file 644
   | nested
 PROJ/skills-src dir 755
-PROJ/skills-src/dir-link symlink 755 -> PROJ/target-dir
+PROJ/skills-src/dir-link symlink <LMODE> -> PROJ/target-dir
 PROJ/target-dir dir 755
 PROJ/target-dir/file.md file 644
   | content
-PROJ/target-dir/nested-link symlink 755 -> PROJ/nested-target
+PROJ/target-dir/nested-link symlink <LMODE> -> PROJ/nested-target
