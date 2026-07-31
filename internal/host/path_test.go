@@ -173,8 +173,8 @@ func TestPathHash8(t *testing.T) {
 	}
 
 	// sha256("/tmp/project") begins with these eight hex characters; the
-	// differential harness recomputes the same value to neutralize it, so the
-	// two have to agree exactly.
+	// golden normalizer calls PathHash8 itself to neutralize the value (N4 in
+	// goldenfixture_test.go), so the two agree by construction.
 	got := PathHash8("/tmp/project")
 	if len(got) != 8 {
 		t.Fatalf("PathHash8 returned %q, want 8 characters", got)

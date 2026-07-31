@@ -154,7 +154,7 @@ type Config struct {
 
 // Parse mirrors claude-contained:604-878: the flag loop, then the post-parse
 // validation block, in that order. Messages are written verbatim, because the
-// differential harness compares stderr byte for byte.
+// golden tests compare stderr byte for byte.
 //
 // Bash also has a pre-loop shortcut for a leading -h/--help (:553-556). It is
 // not reproduced because it is unobservable: the loop's own -h/--help arm

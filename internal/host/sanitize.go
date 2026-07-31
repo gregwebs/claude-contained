@@ -15,8 +15,8 @@ const maxFolderNameLen = 20
 //
 // On the lowercasing: bash uses `tr '[:upper:]' '[:lower:]'`, whose behavior is
 // locale-dependent. Under LC_ALL=C it is byte-oriented and leaves a multibyte
-// upper-case rune untouched; under the UTF-8 locales that both users and the
-// differential harness actually run in, BSD tr is multibyte-aware and maps
+// upper-case rune untouched; under the UTF-8 locales that users and the test
+// suites actually run in, BSD tr is multibyte-aware and maps
 // 'İ' to 'i' -- which is exactly what strings.ToLower does. Verified by
 // experiment, so the Unicode-aware form is the faithful port here and the
 // byte-oriented one would be the divergence. Every case in the golden table

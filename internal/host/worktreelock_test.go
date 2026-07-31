@@ -39,9 +39,14 @@ func TestMutexAcquireReleaseRoundTrip(t *testing.T) {
 	}
 }
 
-// The harness normalizer keys on "^[0-9]+ [0-9]+$" (see
-// tests/differential/lib/normalize.sh), so the owner file must be written in
-// exactly that shape.
+// mutexHolderIsStale parses the owner file with strings.Fields
+// (worktreelock.go:84-92), so the file must be written in exactly the
+// "<PID> <EPOCH>" shape this test pins. (Not a dependency on the golden
+// normalizer's N7 substitution: the owner file's bytes are never inlined
+// into a golden at all -- goldenfixture_test.go's manifest walk inlines
+// content under .git only for "locked" and "*.mid-run-snapshot", and case
+// 56, the one golden that exercises a stale-mutex reclaim, asserts the
+// mutex directory is gone by the time the manifest is captured.)
 func TestMutexOwnerFileByteFormat(t *testing.T) {
 	repo := realTempDir(t)
 	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {

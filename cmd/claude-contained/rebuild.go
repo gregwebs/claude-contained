@@ -25,8 +25,8 @@ const (
 
 // cacheBustToken is the AI_TOOLS_CACHE_BUST value: `date -u +%Y%m%d%H%M%S`
 // (claude-contained:538). The clock is host state rather than a fresh read, so
-// the token is one deterministic input in tests; the differential harness
-// neutralizes the field regardless (tests/differential/lib/normalize.sh).
+// the token is one deterministic input in tests; the golden normalizer
+// neutralizes the field regardless, to `<TOKEN>` (N6 in goldenfixture_test.go).
 const cacheBustToken = "20060102150405"
 
 // rebuildAttempt is one build plus the stderr lines printed immediately before

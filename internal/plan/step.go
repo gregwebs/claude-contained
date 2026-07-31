@@ -5,9 +5,9 @@ package plan
 // plan by comparing values, with no process started and no filesystem touched.
 //
 // Output is modeled as a Step rather than done inline because it is ordered
-// against the mutations and is compared byte for byte by the differential
-// harness. A plan that got the mutations right but printed at the wrong moment
-// would still be a divergence.
+// against the mutations and is compared byte for byte by the golden tests. A
+// plan that got the mutations right but printed at the wrong moment would
+// still be a divergence.
 type Step interface{ isStep() }
 
 type (

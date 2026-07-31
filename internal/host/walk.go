@@ -12,9 +12,9 @@ import (
 // directory has been read.
 //
 // scan_shared_skill_symlink_tree (claude-contained:1716-1743) feeds this order
-// straight into --mount arguments, and the differential harness compares
-// runtime argv byte for byte, so two symlinks in one directory have to come out
-// in the same order find's does. os.ReadDir would not do: it sorts. A symlink
+// straight into --mount arguments, and the golden tests compare runtime argv
+// byte for byte, so two symlinks in one directory have to come out in the
+// same order find's does. os.ReadDir would not do: it sorts. A symlink
 // to a directory is never descended into, matching find's default (non -L)
 // behavior -- exactly the property the caller relies on to avoid an infinite
 // walk through a self-referential symlink.

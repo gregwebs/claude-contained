@@ -160,8 +160,8 @@ func runWith(exec runner, plat runtime.Platform, argv []string, stdin io.Reader,
 	// Order here is bash's, and it is observable: the placeholder sweep of the
 	// project directory happens at claude-contained:1410, *before* the env file
 	// is read at :1416. Reading the file first would leave those stale files on
-	// disk when a bad file aborts the run, which the differential harness sees
-	// as a filesystem-manifest divergence.
+	// disk when a bad file aborts the run, which the golden tests' filesystem
+	// manifest would see as a divergence.
 	host.CleanupPlaceholderFiles(mainHost)
 
 	// The project env file and the built-ins complete the environment. This runs
@@ -468,7 +468,7 @@ func (e *executor) apply(steps []plan.Step, from int) (int, error) {
 		case plan.MkdirAll:
 			// 0777 is masked by the process umask, exactly as `mkdir -p` does.
 			// Hardcoding 0755 would diverge for any umask other than 022, and
-			// the differential manifest records file modes.
+			// the golden manifest records file modes.
 			if err := os.MkdirAll(s.Path, 0o777); err != nil {
 				return i, err
 			}

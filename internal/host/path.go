@@ -109,8 +109,9 @@ func splitComponents(path string) []string {
 
 // PathHash8 mirrors path_hash_8 (claude-contained:357-367): the first 8 hex
 // characters of the SHA-256 of the path. It feeds default Zellij session names,
-// and the differential harness recomputes it to neutralize the value, so it has
-// to agree exactly.
+// and the golden normalizer calls this function itself to neutralize the value
+// (N4 in goldenfixture_test.go), so it agrees by construction rather than by a
+// second implementation that has to be kept in step.
 func PathHash8(path string) string {
 	sum := sha256.Sum256([]byte(path))
 	return hex.EncodeToString(sum[:])[:8]

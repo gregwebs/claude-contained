@@ -38,8 +38,8 @@ func (a *Apple) Profile() Profile {
 		Help:             appleHelp,
 		// Apple Containers routes the container through the vmnet gateway, which
 		// cannot reach a host service bound to 127.0.0.1 (apple/container#346).
-		// Kept byte-identical to claude-contained's own lines, because the
-		// differential harness compares stderr.
+		// Kept byte-identical to claude-contained's own lines, because the golden
+		// tests compare stderr.
 		HostForwardNotice: []string{
 			"Warning: Apple Containers cannot reach host services bound only to 127.0.0.1.",
 			"         -H reaches host services listening on 0.0.0.0; use Docker for the rest.",

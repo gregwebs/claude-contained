@@ -216,9 +216,11 @@ func AttachCommand(session string, srtDisable bool) []string {
 
 // runGuardFmt is the script bash passes to `bash -lc` (claude-contained:1968-1973).
 // The indentation is part of the argv element and is reproduced exactly; the
-// differential harness compares the runtime argv byte for byte. %s is the
-// launcher's program name, the only token that differs between the two
-// launchers (claude-contained:1970 vs claude-docked:1972).
+// golden tests compare the runtime argv byte for byte. %s is the launcher's
+// program name -- the token that differed between the two bash launchers
+// (claude-contained:1970 vs claude-docked:1972); ticket 11 unified the program
+// name across both, so this is a citation to that history, not a present-tense
+// claim about two launchers.
 const runGuardFmt = `if ! command -v "$0" >/dev/null 2>&1; then
        echo "error: claude-contained image is missing Zellij support (zellij-run)." >&2
        echo "       Rebuild it with: %s --rebuild=full" >&2

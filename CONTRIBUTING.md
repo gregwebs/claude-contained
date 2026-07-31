@@ -65,11 +65,39 @@ make test-shell
 
 GitHub Actions runs `make quality` for pull requests and pushes to `main`.
 
+### Golden tests
+
+`cmd/claude-contained`'s golden suite drives the built binary in-process
+(`runWith`, with the platform injected) against a stubbed container runtime,
+across three configurations -- `apple-darwin`, `docker-darwin`,
+`docker-linux` -- and asserts the full observable result against committed
+data under `cmd/claude-contained/testdata/golden/`: runtime argv, stdout,
+stderr, exit status, and a filesystem manifest.
+
+- `go test ./cmd/claude-contained -run TestGolden` runs it; it is part of
+  `make test` / `make quality`.
+- `go test ./cmd/claude-contained -run TestGolden -update` regenerates the
+  goldens for cases whose behavior changed and prints a diff of what it
+  wrote. It refuses to write a file for a case that trips either liveness
+  guard (empty on every axis, or a runtime-args declaration mismatched
+  against what was actually captured) -- an empty or mis-declared golden is
+  unwritable by construction.
+- **A changed golden in a pull request is a behavior change**, not
+  formatting. Explain it in the commit message the same way you would
+  explain a change to the code path it covers.
+- Goldens are normalized so a fixture's own temp-directory path, timestamps,
+  and machine-specific values never appear literally. The tokens are
+  `<PROJ>`, `<HOME>`, `<ROOT>`, `<PHASH>`, `<TIME>`, `<TOKEN>`, `<PID>`,
+  `<EPOCH>`, `<UID>`, `<GID>`, `<ARCH>`, and `<LMODE>` (a symlink's own
+  permission bits, which Linux and macOS report differently and which no
+  production code path ever sets or reads). A new volatile field is one new
+  named substitution, not a per-case exception.
+
 ## Repository Architecture
 
 - **Go launcher**: `cmd/claude-contained` is the entry point. `internal/cli` parses flags, `internal/host` inspects and prepares host state, `internal/plan` builds a resumable execution plan, and `internal/runtime` is the container-runtime seam.
 - **Container image**: `Dockerfile` assembles the image. Production helpers and configuration live under `image/`; each script documents its purpose at the top of the file.
-- **Tests**: Go unit tests live beside their packages. Shell suites under `tests/` exercise runtime behavior (`make test-shell` runs every `tests/*.test.sh` against both build outputs). `tests/differential/` is not part of that matrix and is reachable from no `make` target: it holds the corpus that proved the Go launcher behavior-preserving against the retired bash launchers, and its harness now refuses to run because the oracle it compared against is gone. Ticket 12 converts the corpus to golden test data.
+- **Tests**: Go unit tests live beside their packages. Golden tests in `cmd/claude-contained` drive the built binary against a stubbed container runtime and assert the full observable result (runtime argv, stdout, stderr, exit status, filesystem manifest) against `testdata/golden/` -- see "Golden tests" above. Shell suites under `tests/` exercise the shipped build outputs (`make test-shell` runs every `tests/*.test.sh` against both build outputs).
 - **Design records**: [CONTEXT.md](CONTEXT.md) defines project vocabulary. Architectural decisions live under [`docs/adr/`](docs/adr/).
 
 The VS Code template has separate implementation notes in [devcontainer/CLAUDE.md](devcontainer/CLAUDE.md).

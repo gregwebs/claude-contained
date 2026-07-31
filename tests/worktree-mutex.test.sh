@@ -15,8 +15,10 @@
 # over (once for the offer, once for cleanup -- see that scenario's comment):
 # there is no override hook from outside the launcher for the mutex's polling
 # constants (bash's are literals; Go's are test-only). That cost is paid here,
-# once per target, rather than in the differential corpus, which has no
-# teardown hook for a live holder process.
+# once per target, rather than in the golden test suite (cmd/claude-contained),
+# which has no teardown hook for a live holder process either -- the U1/U2
+# unit tests in internal/host/worktreelock_test.go cover the same fail-safe
+# and fail-open warnings with a synthesized (non-live) holder instead.
 #
 # Usage: tests/worktree-mutex.test.sh
 set -uo pipefail

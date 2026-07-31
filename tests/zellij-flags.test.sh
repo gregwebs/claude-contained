@@ -8,11 +8,11 @@
 # never falls back to creation, and the top-level container command is the
 # repo-owned zellij-run wrapper.
 #
-# The launcher cases in suite() run against every target -- the bash oracles
-# and the Go binary alike, selected via CLAUDE_CONTAINED_TEST_TARGETS. The
-# in-container Zellij scripts (zellij-pane-command.sh, zellij-run.sh,
-# zellij-attach.sh) are covered separately, target-independent, in
-# tests/zellij-image-scripts.test.sh.
+# The launcher cases in suite() run against every target -- bin/claude-contained
+# and the bin/claude-contained-docked symlink alike, selected via
+# CLAUDE_CONTAINED_TEST_TARGETS. The in-container Zellij scripts
+# (zellij-pane-command.sh, zellij-run.sh, zellij-attach.sh) are covered
+# separately, target-independent, in tests/zellij-image-scripts.test.sh.
 #
 # Usage: tests/zellij-flags.test.sh
 set -uo pipefail

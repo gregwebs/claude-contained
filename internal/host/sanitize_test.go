@@ -36,9 +36,9 @@ func TestSanitizeFolderName(t *testing.T) {
 }
 
 // bash's `tr '[:upper:]' '[:lower:]'` is multibyte-aware under the UTF-8
-// locales that users and the differential harness actually run in: it maps
-// 'İ' to a plain 'i', so the name keeps a leading letter instead of losing it
-// to the non-alphanumeric substitution. Verified against the bash function.
+// locales that users and the test suites actually run in: it maps 'İ' to a
+// plain 'i', so the name keeps a leading letter instead of losing it to the
+// non-alphanumeric substitution. Verified against the bash function.
 //
 // Under LC_ALL=C the same pipeline yields "stanbul" instead, so this is the one
 // place the port is pinned to a locale rather than to bash unconditionally.
