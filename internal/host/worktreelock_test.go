@@ -378,3 +378,301 @@ func TestReleaseWorktreeLocksSurvivesOtherOwner(t *testing.T) {
 		t.Fatalf("owners = %v, aic-mine-2222 should have been removed", owners)
 	}
 }
+
+// --- §3.2 U1-U8: the genuinely uncovered paths -------------------------
+//
+// These are characterization tests for code that already exists (plan §3.2):
+// each of U1-U4 was watched to fail once, against a deliberately broken
+// production line, before being left in its passing form. What was broken
+// and observed to fail is recorded on each test below rather than left in
+// the code, per the plan's instruction not to leave debug scaffolding
+// behind -- a characterization test nobody watched fail is a comment, and
+// this one records that it *was* watched.
+
+// mutexBlockingFixture pre-occupies the mutex directory with a live, fresh
+// (not reclaimable) holder, so acquireMutex inside LockWorktrees/
+// ReleaseWorktreeLocks reliably times out. Shrinks the wait tunables first,
+// the same way TestMutexTimesOutOnLiveHolder does, so the timeout itself
+// stays fast.
+func mutexBlockingFixture(t *testing.T, main string) {
+	t.Helper()
+	restoreGrace, restoreMax, restorePoll := mutexStaleGrace, mutexMaxWaits, mutexPollInterval
+	mutexStaleGrace, mutexMaxWaits, mutexPollInterval = 2, 4, time.Millisecond
+	t.Cleanup(func() { mutexStaleGrace, mutexMaxWaits, mutexPollInterval = restoreGrace, restoreMax, restorePoll })
+
+	mutexDir := filepath.Join(main, ".git", "claude-contained-worktree-locks.lock")
+	if err := os.Mkdir(mutexDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeOwner(t, mutexDir, int64(os.Getpid()), time.Now().Unix())
+}
+
+// U1: LockWorktrees' fail-safe path -- a mutex it cannot acquire is a
+// warning, never a reason to leave the worktrees unprotected.
+//
+// Watched to fail: with acquireMutex's `if err := os.Mkdir(lockDir, 0o777);
+// err == nil { break }` changed to always `break` (i.e. acquireMutex always
+// reports ok=true, as if `return &mutex{dir: lockDir}, true` were forced
+// unconditionally at the top), this test's fail-safe-warning assertion
+// failed as expected: no warning was printed because the (real) code path
+// never took the "mutex unavailable" branch at all. Reverted.
+func TestLockWorktreesFailSafeWithoutMutex(t *testing.T) {
+	main, wt := gitFixture(t)
+	mutexBlockingFixture(t, main)
+
+	var stdout, stderr bytes.Buffer
+	locked := LockWorktrees(main, []string{wt}, "aic-test-0000", &stdout, &stderr)
+
+	if !strings.Contains(stderr.String(), "Warning: proceeding to auto-lock without the serialization mutex;") {
+		t.Errorf("stderr = %q, want the fail-safe warning's first line", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "a concurrent launcher on this repo could race on lock bookkeeping.") {
+		t.Errorf("stderr = %q, want the fail-safe warning's second line", stderr.String())
+	}
+	if len(locked) != 1 || locked[0] != wt {
+		t.Fatalf("LockWorktrees returned %v, want [%s]: fail-safe means it locks anyway", locked, wt)
+	}
+	if _, isLocked := lockReasonFor(t, main, wt); !isLocked {
+		t.Fatal("worktree should be locked despite the unavailable mutex (fail-safe)")
+	}
+}
+
+// U2: ReleaseWorktreeLocks' fail-open path -- a mutex it cannot acquire
+// during cleanup leaves the locks in place rather than risk dropping a
+// still-live owner.
+//
+// Watched to fail alongside U1, with the same break described above
+// (acquireMutex forced to always report ok=true): with the mutex never
+// actually reporting itself unavailable, ReleaseWorktreeLocks' fail-open
+// branch was never taken, and this test's "worktree remains locked"
+// assertion failed -- the mutex-blocking fixture's own owner file was
+// simply overwritten by the "successful" acquire, and the worktree was
+// unlocked as a normal release. Reverted.
+func TestReleaseWorktreeLocksFailOpenWithoutMutex(t *testing.T) {
+	main, wt := gitFixture(t)
+	mustAddOwner(t, main, wt, "aic-test-0000")
+	mutexBlockingFixture(t, main)
+
+	var stderr bytes.Buffer
+	ReleaseWorktreeLocks(main, []string{wt}, "aic-test-0000", &stderr)
+
+	if !strings.Contains(stderr.String(), "Warning: could not acquire worktree auto-lock mutex during cleanup;") {
+		t.Errorf("stderr = %q, want the fail-open warning", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "worktree unlock") {
+		t.Errorf("stderr = %q, want it to name the manual git worktree unlock command", stderr.String())
+	}
+	if !strings.Contains(stderr.String(), main) {
+		t.Errorf("stderr = %q, want it to name the repo path", stderr.String())
+	}
+	if _, isLocked := lockReasonFor(t, main, wt); !isLocked {
+		t.Fatal("worktree should remain locked: fail-open means the lock is left in place")
+	}
+}
+
+// U3: LockWorktrees' warning path -- addAutoLockOwner failing (a user's own
+// lock) is named on stderr, the worktree is absent from the returned list,
+// and the Auto-locked count reflects the omission.
+//
+// Watched to fail: with the `if err := addAutoLockOwner(...); err != nil {
+// ... continue }` guard changed to ignore the error (append to `locked`
+// unconditionally instead of `continue`-ing past it), this test's "locked
+// should be empty" assertion failed -- the user's own worktree was reported
+// as auto-locked. Reverted.
+func TestLockWorktreesWarnsAndOmitsOnUserLock(t *testing.T) {
+	main, wt := gitFixture(t)
+	runGit(t, main, "worktree", "lock", "--reason", "mine", wt)
+
+	var stdout, stderr bytes.Buffer
+	locked := LockWorktrees(main, []string{wt}, "aic-test-0000", &stdout, &stderr)
+
+	if len(locked) != 0 {
+		t.Fatalf("locked = %v, want empty: a user's own lock must be left unchanged", locked)
+	}
+	if !strings.Contains(stderr.String(), "Warning: could not auto-lock "+wt+"; leaving it unchanged") {
+		t.Errorf("stderr = %q, want the per-worktree warning naming %s", stderr.String(), wt)
+	}
+	if !strings.Contains(stdout.String(), "Auto-locked 0 worktree(s).") {
+		t.Errorf("stdout = %q, want the count to reflect the omission", stdout.String())
+	}
+	reason, isLocked := lockReasonFor(t, main, wt)
+	if !isLocked || reason != "mine" {
+		t.Fatalf("user lock = %q locked=%v, want unchanged \"mine\"", reason, isLocked)
+	}
+}
+
+// U4: acquireMutex reclaims an aged live-PID holder end to end, not just at
+// the mutexHolderIsStale predicate TestMutexHolderIsStaleAged already
+// covers.
+//
+// Watched to fail: with mutexHolderIsStale's age-fallback block (the
+// `if holderTS > 0 && now > holderTS { ... }` clause) deleted so only the
+// PID-liveness check could report staleness, this test's "reclaim note"
+// assertion failed -- acquireMutex timed out instead of reclaiming, because
+// the holder PID (this test process's own, still alive) never resolves as
+// dead. Reverted.
+func TestAcquireMutexReclaimsAgedLivePIDHolder(t *testing.T) {
+	restoreGrace, restoreMax, restorePoll := mutexStaleGrace, mutexMaxWaits, mutexPollInterval
+	mutexStaleGrace, mutexMaxWaits, mutexPollInterval = 1, 50, time.Millisecond
+	defer func() { mutexStaleGrace, mutexMaxWaits, mutexPollInterval = restoreGrace, restoreMax, restorePoll }()
+
+	repo := realTempDir(t)
+	if err := os.MkdirAll(filepath.Join(repo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	lockDir := filepath.Join(repo, ".git", "claude-contained-worktree-locks.lock")
+	if err := os.Mkdir(lockDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A live PID (this test process's own) but a timestamp far older than
+	// mutexStaleAfter (30s default): the age fallback must drive the
+	// reclaim, since the PID itself resolves as alive.
+	writeOwner(t, lockDir, int64(os.Getpid()), time.Now().Add(-time.Hour).Unix())
+
+	var stderr bytes.Buffer
+	m, ok := acquireMutex(repo, &stderr)
+	if !ok {
+		t.Fatalf("acquireMutex failed: %s", stderr.String())
+	}
+	defer m.release()
+	if !strings.Contains(stderr.String(), "reclaiming stale worktree auto-lock mutex") {
+		t.Errorf("stderr = %q, want the reclaim note", stderr.String())
+	}
+	data, _ := os.ReadFile(filepath.Join(lockDir, "owner"))
+	fields := strings.Fields(string(data))
+	if len(fields) == 0 || fields[0] != strconv.Itoa(os.Getpid()) {
+		t.Errorf("reclaimed mutex owner = %q, want this process's PID", string(data))
+	}
+}
+
+// U5: removeAutoLockOwner's remaining early returns -- worktree directory
+// gone, lock file absent, our owner not in the list -- each a silent no-op.
+func TestRemoveAutoLockOwnerEarlyReturns(t *testing.T) {
+	t.Run("worktree directory gone", func(t *testing.T) {
+		main, wt := gitFixture(t)
+		mustAddOwner(t, main, wt, "aic-one")
+		if err := os.RemoveAll(wt); err != nil {
+			t.Fatal(err)
+		}
+		// Must not panic: os.Stat(wtPath) fails and removeAutoLockOwner
+		// returns immediately.
+		removeAutoLockOwner(main, wt, "aic-one")
+	})
+
+	t.Run("lock file absent", func(t *testing.T) {
+		main, wt := gitFixture(t)
+		// Never locked at all: worktreeLockFile resolves, but the file
+		// itself (<git-dir>/locked) does not exist.
+		removeAutoLockOwner(main, wt, "aic-one")
+		if _, locked := lockReasonFor(t, main, wt); locked {
+			t.Fatal("a no-op remove must not itself create a lock")
+		}
+	})
+
+	t.Run("owner not present", func(t *testing.T) {
+		main, wt := gitFixture(t)
+		mustAddOwner(t, main, wt, "aic-one")
+		removeAutoLockOwner(main, wt, "aic-someone-else")
+		reason, locked := lockReasonFor(t, main, wt)
+		if !locked {
+			t.Fatal("worktree should still be locked: the removed owner was never in the list")
+		}
+		owners, _ := parseAutoLockOwners(reason)
+		if !reflectContains(owners, "aic-one") {
+			t.Fatalf("owners = %v, want aic-one untouched", owners)
+		}
+	})
+}
+
+// U6: LockWorktrees deduplicates a repeated worktree in the slice it
+// returns (the `seen` guard, worktreelock.go:274-277) -- distinct from U7's
+// appendAutoLockOwner idempotence, which is what actually stops a duplicate
+// owner *line* in the lock file.
+func TestLockWorktreesDeduplicatesReturnedSlice(t *testing.T) {
+	main, wt := gitFixture(t)
+
+	var stdout, stderr bytes.Buffer
+	locked := LockWorktrees(main, []string{wt, wt}, "aic-test-0000", &stdout, &stderr)
+
+	if len(locked) != 1 || locked[0] != wt {
+		t.Fatalf("locked = %v, want exactly one entry for the repeated worktree", locked)
+	}
+	if !strings.Contains(stdout.String(), "Auto-locked 1 worktree(s).") {
+		t.Errorf("stdout = %q, want the count to reflect the dedup", stdout.String())
+	}
+}
+
+// U7: appendAutoLockOwner is idempotent -- appending an owner already
+// present returns without rewriting the lock file at all. This, not U6's
+// `seen` guard on the returned slice, is what stops a duplicate owner line
+// from ever reaching the lock file on disk.
+func TestAppendAutoLockOwnerIsIdempotent(t *testing.T) {
+	main, wt := gitFixture(t)
+	mustAddOwner(t, main, wt, "aic-one")
+
+	lockFile, err := worktreeLockFile(wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.Stat(lockFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if err := appendAutoLockOwner(lockFile, "aic-one"); err != nil {
+		t.Fatalf("appendAutoLockOwner (repeat): %v", err)
+	}
+
+	reason, locked := lockReasonFor(t, main, wt)
+	if !locked {
+		t.Fatal("worktree should still be locked")
+	}
+	owners, _ := parseAutoLockOwners(reason)
+	count := 0
+	for _, o := range owners {
+		if o == "aic-one" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Fatalf("owners = %v, want exactly one aic-one -- a duplicate append must not add a second", owners)
+	}
+
+	after, err := os.Stat(lockFile)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.ModTime().Equal(before.ModTime()) {
+		t.Error("the lock file was rewritten for a no-op append")
+	}
+}
+
+// U8: removeAutoLockOwner's last-owner path falls back to removing the lock
+// file directly when `git worktree unlock` itself fails.
+//
+// Forcing that failure without touching filesystem permissions (which would
+// break the os.Remove fallback identically, defeating the point): deleting
+// the worktree admin directory's own `gitdir` back-pointer file makes `git
+// worktree unlock <path>` fail with "fatal: '<path>' is not a working tree"
+// (verified empirically against git 2.47), while `git -C <wt> rev-parse
+// --git-dir` -- what worktreeLockFile itself calls -- is unaffected, so
+// removeAutoLockOwner still reaches the unlock attempt and its fallback.
+func TestRemoveAutoLockOwnerFallsBackWhenUnlockFails(t *testing.T) {
+	main, wt := gitFixture(t)
+	mustAddOwner(t, main, wt, "aic-only")
+
+	lockFile, err := worktreeLockFile(wt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminDir := filepath.Dir(lockFile)
+	if err := os.Remove(filepath.Join(adminDir, "gitdir")); err != nil {
+		t.Fatal(err)
+	}
+
+	removeAutoLockOwner(main, wt, "aic-only")
+
+	if _, err := os.Stat(lockFile); !os.IsNotExist(err) {
+		t.Fatalf("lock file still present after the unlock-failure fallback (err=%v)", err)
+	}
+}
