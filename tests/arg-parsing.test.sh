@@ -22,6 +22,7 @@ repo_root="$(dirname "$here")"
 # A developer's exported build-context override must not change any result
 # here, the same way an ambient CLAUDE_CONTAINED_RUNTIME must not.
 unset CLAUDE_CONTAINED_BUILD_CONTEXT
+unset CLAUDE_CONTAINED_LOG_LEVEL
 
 stub_dir="$(mktemp -d)"
 # The launcher resolves paths through realpath, and on macOS /var is a symlink to

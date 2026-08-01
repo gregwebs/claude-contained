@@ -32,6 +32,9 @@ Options:
   --new-session      With --zellij, start even when another session is live
   --container-runtime NAME  Container runtime: apple or docker (default: per host)
   --build-context DIR  Checkout holding the Dockerfile for --rebuild
+  --log-level LEVEL  Diagnostic detail: debug, info, warn, error, or off
+  --log-file PATH    Write the diagnostic stream to a secured, truncated file
+  --log-only         Carry user-facing output on the diagnostic stream
   -h, --help         Show this help message
 
 Behavior:
@@ -64,6 +67,10 @@ Behavior:
   - --rebuild finds the Dockerfile via --build-context, else
     CLAUDE_CONTAINED_BUILD_CONTEXT, else this executable's own directory or the
     Git repository containing it.
+  - Diagnostics default to off. --log-level wins over
+    CLAUDE_CONTAINED_LOG_LEVEL; --log-only implies info only when neither set a
+    level. --log-file is mode 0600 and never falls back to stderr on failure.
+    Help and interactive prompts always remain on their original terminal.
   - Apple Containers defaults the container's resolver to the vmnet gateway, which
     often cannot resolve. The launcher uses --dns 1.1.1.1 by default. Explicit
     --dns wins; set CLAUDE_DNS=system to use the runtime default, or

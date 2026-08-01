@@ -137,6 +137,7 @@ func withStubbedHostAndPath(t *testing.T) string {
 	writeStubDocker(t, stubDir)
 	t.Setenv("HOME", home)
 	t.Setenv("PATH", stubDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("CLAUDE_CONTAINED_LOG_LEVEL", "")
 	return stubDir
 }
 

@@ -27,6 +27,9 @@ There are no positional arguments. Use `-C` for the project directory, `-m` for 
 | `--no-sandbox` | Disable the srt sandbox for this run |
 | `--container-runtime NAME` | Container runtime: `apple` or `docker` |
 | `--build-context DIR` | Checkout holding the Dockerfile for `--rebuild` |
+| `--log-level LEVEL` | Diagnostic detail: `debug`, `info`, `warn`, `error`, or `off` (default) |
+| `--log-file PATH` | Write the diagnostic stream to a secured, truncated file |
+| `--log-only` | Carry user-facing output on the diagnostic stream |
 | `-s`, `--shell` | Start a bash shell instead of the selected tool |
 | `-S`, `--ssh` | Enable SSH agent forwarding |
 | `-w`, `--worktree` | Include a Git worktree's main repository without prompting |
@@ -62,6 +65,18 @@ The launcher's `--help` output is authoritative for the installed version.
 
 If mounted Git metadata can see linked worktrees outside the mounted directories, the launcher offers to auto-lock them while the container runs. This prevents an in-container `git worktree prune` or `git gc` from removing worktrees it cannot see. `-W` accepts the offer without prompting. Locks owned by the launcher are released after the last owning container exits, and stale launcher locks are reclaimed on a later run.
 
+### Diagnostic Stream
+
+Contributor-facing diagnostics are opt-in and use a separate stream from the launcher's user-facing prose. Choose `debug`, `info`, `warn`, `error`, or `off` with `--log-level`; the exact lowercase spelling is required. Resolution order is an explicit `--log-level`, then `CLAUDE_CONTAINED_LOG_LEVEL`, then the `info` implied by `--log-only`, then `off`. An explicit `off` prevents the implication. `--log-file` alone does not enable diagnostic records.
+
+By default, enabled diagnostics use stderr. `--log-file PATH` instead creates or truncates PATH after narrowing it to mode `0600`; a setup failure exits 2 and never falls back to stderr. `--log-only` carries normal stdout and stderr lines as `kind=output stream=stdout|stderr` records to the same destination. These relocated output records are never level-filtered, so user-facing warnings survive even with `--log-level=error`. Help remains raw on stdout, and interactive prompt text remains raw on the terminal.
+
+Attach and Zellij attach normally replace the launcher process. With `--log-only`, the launcher instead proxies that command as a child so its later stdout and stderr can continue through the diagnostic stream; the child exit status is preserved.
+
+Launcher-generated records use `kind=diagnostic` and exactly one component from `cli`, `host`, `env`, `plan`, `runtime`, `worktree`, `zellij`, `attach`, or `rebuild`. They never include environment assignment values or the value of `AI_GH_TOKEN`; rendered runtime arguments replace every `-e` operand with a redacted form at every level. Paths, mount information, and non-`-e` tool arguments can remain visible, and the redacted argv is not a pasteable reproduction of the real command.
+
+Relocated output has a different security boundary: it is existing launcher, runtime, or child-process output carried verbatim and can contain arbitrary sensitive text. Mode `0600` limits file access but does not make a diagnostic file safe to share. If writing or flushing the stream fails, process replacement is blocked and a successful launcher result becomes a failure; an already nonzero primary result remains primary.
+
 ## Examples
 
 ```bash
@@ -85,6 +100,8 @@ claude-contained -y -t codex
 # Debugging and persistence
 claude-contained -s
 claude-contained -S
+claude-contained --log-level=debug
+claude-contained --log-level=debug --log-file ./launcher.log
 claude-contained --share-skills /Users/me/Projects/skills
 claude-contained --share-host-claude
 

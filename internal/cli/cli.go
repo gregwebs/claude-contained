@@ -7,11 +7,13 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"regexp"
 	"strings"
 
+	"claude-contained/internal/diagnostic"
 	"claude-contained/internal/host"
 )
 
@@ -47,6 +49,13 @@ const RuntimeFlag = "--container-runtime"
 // deliberate divergence in the unknown-flag path, pinned by
 // tests/arg-parsing.test.sh rather than left accidental.
 const BuildContextFlag = "--build-context"
+
+const (
+	// LogLevelFlag selects contributor-facing diagnostic detail.
+	LogLevelFlag = "--log-level"
+	// LogFileFlag moves the diagnostic stream to a secured file.
+	LogFileFlag = "--log-file"
+)
 
 type syntaxFailureKind uint8
 
@@ -93,6 +102,10 @@ type Config struct {
 	// BuildContext is --build-context's value, unvalidated: internal/host checks
 	// for a Dockerfile when a rebuild actually needs one.
 	BuildContext         string
+	LogLevel             string
+	LogLevelSet          bool
+	LogFile              string
+	LogOnly              bool
 	ZellijMode           bool
 	ZellijNewSession     bool
 	ZellijSessionName    string
@@ -263,6 +276,41 @@ func Parse(args []string, progName string, shareHostClaudeEnv bool) Config {
 			cfg.BuildContext = v
 			recordInlineValue(BuildContextFlag, v, "a non-empty directory")
 
+		case arg == LogLevelFlag:
+			if recordRequiredValue(LogLevelFlag, next, "debug, info, warn, error, or off") {
+				cfg.LogLevel = next
+				cfg.LogLevelSet = true
+			}
+			if hasNext {
+				i++
+			}
+		case strings.HasPrefix(arg, LogLevelFlag+"="):
+			v := strings.TrimPrefix(arg, LogLevelFlag+"=")
+			if v == "" {
+				recordInlineValue(LogLevelFlag, v, "debug, info, warn, error, or off")
+			} else {
+				cfg.LogLevel = v
+				cfg.LogLevelSet = true
+			}
+
+		case arg == LogFileFlag:
+			if recordRequiredValue(LogFileFlag, next, "a path") {
+				cfg.LogFile = next
+			}
+			if hasNext {
+				i++
+			}
+		case strings.HasPrefix(arg, LogFileFlag+"="):
+			v := strings.TrimPrefix(arg, LogFileFlag+"=")
+			if v == "" {
+				recordInlineValue(LogFileFlag, v, "a non-empty path")
+			} else {
+				cfg.LogFile = v
+			}
+
+		case arg == "--log-only":
+			cfg.LogOnly = true
+
 		case arg == "--readonly-extras":
 			cfg.ReadonlyExtras = true
 
@@ -410,13 +458,24 @@ var zellijSessionNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
 // ValidateZellijSessionName mirrors validate_zellij_session_name
 // (claude-contained:375-388).
 func ValidateZellijSessionName(name string, stderr io.Writer) error {
+	return ValidateZellijSessionNameContext(context.Background(), name, stderr)
+}
+
+// ValidateZellijSessionNameContext is the diagnostic-aware validation seam.
+// The compatibility wrapper above keeps callers that do not own a configured
+// context silent through diagnostic's discard fallback.
+func ValidateZellijSessionNameContext(ctx context.Context, name string, stderr io.Writer) error {
 	if name == "" {
 		_, _ = fmt.Fprintln(stderr, "error: Zellij session name cannot be empty")
+		diagnostic.For(ctx, diagnostic.ComponentCLI).Warn("command line validation failed",
+			diagnostic.String("validation_kind", "zellij-session-empty"))
 		return exitWith(ExitUsage)
 	}
 	if name[0] == '-' || !zellijSessionNamePattern.MatchString(name) {
 		_, _ = fmt.Fprintf(stderr, "error: invalid Zellij session name: %s\n", name)
 		_, _ = fmt.Fprintln(stderr, "       Use only letters, numbers, '_', '.', and '-'; do not start with '-'.")
+		diagnostic.For(ctx, diagnostic.ComponentCLI).Warn("command line validation failed",
+			diagnostic.String("validation_kind", "zellij-session-invalid"))
 		return exitWith(ExitUsage)
 	}
 	return nil
@@ -426,6 +485,19 @@ func ValidateZellijSessionName(name string, stderr io.Writer) error {
 // semantics. Order matters: each check's message and exit status is observable,
 // and the --name rewrite happens here rather than at use.
 func Validate(cfg *Config, stderr io.Writer) error {
+	return ValidateContext(context.Background(), cfg, stderr)
+}
+
+// ValidateContext reports the same byte-identical user diagnostics as
+// Validate and adds only closed validation classifications to the configured
+// diagnostic stream.
+func ValidateContext(ctx context.Context, cfg *Config, stderr io.Writer) error {
+	fail := func(kind string) error {
+		diagnostic.For(ctx, diagnostic.ComponentCLI).Warn("command line validation failed",
+			diagnostic.String("validation_kind", kind))
+		return exitWith(ExitUsage)
+	}
+
 	// Effective help short-circuits both deferred syntax failures encountered
 	// later in argv and semantic validation. The front end prints the selected
 	// runtime profile's help before calling Validate; this guard keeps the seam's
@@ -435,48 +507,53 @@ func Validate(cfg *Config, stderr io.Writer) error {
 	}
 	if len(cfg.parse.failures) > 0 {
 		failure := cfg.parse.failures[0]
+		kind := "invalid-syntax"
 		switch failure.kind {
 		case syntaxRequiredValue:
+			kind = "required-value"
 			_, _ = fmt.Fprintf(stderr, "error: %s requires %s\n", failure.flag, failure.what)
 		case syntaxNewSessionValue:
+			kind = "new-session-value"
 			_, _ = fmt.Fprintln(stderr, "error: --new-session no longer takes a name; use --session=NAME")
 		case syntaxUnknownFlag:
+			kind = "unknown-flag"
 			_, _ = fmt.Fprintf(stderr, "error: unknown flag: %s\n", failure.value)
 			_, _ = fmt.Fprintf(stderr, "       run '%s --help' for the supported flags\n", cfg.parse.progName)
 		case syntaxPositional:
+			kind = "positional-argument"
 			_, _ = fmt.Fprintf(stderr, "error: positional arguments are no longer accepted: %s\n", failure.value)
 			_, _ = fmt.Fprintf(stderr, "       use -C/--dir for the project directory:  %s -C %s\n", cfg.parse.progName, failure.value)
 			_, _ = fmt.Fprintf(stderr, "       use -m/--mount for extra directories:    %s -m %s\n", cfg.parse.progName, failure.value)
 			_, _ = fmt.Fprintf(stderr, "       (bare '%s' uses the current directory)\n", cfg.parse.progName)
 		}
-		return exitWith(ExitUsage)
+		return fail(kind)
 	}
 
 	if cfg.ZellijNewSession && !cfg.ZellijMode {
 		_, _ = fmt.Fprintln(stderr, "error: --new-session is valid only with --zellij")
-		return exitWith(ExitUsage)
+		return fail("new-session-without-zellij")
 	}
 	if cfg.ZellijSessionNameSet && !cfg.ZellijMode {
 		_, _ = fmt.Fprintln(stderr, "error: --session is valid only with --zellij")
-		return exitWith(ExitUsage)
+		return fail("session-without-zellij")
 	}
 	if cfg.ZellijMode && cfg.AttachMode && cfg.ShellMode {
 		_, _ = fmt.Fprintln(stderr, "error: --zellij --attach cannot be combined with --shell")
-		return exitWith(ExitUsage)
+		return fail("zellij-attach-shell")
 	}
 	// Under --zellij the target is a session, named only by --session.
 	// Accepting a name on -a as well would give one token two meanings again.
 	if cfg.ZellijMode && cfg.AttachName != "" {
 		_, _ = fmt.Fprintln(stderr, "error: -a/--attach takes no name with --zellij; use --session=NAME")
-		return exitWith(ExitUsage)
+		return fail("zellij-attach-name")
 	}
 	if cfg.AttachMode && cfg.CustomContainerName != "" {
 		_, _ = fmt.Fprintln(stderr, "error: --name cannot be combined with -a/--attach")
 		_, _ = fmt.Fprintln(stderr, "       --name names a new container; --attach reconnects to an existing one.")
-		return exitWith(ExitUsage)
+		return fail("attach-custom-name")
 	}
 	if cfg.ZellijSessionNameSet {
-		if err := ValidateZellijSessionName(cfg.ZellijSessionName, stderr); err != nil {
+		if err := ValidateZellijSessionNameContext(ctx, cfg.ZellijSessionName, stderr); err != nil {
 			return err
 		}
 	}
@@ -490,7 +567,7 @@ func Validate(cfg *Config, stderr io.Writer) error {
 		_, _ = fmt.Fprintln(stderr, "       Attaching starts a Zellij client; the pane keeps the environment it was")
 		_, _ = fmt.Fprintln(stderr, "       created with, so the variable would silently never reach the tool.")
 		_, _ = fmt.Fprintln(stderr, "       Set it when the session is created instead.")
-		return exitWith(ExitUsage)
+		return fail("zellij-attach-environment")
 	}
 	return nil
 }

@@ -1,6 +1,7 @@
 package host
 
 import (
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -38,6 +39,9 @@ type State struct {
 	// BuildContext is CLAUDE_CONTAINED_BUILD_CONTEXT: the checkout --rebuild
 	// builds from. Empty means unset; there is no set-but-empty distinction.
 	BuildContext string
+	// LogLevel is CLAUDE_CONTAINED_LOG_LEVEL. The command-line flag may replace
+	// it after probing; the raw value is never part of State.LogValue.
+	LogLevel string
 }
 
 // Probe captures host state. HOME comes from the environment rather than the
@@ -66,6 +70,34 @@ func Probe() State {
 		ShareHostClaude:  os.Getenv("CLAUDE_CONTAINED_SHARE_HOST_CLAUDE") == "1",
 		ContainerRuntime: os.Getenv("CLAUDE_CONTAINED_RUNTIME"),
 		BuildContext:     os.Getenv(BuildContextEnvVar),
+		LogLevel:         os.Getenv("CLAUDE_CONTAINED_LOG_LEVEL"),
+	}
+}
+
+// LogValue is an explicit allowlist. New State fields remain absent until
+// deliberately reviewed; in particular raw tokens and environment values can
+// never appear through a blanket slog.Any of State.
+func (s State) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("uid", s.UID),
+		slog.String("gid", s.GID),
+		slog.String("arch", diagnosticArch(s.Arch)),
+		slog.String("home", s.Home),
+		slog.Bool("gh_token_present", s.GHToken != ""),
+		slog.Bool("dns_configured", s.DNSEnvSet),
+		slog.Bool("share_host_claude", s.ShareHostClaude),
+		slog.Bool("runtime_env_set", s.ContainerRuntime != ""),
+		slog.Bool("build_context_env_set", s.BuildContext != ""),
+		slog.Bool("log_level_env_set", s.LogLevel != ""),
+	)
+}
+
+func diagnosticArch(arch string) string {
+	switch arch {
+	case "aarch64", "x86_64":
+		return arch
+	default:
+		return "unknown"
 	}
 }
 

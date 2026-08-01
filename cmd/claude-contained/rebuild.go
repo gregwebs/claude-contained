@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"claude-contained/internal/cli"
+	"claude-contained/internal/diagnostic"
 	"claude-contained/internal/host"
 	"claude-contained/internal/plan"
 	"claude-contained/internal/runtime"
@@ -99,6 +100,8 @@ func runRebuild(
 
 	buildContext, err := host.FindBuildContext(src)
 	if err != nil {
+		diagnostic.For(ctx, diagnostic.ComponentRebuild).Error("build context resolution failed",
+			diagnostic.ErrorAttr(err))
 		return reportBuildContextError(err, rt.Profile().Name, stderr)
 	}
 
@@ -107,12 +110,26 @@ func runRebuild(
 			_, _ = fmt.Fprintln(stderr, line)
 		}
 		attempt.Spec.Context = buildContext
-		if code := exec(ctx, rt.RenderBuild(attempt.Spec), stdin, stdout, stderr); code == 0 {
+		argv := rt.RenderBuild(attempt.Spec)
+		started := time.Now()
+		diagnostic.For(ctx, diagnostic.ComponentRebuild).Info("image rebuild attempt started",
+			diagnostic.Int("attempt", i+1), diagnostic.Value("argv", runtime.DiagnosticArgv(argv)))
+		if code := exec(ctx, argv, stdin, stdout, stderr); code == 0 {
+			diagnostic.For(ctx, diagnostic.ComponentRebuild).Info("image rebuild attempt completed",
+				diagnostic.Int("attempt", i+1), diagnostic.Duration("duration", time.Since(started)),
+				diagnostic.Int("exit_status", code))
 			return cli.ExitOK
 		} else if i == len(attempts)-1 {
+			diagnostic.For(ctx, diagnostic.ComponentRebuild).Warn("image rebuild attempt failed",
+				diagnostic.Int("attempt", i+1), diagnostic.Duration("duration", time.Since(started)),
+				diagnostic.Int("exit_status", code))
 			// bash runs under `set -e`, so the last build's status is the
 			// script's (claude-contained:546).
 			return code
+		} else {
+			diagnostic.For(ctx, diagnostic.ComponentRebuild).Warn("image rebuild attempt failed; retrying",
+				diagnostic.Int("attempt", i+1), diagnostic.Duration("duration", time.Since(started)),
+				diagnostic.Int("exit_status", code))
 		}
 	}
 	return cli.ExitFailure // unreachable: the loop returns on the last attempt.

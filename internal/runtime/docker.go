@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/exec"
 	"time"
+
+	"claude-contained/internal/diagnostic"
 )
 
 // dockerHelp is the source of truth for the Docker runtime's --help text; see
@@ -156,9 +158,12 @@ func (d *Docker) InspectEnv(ctx context.Context, name string) ([]string, error) 
 }
 
 func (d *Docker) EnsureUp(ctx context.Context, stdout, stderr io.Writer, confirm func(string) bool) error {
-	if d.daemonUp(ctx) {
+	probeErr := d.daemonStatus(ctx)
+	if probeErr == nil {
 		return nil
 	}
+	logger := diagnostic.For(ctx, diagnostic.ComponentRuntime)
+	logger.Debug("container runtime liveness probe failed", diagnostic.ErrorAttr(probeErr))
 	if d.platform != Darwin {
 		// Off macOS the daemon is a service, not an application. Starting it is
 		// distro-specific and may or may not need root (`sudo systemctl start
@@ -174,7 +179,7 @@ func (d *Docker) EnsureUp(ctx context.Context, stdout, stderr io.Writer, confirm
 		_, _ = fmt.Fprintln(stderr, "error: Docker is not running.")
 		_, _ = fmt.Fprintln(stderr, "       Start the daemon and retry (for example: sudo systemctl start docker,")
 		_, _ = fmt.Fprintln(stderr, "       or systemctl --user start docker-desktop for Docker Desktop).")
-		return ErrNotRunning
+		return fmt.Errorf("%w: %w", ErrNotRunning, probeErr)
 	}
 	if !confirm(d.Profile().NotRunningPrompt) {
 		return ErrAborted
@@ -182,10 +187,14 @@ func (d *Docker) EnsureUp(ctx context.Context, stdout, stderr io.Writer, confirm
 	// Unlike Apple Containers' single start command, Docker Desktop is an
 	// application: open it and wait for the daemon to answer. The wait is
 	// deliberately unbounded, matching claude-docked:872.
-	_ = exec.CommandContext(ctx, "open", "-a", "Docker").Run()
+	if err := exec.CommandContext(ctx, "open", "-a", "Docker").Run(); err != nil {
+		// Starting Docker Desktop is best-effort for behavior compatibility; the
+		// polling loop remains authoritative, but the discarded cause is useful.
+		logger.Warn("Docker Desktop start request failed", diagnostic.ErrorAttr(err))
+	}
 	_, _ = fmt.Fprintln(stdout, "Waiting for Docker to start...")
 	for {
-		if d.daemonUp(ctx) {
+		if d.daemonStatus(ctx) == nil {
 			return nil
 		}
 		select {
@@ -196,6 +205,6 @@ func (d *Docker) EnsureUp(ctx context.Context, stdout, stderr io.Writer, confirm
 	}
 }
 
-func (d *Docker) daemonUp(ctx context.Context) bool {
-	return exec.CommandContext(ctx, d.Bin(), "info").Run() == nil
+func (d *Docker) daemonStatus(ctx context.Context) error {
+	return exec.CommandContext(ctx, d.Bin(), "info").Run()
 }

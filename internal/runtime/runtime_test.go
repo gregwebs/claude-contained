@@ -230,6 +230,25 @@ func TestHelpDocumentsBuildContext(t *testing.T) {
 	}
 }
 
+func TestHelpDocumentsDiagnosticStream(t *testing.T) {
+	for name, help := range map[string]string{
+		"apple":  NewApple(Darwin).Profile().Help,
+		"docker": NewDocker(Darwin).Profile().Help,
+	} {
+		for _, text := range []string{
+			"--log-level LEVEL",
+			"--log-file PATH",
+			"--log-only",
+			"CLAUDE_CONTAINED_LOG_LEVEL",
+			"mode 0600",
+		} {
+			if !strings.Contains(help, text) {
+				t.Errorf("%s help does not document %q", name, text)
+			}
+		}
+	}
+}
+
 func contains(haystack []string, needle string) bool {
 	for _, s := range haystack {
 		if s == needle {

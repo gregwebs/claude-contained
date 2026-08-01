@@ -28,6 +28,7 @@ set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(dirname "$here")"
+unset CLAUDE_CONTAINED_LOG_LEVEL
 
 fails=0
 _check() { # _check "description" <rc-that-should-be-0>
@@ -69,9 +70,19 @@ EOF
 #!/usr/bin/env bash
 set -uo pipefail
 case "\${1:-}" in
-  info|ps) exit 0 ;;
+  info) exit 0 ;;
+  ps)
+    [[ "\${STUB_ATTACH:-}" == 1 ]] && echo aic-live
+    exit 0
+    ;;
+  inspect)
+    if [[ "\${STUB_ZELLIJ:-}" == 1 ]]; then
+      printf '%s\n' 'CLAUDE_CONTAINED_ZELLIJ=1' 'CLAUDE_CONTAINED_ZELLIJ_SESSION=alpha'
+    fi
+    exit 0
+    ;;
 esac
-if [[ "\${1:-}" == "run" ]]; then
+if [[ "\${1:-}" == "run" || ( "\${1:-}" == "exec" && "\${STUB_ATTACH:-}" == 1 ) ]]; then
   : > "${marker}"
   sleep "${STUB_SLEEP}"
 fi
@@ -138,6 +149,38 @@ start_launcher() {
   launcher_pid="$(cat "$launcher_pid_file")"
 }
 
+start_log_only_attach() {
+  local target="$1" marker="$2" kind="${3:-plain}"
+  launcher_pid_file="$(mktemp)"; rm -f "$launcher_pid_file"
+  launcher_rc_file="$(mktemp)"; rm -f "$launcher_rc_file"
+
+  (
+    set -m
+    if [[ "$kind" == zellij ]]; then
+      env HOME="$home" PATH="${stub_dir}:$PATH" STUB_ATTACH=1 STUB_ZELLIJ=1 \
+        CLAUDE_CONTAINED_LOG_LEVEL='' \
+        "${repo_root}/${target}" --container-runtime=docker \
+        --log-only --log-level=off --zellij --attach --session alpha \
+        </dev/null >/dev/null 2>/dev/null &
+    else
+      env HOME="$home" PATH="${stub_dir}:$PATH" STUB_ATTACH=1 \
+        CLAUDE_CONTAINED_LOG_LEVEL='' \
+        "${repo_root}/${target}" --container-runtime=docker \
+        --log-only --log-level=off --attach live \
+        </dev/null >/dev/null 2>/dev/null &
+    fi
+    lp=$!
+    printf '%s' "$lp" > "$launcher_pid_file"
+    wait "$lp"
+    echo $? > "$launcher_rc_file"
+  ) &
+  harness_pid=$!
+
+  wait_for_file "$launcher_pid_file" 5
+  launcher_pid="$(cat "$launcher_pid_file")"
+  wait_for_file "$marker" 5
+}
+
 read -ra targets <<< "${CLAUDE_CONTAINED_TEST_TARGETS:-bin/claude-contained bin/claude-contained-docked}"
 
 for target in "${targets[@]}"; do
@@ -200,16 +243,68 @@ for target in "${targets[@]}"; do
     elapsed=$((SECONDS - start))
 
     rc="$(cat "$launcher_rc_file" 2>/dev/null || echo -1)"
-    [[ "$rc" == "$want_code" ]]
-    _check "${target} ${sig} (solo): exit status is ${want_code} (got ${rc})" $?
-    [[ $elapsed -ge $((STUB_SLEEP - 1)) ]]
-    _check "${target} ${sig} (solo): the run completed naturally before the launcher exited (${elapsed}s)" $?
-    worktree_is_locked "$main" "$wt"; rc2=$?; [[ $rc2 -ne 0 ]]
-    _check "${target} ${sig} (solo): worktree is unlocked once the launcher exits" $?
+    if [[ "$rc" == "$want_code" ]]; then check_rc=0; else check_rc=1; fi
+    _check "${target} ${sig} (solo): exit status is ${want_code} (got ${rc})" "$check_rc"
+    if [[ $elapsed -ge $((STUB_SLEEP - 1)) ]]; then check_rc=0; else check_rc=1; fi
+    _check "${target} ${sig} (solo): the run completed naturally before the launcher exited (${elapsed}s)" "$check_rc"
+    worktree_is_locked "$main" "$wt"; rc2=$?
+    if [[ $rc2 -ne 0 ]]; then check_rc=0; else check_rc=1; fi
+    _check "${target} ${sig} (solo): worktree is unlocked once the launcher exits" "$check_rc"
 
     rm -rf "$stub_dir" "$home" "$root" "$launcher_pid_file" "$launcher_rc_file"
     rm -f "$marker"
   done
+
+  # --log-only keeps the launcher alive to proxy attach output. Its signal
+  # behavior must therefore match the ordinary foreground run rather than
+  # orphaning the attached runtime child.
+  for delivery in group solo; do
+    home="$(mktemp -d)"; root="$(mktemp -d)"
+    marker="$(mktemp -u)"
+    setup_runtime_stubs "$marker"
+    start_log_only_attach "$target" "$marker"
+    _check "${target} TERM (${delivery}, log-only attach): stub exec started" $?
+
+    start=$SECONDS
+    if [[ "$delivery" == group ]]; then
+      kill -TERM "-${launcher_pid}" 2>/dev/null
+    else
+      kill -TERM "${launcher_pid}" 2>/dev/null
+    fi
+    wait "$harness_pid" 2>/dev/null
+    elapsed=$((SECONDS - start))
+
+    rc="$(cat "$launcher_rc_file" 2>/dev/null || echo -1)"
+    if [[ "$rc" == 143 ]]; then check_rc=0; else check_rc=1; fi
+    _check "${target} TERM (${delivery}, log-only attach): exit status is 143 (got ${rc})" "$check_rc"
+    if [[ "$delivery" == group ]]; then
+      if [[ $elapsed -lt $((STUB_SLEEP - 1)) ]]; then check_rc=0; else check_rc=1; fi
+      _check "${target} TERM (group, log-only attach): child died promptly (${elapsed}s)" "$check_rc"
+    else
+      if [[ $elapsed -ge $((STUB_SLEEP - 1)) ]]; then check_rc=0; else check_rc=1; fi
+      _check "${target} TERM (solo, log-only attach): child completed before exit (${elapsed}s)" "$check_rc"
+    fi
+
+    rm -rf "$stub_dir" "$home" "$root" "$launcher_pid_file" "$launcher_rc_file"
+    rm -f "$marker"
+  done
+
+  home="$(mktemp -d)"; root="$(mktemp -d)"
+  marker="$(mktemp -u)"
+  setup_runtime_stubs "$marker"
+  start_log_only_attach "$target" "$marker" zellij
+  _check "${target} TERM (solo, log-only Zellij attach): stub exec started" $?
+  start=$SECONDS
+  kill -TERM "${launcher_pid}" 2>/dev/null
+  wait "$harness_pid" 2>/dev/null
+  elapsed=$((SECONDS - start))
+  rc="$(cat "$launcher_rc_file" 2>/dev/null || echo -1)"
+  [[ "$rc" == 143 ]]
+  _check "${target} TERM (solo, log-only Zellij attach): exit status is 143 (got ${rc})" $?
+  [[ $elapsed -ge $((STUB_SLEEP - 1)) ]]
+  _check "${target} TERM (solo, log-only Zellij attach): child completed before exit (${elapsed}s)" $?
+  rm -rf "$stub_dir" "$home" "$root" "$launcher_pid_file" "$launcher_rc_file"
+  rm -f "$marker"
 
 done
 

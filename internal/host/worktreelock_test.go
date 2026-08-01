@@ -2,6 +2,7 @@ package host
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -10,7 +11,41 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"claude-contained/internal/diagnostic"
 )
+
+func TestWorktreeFailureDiagnosticsCarryReviewedFacts(t *testing.T) {
+	main, wt := gitFixture(t)
+	mutexBlockingFixture(t, main)
+
+	var records, stdout, stderr bytes.Buffer
+	stream, err := diagnostic.Open(diagnostic.Options{
+		Resolution: diagnostic.Resolution{Level: diagnostic.LevelDebug},
+	}, &records)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := stream.Context(context.Background())
+	locked := LockWorktreesContext(ctx, main, []string{wt}, "aic-test", &stdout, &stderr)
+	if err := stream.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if len(locked) != 1 {
+		t.Fatalf("locked = %v, want fail-safe lock", locked)
+	}
+	got := records.String()
+	for _, anchor := range []string{
+		"kind=diagnostic component=worktree",
+		"msg=\"worktree auto-lock mutex acquisition timed out\"",
+		"wait_count=", "lock_dir=", "error.class=path",
+		"msg=\"worktree auto-lock proceeding without serialization mutex\"",
+	} {
+		if !strings.Contains(got, anchor) {
+			t.Errorf("worktree diagnostics missing %q: %q", anchor, got)
+		}
+	}
+}
 
 // --- Step 1: the mutex --------------------------------------------------
 

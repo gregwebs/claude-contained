@@ -456,6 +456,58 @@ func TestBuildContextValueIsNotValidatedByCLI(t *testing.T) {
 	}
 }
 
+func TestDiagnosticFlagFormsAndLastOccurrence(t *testing.T) {
+	cfg, stderr, err := validateArgs(
+		"--log-level", "debug",
+		"--log-file", "/first",
+		"--log-level=warn",
+		"--log-file=/second",
+		"--log-only",
+	)
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q, want empty", stderr)
+	}
+	if cfg.LogLevel != "warn" || !cfg.LogLevelSet {
+		t.Errorf("log level = %q, set %v; want warn, true", cfg.LogLevel, cfg.LogLevelSet)
+	}
+	if cfg.LogFile != "/second" || !cfg.LogOnly {
+		t.Errorf("log file/only = %q/%v, want /second/true", cfg.LogFile, cfg.LogOnly)
+	}
+}
+
+func TestMalformedDiagnosticValueDoesNotReplacePriorSelection(t *testing.T) {
+	cfg, stderr, err := validateArgs("--log-level=debug", "--log-level=")
+	requireUsageError(t, err)
+	if stderr != "error: --log-level requires debug, info, warn, error, or off\n" {
+		t.Errorf("stderr = %q", stderr)
+	}
+	if cfg.LogLevel != "debug" || !cfg.LogLevelSet {
+		t.Errorf("selected log level = %q, %v; want prior debug", cfg.LogLevel, cfg.LogLevelSet)
+	}
+}
+
+func TestDiagnosticFlagsUseDeferredRequiredValueGrammar(t *testing.T) {
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"--log-level"}, "error: --log-level requires debug, info, warn, error, or off\n"},
+		{[]string{"--log-level="}, "error: --log-level requires debug, info, warn, error, or off\n"},
+		{[]string{"--log-file"}, "error: --log-file requires a path\n"},
+		{[]string{"--log-file="}, "error: --log-file requires a non-empty path\n"},
+	}
+	for _, tt := range tests {
+		_, stderr, err := validateArgs(tt.args...)
+		requireUsageError(t, err)
+		if stderr != tt.want {
+			t.Errorf("%q stderr = %q, want %q", tt.args, stderr, tt.want)
+		}
+	}
+}
+
 func TestRebuildModeDefaults(t *testing.T) {
 	cases := []struct {
 		name string

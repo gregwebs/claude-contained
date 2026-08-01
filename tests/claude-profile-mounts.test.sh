@@ -10,6 +10,7 @@ set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(dirname "$here")"
+unset CLAUDE_CONTAINED_LOG_LEVEL
 
 stub_dir="$(mktemp -d)"
 proj="$(mktemp -d)"

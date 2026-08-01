@@ -25,6 +25,7 @@ set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(dirname "$here")"
+unset CLAUDE_CONTAINED_LOG_LEVEL
 
 fails=0
 _check() { # _check "description" <rc-that-should-be-0>

@@ -149,7 +149,17 @@ The Go launcher selects its container runtime in this order: `--container-runtim
 
 Code above `internal/runtime` must not mention `container` or `docker` commands.
 
-See [ADR-0003](docs/adr/0003-flag-only-cli.md) for the flag-only CLI and [ADR-0004](docs/adr/0004-go-launcher-rewrite.md) for the Go port.
+See [ADR-0003](docs/adr/0003-flag-only-cli.md) for the flag-only CLI, [ADR-0004](docs/adr/0004-go-launcher-rewrite.md) for the Go port, and [ADR-0005](docs/adr/0005-diagnostic-stream.md) for the separate diagnostic stream.
+
+### Add Diagnostic Records Deliberately
+
+Diagnostic records are selective observations for contributors, not a mirror of every user-facing print. Add one when the existing prose loses useful cause or decision detail. Retrieve the logger from `context.Context` through `internal/diagnostic` and bind exactly one of its closed components: `cli`, `host`, `env`, `plan`, `runtime`, `worktree`, `zellij`, `attach`, or `rebuild`. Never use package-level `slog` calls, `slog.Default`, or `slog.SetDefault` in production.
+
+Records use `kind=diagnostic` plus `component`. Relocated output uses `kind=output` plus `stream=stdout|stderr` and bypasses the diagnostic level filter because discarding it would be data loss. Do not add `phase` or `operation`; put the action in the record message. Omit timestamps and source, and add an explicit `duration` only for elapsed work where it matters, such as runtime liveness or image rebuilds.
+
+Use safe typed carriers rather than attaching raw configs, host state, plans, runtime arguments, or errors. Environment values and known tokens must never enter launcher-generated diagnostics at any level. Environment assignments expose only key and provenance, host tokens expose presence, and runtime argv must use the `-e`-redacting carrier. Relocated output is existing text carried verbatim and may contain secrets; do not describe it as redacted or safe to share.
+
+When adding a component, flag, help description, or launcher-read environment variable, update the closed set, both `internal/runtime/help_*.txt` files, `USAGE.md`, focused metadata/redaction tests, and every test harness environment blacklist together. Do not add a diagnostic dimension to the golden fixtures.
 
 ### Keep the Dockerfile Small
 

@@ -12,6 +12,7 @@ package env
 
 import (
 	"fmt"
+	"log/slog"
 	"strings"
 )
 
@@ -29,8 +30,35 @@ const (
 	Builtin
 )
 
+func (o Origin) String() string {
+	switch o {
+	case Flag:
+		return "flag"
+	case File:
+		return "project-file"
+	case Builtin:
+		return "builtin"
+	default:
+		return "invalid"
+	}
+}
+
 // Pair is one environment variable bound for the container.
 type Pair struct{ Key, Value string }
+
+// ResolvedPair is the diagnostic-only view of a final assignment. It carries
+// provenance and deliberately has no value field, so callers cannot leak one.
+type ResolvedPair struct {
+	Key    string
+	Origin Origin
+}
+
+func (p ResolvedPair) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.String("key", p.Key),
+		slog.String("provenance", p.Origin.String()),
+	)
+}
 
 // entry is one recorded assignment together with where it came from.
 type entry struct {
@@ -94,6 +122,15 @@ func (s *Store) Pairs() []Pair {
 	out := make([]Pair, 0, len(s.entries))
 	for _, e := range s.entries {
 		out = append(out, Pair{Key: e.key, Value: e.value})
+	}
+	return out
+}
+
+// DiagnosticPairs returns final deduplicated keys and provenance only.
+func (s *Store) DiagnosticPairs() []ResolvedPair {
+	out := make([]ResolvedPair, 0, len(s.entries))
+	for _, e := range s.entries {
+		out = append(out, ResolvedPair{Key: e.key, Origin: e.origin})
 	}
 	return out
 }

@@ -43,3 +43,19 @@ _Avoid_: dotenv, .env
 **Zellij session store**:
 The host-backed Zellij state reserved for contained runs, used to resurrect named terminal workspaces after their container processes exit.
 _Avoid_: Zellij config, Zellij cache
+
+**Diagnostic record**:
+One observation the launcher emits about its own decision-making, for someone debugging the launcher rather than someone using it. Silent unless asked for.
+_Avoid_: log message, debug print, trace
+
+**Relocated output**:
+User-facing text that would normally be printed to the terminal, carried on the diagnostic stream instead because the user asked for it. It keeps its identity as output, so it is never filtered away.
+_Avoid_: redirected output, captured output
+
+**Diagnostic stream**:
+Where diagnostic records and relocated output are written — stderr by default, a file when the user names one.
+_Avoid_: log sink, log output, logger
+
+**Component**:
+The launcher subsystem a diagnostic record is attributed to, drawn from a closed set so records can be filtered by origin.
+_Avoid_: module, subsystem, package

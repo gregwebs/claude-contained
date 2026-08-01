@@ -1,10 +1,39 @@
 package env
 
 import (
+	"bytes"
+	"log/slog"
 	"reflect"
 	"strings"
 	"testing"
 )
+
+func TestDiagnosticPairsExposeOnlyKeyAndProvenance(t *testing.T) {
+	const sentinel = "DO-NOT-LOG"
+	s := New()
+	mustSet(t, s, "FLAG_SECRET="+sentinel, "--env", Flag)
+	if err := s.LoadFile([]byte("FILE_SECRET=" + sentinel + "\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Default("BUILTIN_SECRET="+sentinel, "builtin", Builtin); err != nil {
+		t.Fatal(err)
+	}
+
+	var out bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&out, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	for _, pair := range s.DiagnosticPairs() {
+		logger.Debug("resolved", "assignment", pair)
+	}
+	got := out.String()
+	if strings.Contains(got, sentinel) {
+		t.Fatalf("diagnostic pairs leaked a value: %q", got)
+	}
+	for _, anchor := range []string{"FLAG_SECRET", "provenance=flag", "FILE_SECRET", "provenance=project-file", "BUILTIN_SECRET", "provenance=builtin"} {
+		if !strings.Contains(got, anchor) {
+			t.Errorf("diagnostic pairs missing %q: %q", anchor, got)
+		}
+	}
+}
 
 func pairs(s *Store) []Pair { return s.Pairs() }
 

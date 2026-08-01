@@ -17,6 +17,7 @@ set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(dirname "$here")"
+unset CLAUDE_CONTAINED_LOG_LEVEL
 
 # Emitted container args for a given set of launcher flags, using a stub runtime
 # on PATH that just echoes its argv.

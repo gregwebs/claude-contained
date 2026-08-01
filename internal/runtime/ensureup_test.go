@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"claude-contained/internal/diagnostic"
 )
 
 // EnsureUp is driven entirely through PATH stubs, so every case runs identically
@@ -183,6 +185,35 @@ func TestDockerEnsureUpLinuxRefusesWithoutPrompting(t *testing.T) {
 		t.Errorf("the refusal belongs on stderr, stdout = %q", stdout.String())
 	}
 	fileMissing(t, filepath.Join(dir, "open.argv"), "opening Docker Desktop")
+}
+
+func TestDockerEnsureUpRecordsTheDiscardedProbeCause(t *testing.T) {
+	ensureUpStubs(t, -1)
+	var records, stdout, stderr bytes.Buffer
+	stream, err := diagnostic.Open(diagnostic.Options{
+		Resolution: diagnostic.Resolution{Level: diagnostic.LevelDebug},
+	}, &records)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := stream.Context(context.Background())
+	if err := NewDocker(Linux).EnsureUp(ctx, &stdout, &stderr, refuseToConfirm(t)); !errors.Is(err, ErrNotRunning) {
+		t.Fatalf("EnsureUp error = %v, want ErrNotRunning", err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatal(err)
+	}
+	got := records.String()
+	for _, anchor := range []string{
+		"msg=\"container runtime liveness probe failed\"",
+		"component=runtime",
+		"error.class=process-exit",
+		"error.exit_status=1",
+	} {
+		if !strings.Contains(got, anchor) {
+			t.Errorf("diagnostic missing %q: %q", anchor, got)
+		}
+	}
 }
 
 // The zero-value platform takes the bash else-arm, i.e. behaves as Linux.

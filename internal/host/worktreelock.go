@@ -1,6 +1,7 @@
 package host
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -10,6 +11,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"claude-contained/internal/diagnostic"
 )
 
 // Tunable only so tests need not sleep five seconds; the values mirror the
@@ -30,21 +33,59 @@ type mutex struct{ dir string }
 // ok=false means the caller must decide for itself which way to fail: the
 // launch path locks anyway, the cleanup path leaves the locks alone.
 func acquireMutex(repoRoot string, stderr io.Writer) (m *mutex, ok bool) {
+	return acquireMutexContext(context.Background(), repoRoot, stderr)
+}
+
+func acquireMutexContext(ctx context.Context, repoRoot string, stderr io.Writer) (m *mutex, ok bool) {
 	lockDir := filepath.Join(repoRoot, ".git", "claude-contained-worktree-locks.lock")
 	waited := 0
+	logger := diagnostic.For(ctx, diagnostic.ComponentWorktree)
+	logger.Debug("worktree auto-lock mutex acquisition started", diagnostic.String("lock_dir", lockDir))
+	var lastErr error
 
 	for {
 		if err := os.Mkdir(lockDir, 0o777); err == nil {
 			break
+		} else {
+			lastErr = err
 		}
-		if waited >= mutexStaleGrace && mutexHolderIsStale(lockDir) {
-			_, _ = fmt.Fprintln(stderr, "Note: reclaiming stale worktree auto-lock mutex from a defunct launcher")
-			_ = os.Remove(filepath.Join(lockDir, "owner"))
-			_ = os.Remove(lockDir)
-			waited = 0
-			continue
+		if waited >= mutexStaleGrace {
+			observation := observeMutexHolder(lockDir)
+			if observation.stale {
+				attrs := []diagnostic.Attr{
+					diagnostic.String("lock_dir", lockDir),
+					diagnostic.Int("wait_count", waited),
+					diagnostic.String("stale_reason", observation.reason),
+				}
+				if observation.pid != 0 {
+					attrs = append(attrs, diagnostic.Int("holder_pid", observation.pid))
+				}
+				if observation.age > 0 {
+					attrs = append(attrs, diagnostic.Duration("holder_duration", observation.age))
+				}
+				if observation.err != nil {
+					attrs = append(attrs, diagnostic.ErrorAttr(observation.err))
+				}
+				logger.Warn("stale worktree auto-lock mutex detected", attrs...)
+				_, _ = fmt.Fprintln(stderr, "Note: reclaiming stale worktree auto-lock mutex from a defunct launcher")
+				if err := os.Remove(filepath.Join(lockDir, "owner")); err != nil && !os.IsNotExist(err) {
+					logger.Warn("stale worktree auto-lock mutex owner removal failed",
+						diagnostic.String("owner_path", filepath.Join(lockDir, "owner")), diagnostic.ErrorAttr(err))
+				}
+				if err := os.Remove(lockDir); err != nil && !os.IsNotExist(err) {
+					logger.Warn("stale worktree auto-lock mutex removal failed",
+						diagnostic.String("lock_dir", lockDir), diagnostic.ErrorAttr(err))
+				}
+				waited = 0
+				continue
+			}
 		}
 		if waited >= mutexMaxWaits {
+			logger.Warn("worktree auto-lock mutex acquisition timed out",
+				diagnostic.String("lock_dir", lockDir),
+				diagnostic.Int("wait_count", waited),
+				diagnostic.ErrorAttr(lastErr),
+			)
 			_, _ = fmt.Fprintln(stderr, "Warning: timed out waiting for worktree auto-lock mutex")
 			return nil, false
 		}
@@ -57,7 +98,13 @@ func acquireMutex(repoRoot string, stderr io.Writer) (m *mutex, ok bool) {
 	if f, err := os.Create(filepath.Join(lockDir, "owner")); err == nil {
 		_, _ = fmt.Fprintf(f, "%d %d\n", os.Getpid(), time.Now().Unix())
 		_ = f.Close()
+	} else {
+		logger.Warn("worktree auto-lock mutex owner identity could not be recorded",
+			diagnostic.String("owner_path", filepath.Join(lockDir, "owner")), diagnostic.ErrorAttr(err))
 	}
+	logger.Debug("worktree auto-lock mutex acquired",
+		diagnostic.String("lock_dir", lockDir), diagnostic.Int("wait_count", waited),
+		diagnostic.Int("holder_pid", os.Getpid()))
 
 	return &mutex{dir: lockDir}, true
 }
@@ -73,12 +120,24 @@ func (m *mutex) release() {
 
 // mutexHolderIsStale mirrors mutex_holder_is_stale (claude-contained:1116-1140).
 func mutexHolderIsStale(lockDir string) bool {
+	return observeMutexHolder(lockDir).stale
+}
+
+type mutexHolderObservation struct {
+	stale  bool
+	reason string
+	pid    int
+	age    time.Duration
+	err    error
+}
+
+func observeMutexHolder(lockDir string) mutexHolderObservation {
 	data, err := os.ReadFile(filepath.Join(lockDir, "owner"))
 	if err != nil {
 		// A live holder writes its owner file within microseconds of creating
 		// the directory; a persistently missing one means the holder died
 		// mid-acquire.
-		return true
+		return mutexHolderObservation{stale: true, reason: "owner-unreadable", err: err}
 	}
 
 	fields := strings.Fields(string(data))
@@ -99,7 +158,7 @@ func mutexHolderIsStale(lockDir string) bool {
 	// data.
 	if holderPID != 0 {
 		if err := syscall.Kill(holderPID, 0); err != nil {
-			return true
+			return mutexHolderObservation{stale: true, reason: "holder-unreachable", pid: holderPID, err: err}
 		}
 	}
 
@@ -109,11 +168,15 @@ func mutexHolderIsStale(lockDir string) bool {
 	if holderTS > 0 && now > holderTS {
 		age := now - holderTS
 		if age >= int64(mutexStaleAfter/time.Second) {
-			return true
+			return mutexHolderObservation{
+				stale: true, reason: "holder-expired", pid: holderPID,
+				age: time.Duration(age) * time.Second,
+			}
 		}
+		return mutexHolderObservation{reason: "holder-active", pid: holderPID, age: time.Duration(age) * time.Second}
 	}
 
-	return false
+	return mutexHolderObservation{reason: "holder-active", pid: holderPID}
 }
 
 // worktreeLockFile mirrors get_worktree_lock_file (claude-contained:1104-1111).
@@ -258,8 +321,19 @@ func removeAutoLockOwner(repoRoot, wtPath, owner string) {
 // bookkeeping; a lone racing append at worst leaks a lock, which cannot
 // destroy data.
 func LockWorktrees(repo string, worktrees []string, owner string, stdout, stderr io.Writer) []string {
-	m, ok := acquireMutex(repo, stderr)
+	return LockWorktreesContext(context.Background(), repo, worktrees, owner, stdout, stderr)
+}
+
+// LockWorktreesContext is LockWorktrees with contributor diagnostics attached
+// to the caller's stream.
+func LockWorktreesContext(
+	ctx context.Context, repo string, worktrees []string, owner string, stdout, stderr io.Writer,
+) []string {
+	logger := diagnostic.For(ctx, diagnostic.ComponentWorktree)
+	m, ok := acquireMutexContext(ctx, repo, stderr)
 	if !ok {
+		logger.Warn("worktree auto-lock proceeding without serialization mutex",
+			diagnostic.String("repo", repo), diagnostic.Int("worktree_count", len(worktrees)))
 		_, _ = fmt.Fprintln(stderr, "Warning: proceeding to auto-lock without the serialization mutex;")
 		_, _ = fmt.Fprintln(stderr, "         a concurrent launcher on this repo could race on lock bookkeeping.")
 	}
@@ -268,6 +342,8 @@ func LockWorktrees(repo string, worktrees []string, owner string, stdout, stderr
 	seen := make(map[string]bool, len(worktrees))
 	for _, wt := range worktrees {
 		if err := addAutoLockOwner(repo, wt, owner); err != nil {
+			logger.Warn("worktree auto-lock failed",
+				diagnostic.String("repo", repo), diagnostic.String("worktree", wt), diagnostic.ErrorAttr(err))
 			_, _ = fmt.Fprintf(stderr, "Warning: could not auto-lock %s; leaving it unchanged\n", wt)
 			continue
 		}
@@ -275,6 +351,8 @@ func LockWorktrees(repo string, worktrees []string, owner string, stdout, stderr
 			seen[wt] = true
 			locked = append(locked, wt)
 		}
+		logger.Debug("worktree auto-lock applied",
+			diagnostic.String("repo", repo), diagnostic.String("worktree", wt))
 	}
 
 	m.release() // no-op when ok was false: m is nil
@@ -289,12 +367,22 @@ func LockWorktrees(repo string, worktrees []string, owner string, stdout, stderr
 // Fail-open: a mutex it cannot take means the locks stay. Erring toward
 // over-locking cannot destroy data; dropping a still-live owner can.
 func ReleaseWorktreeLocks(repo string, worktrees []string, owner string, stderr io.Writer) {
+	ReleaseWorktreeLocksContext(context.Background(), repo, worktrees, owner, stderr)
+}
+
+// ReleaseWorktreeLocksContext is ReleaseWorktreeLocks with cleanup diagnostics.
+func ReleaseWorktreeLocksContext(
+	ctx context.Context, repo string, worktrees []string, owner string, stderr io.Writer,
+) {
 	if repo == "" || len(worktrees) == 0 {
 		return
 	}
 
-	m, ok := acquireMutex(repo, stderr)
+	logger := diagnostic.For(ctx, diagnostic.ComponentWorktree)
+	m, ok := acquireMutexContext(ctx, repo, stderr)
 	if !ok {
+		logger.Warn("worktree auto-lock cleanup left locks in place",
+			diagnostic.String("repo", repo), diagnostic.Int("worktree_count", len(worktrees)))
 		_, _ = fmt.Fprintln(stderr, "Warning: could not acquire worktree auto-lock mutex during cleanup;")
 		_, _ = fmt.Fprintf(stderr, "         leaving auto-locks in place (release with 'git -C \"%s\" worktree unlock <path>').\n", repo)
 		return
@@ -302,6 +390,8 @@ func ReleaseWorktreeLocks(repo string, worktrees []string, owner string, stderr 
 
 	for _, wt := range worktrees {
 		removeAutoLockOwner(repo, wt, owner)
+		logger.Debug("worktree auto-lock owner release attempted",
+			diagnostic.String("repo", repo), diagnostic.String("worktree", wt))
 	}
 	m.release()
 }

@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"os/exec"
+
+	"claude-contained/internal/diagnostic"
 )
 
 // appleHelp is the source of truth for Apple Containers' --help text; changes
@@ -130,9 +132,12 @@ func (a *Apple) InspectEnv(ctx context.Context, name string) ([]string, error) {
 // the host, so this method is unreachable on any other platform. There is
 // therefore no defensive platform arm here.
 func (a *Apple) EnsureUp(ctx context.Context, stdout, stderr io.Writer, confirm func(string) bool) error {
-	if exec.CommandContext(ctx, a.Bin(), "system", "status").Run() == nil {
+	statusErr := exec.CommandContext(ctx, a.Bin(), "system", "status").Run()
+	if statusErr == nil {
 		return nil
 	}
+	diagnostic.For(ctx, diagnostic.ComponentRuntime).Debug("container runtime liveness probe failed",
+		diagnostic.ErrorAttr(statusErr))
 	if !confirm(a.Profile().NotRunningPrompt) {
 		return ErrAborted
 	}

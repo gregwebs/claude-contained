@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"claude-contained/internal/cli"
+	"claude-contained/internal/diagnostic"
 	"claude-contained/internal/env"
 	"claude-contained/internal/host"
 	"claude-contained/internal/plan"
@@ -31,12 +32,30 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	return runWith(execRuntime, runtime.HostPlatform(), argv, stdin, stdout, stderr)
 }
 
+func diagnosticDestinationKind(path string) string {
+	if path != "" {
+		return "file"
+	}
+	return "stderr"
+}
+
+func diagnosticToolName(tool string) string {
+	switch tool {
+	case "claude", "codex", "copilot", "gemini", "vibe":
+		return tool
+	default:
+		return "invalid"
+	}
+}
+
 // plat is a parameter for the same reason exec is: it is the only way a test can
 // exercise the Docker-on-Linux and Docker-on-macOS configurations from either
 // host. Without it, every test here would silently change which runtime it
 // selects depending on the machine it runs on -- and CI is Linux while
 // development is macOS.
-func runWith(exec runner, plat runtime.Platform, argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
+func runWith(exec runner, plat runtime.Platform, argv []string, stdin io.Reader, stdout, stderr io.Writer) (status int) {
+	terminalStdout, terminalStderr := stdout, stderr
+
 	// Probe first: the selection reads CLAUDE_CONTAINED_RUNTIME out of host
 	// state, like every other environment variable the launcher honors. Probe
 	// itself is unobservable here -- it reads env, `uname -m` and /etc/localtime.
@@ -53,11 +72,54 @@ func runWith(exec runner, plat runtime.Platform, argv []string, stdin io.Reader,
 	prof := rt.Profile()
 
 	if cfg.HelpRequested {
-		_, _ = fmt.Fprint(stdout, prof.Help)
+		_, _ = fmt.Fprint(terminalStdout, prof.Help)
 		return cli.ExitOK
 	}
 
-	err := cli.Validate(&cfg, stderr)
+	resolution, err := diagnostic.ResolveLevel(cfg.LogLevel, cfg.LogLevelSet, h.LogLevel, cfg.LogOnly)
+	if err != nil {
+		_, _ = fmt.Fprintf(terminalStderr, "error: %v\n", err)
+		return cli.ExitUsage
+	}
+	stream, err := diagnostic.Open(diagnostic.Options{
+		Resolution: resolution,
+		FilePath:   cfg.LogFile,
+		LogOnly:    cfg.LogOnly,
+	}, terminalStderr)
+	if err != nil {
+		_, _ = fmt.Fprintf(terminalStderr, "error: %v\n", err)
+		return cli.ExitUsage
+	}
+	// Registered before host cleanup defers below: LIFO ordering keeps the
+	// stream available for cleanup diagnostics and closes it last.
+	defer func() {
+		if closeErr := stream.Close(); closeErr != nil {
+			_, _ = fmt.Fprintf(terminalStderr, "error: diagnostic stream failed: %v\n", closeErr)
+			if status == cli.ExitOK {
+				status = cli.ExitFailure
+			}
+		}
+	}()
+
+	ctx := stream.Context(context.Background())
+	stdout, stderr = stream.Writers(stdout, stderr)
+	diagnostic.For(ctx, diagnostic.ComponentCLI).Info("diagnostic stream configured",
+		diagnostic.String("log_level", resolution.Level.String()),
+		diagnostic.String("log_level_source", resolution.Source.String()),
+		diagnostic.String("destination_kind", diagnosticDestinationKind(cfg.LogFile)),
+		diagnostic.Bool("log_only", cfg.LogOnly),
+	)
+	diagnostic.For(ctx, diagnostic.ComponentCLI).Debug("launcher configuration parsed",
+		diagnostic.String("tool", diagnosticToolName(cfg.Tool)),
+		diagnostic.Bool("shell", cfg.ShellMode),
+		diagnostic.Bool("attach", cfg.AttachMode),
+		diagnostic.Bool("zellij", cfg.ZellijMode),
+		diagnostic.Int("environment_assignments", len(cfg.EnvFlagArgs)),
+	)
+	diagnostic.For(ctx, diagnostic.ComponentHost).Debug("host state probed",
+		diagnostic.Value("state", h))
+
+	err = cli.ValidateContext(ctx, &cfg, stderr)
 	if err != nil {
 		return exitCode(err)
 	}
@@ -65,9 +127,14 @@ func runWith(exec runner, plat runtime.Platform, argv []string, stdin io.Reader,
 	// After help and CLI validation, and before anything interacts with the
 	// selected runtime. That ordering lets Apple.EnsureUp assume a macOS host
 	// and preserves CLI diagnostics ahead of runtime-selection diagnostics.
+	selection := runtime.DiagnosticSelection(sel)
+	selectionLogger := diagnostic.For(ctx, diagnostic.ComponentRuntime)
 	if err := runtime.ValidateSelection(sel, stderr); err != nil {
+		selectionLogger.Warn("container runtime selection invalid",
+			diagnostic.Value("selection", selection))
 		return cli.ExitUsage
 	}
+	selectionLogger.Info("container runtime selected", diagnostic.Value("selection", selection))
 
 	// The tool process environment. Command-line variables are validated here,
 	// before the runtime-liveness prompt below, so a bad -e fails without first
@@ -75,6 +142,8 @@ func runWith(exec runner, plat runtime.Platform, argv []string, stdin io.Reader,
 	envStore := env.New()
 	for _, assignment := range cfg.EnvFlagArgs {
 		if err := envStore.Set(assignment, "--env", env.Flag); err != nil {
+			diagnostic.For(ctx, diagnostic.ComponentEnv).Warn("command-line environment assignment validation failed",
+				diagnostic.ErrorAttr(err))
 			_, _ = fmt.Fprintln(stderr, err.Error())
 			return cli.ExitUsage
 		}
@@ -92,18 +161,22 @@ func runWith(exec runner, plat runtime.Platform, argv []string, stdin io.Reader,
 		shareSkillsDir = host.ResolvePath(shareSkillsDir)
 	}
 
-	ctx := context.Background()
-	prompter := newPrompter(stdin, stderr)
+	prompter := newPrompter(stdin, terminalStderr, isTerminal(stdin))
 
 	// The runtime-liveness check comes before anything else touches the host,
 	// matching bash. Declining is an abort, not a failure.
+	livenessStarted := time.Now()
 	if err := rt.EnsureUp(ctx, stdout, stderr, prompter.confirm); err != nil {
+		diagnostic.For(ctx, diagnostic.ComponentRuntime).Warn("container runtime liveness check failed",
+			diagnostic.Duration("duration", time.Since(livenessStarted)), diagnostic.ErrorAttr(err))
 		if errors.Is(err, runtime.ErrAborted) {
 			_, _ = fmt.Fprintln(stdout, "Aborted.")
 			return cli.ExitFailure
 		}
 		return cli.ExitFailure
 	}
+	diagnostic.For(ctx, diagnostic.ComponentRuntime).Debug("container runtime liveness check completed",
+		diagnostic.Duration("duration", time.Since(livenessStarted)))
 
 	// Bash rebuilds and exits before it ever looks at the project directory
 	// (claude-contained:892-896), so this sits between the runtime-liveness
@@ -126,9 +199,9 @@ func runWith(exec runner, plat runtime.Platform, argv []string, stdin io.Reader,
 		// plain attach block at :952. Both replace this process; neither ever
 		// creates a container.
 		if cfg.ZellijMode {
-			return zellijAttachAndExec(ctx, rt, cfg, h, prompter, stdout, stderr)
+			return zellijAttachAndExec(ctx, exec, cfg.LogOnly, rt, cfg, h, prompter, stdout, stderr)
 		}
-		return attachAndExec(ctx, rt, cfg, h, envStore.Pairs(), prompter, stdout, stderr)
+		return attachAndExec(ctx, exec, cfg.LogOnly, rt, cfg, h, envStore.Pairs(), prompter, stdout, stderr)
 	}
 
 	projectDir := cfg.ProjectDir
@@ -165,8 +238,12 @@ func runWith(exec runner, plat runtime.Platform, argv []string, stdin io.Reader,
 	// The project env file and the built-ins complete the environment. This runs
 	// before the worktree handling below, so a rejected file fails without first
 	// asking the user about locks and taking them -- there is nothing to unwind.
-	if code := completeEnv(envStore, h, cfg.NoProjectEnv, mainHost, stderr); code != 0 {
+	if code := completeEnv(ctx, envStore, h, cfg.NoProjectEnv, mainHost, stderr); code != 0 {
 		return code
+	}
+	for _, pair := range envStore.DiagnosticPairs() {
+		diagnostic.For(ctx, diagnostic.ComponentEnv).Debug("environment assignment resolved",
+			diagnostic.Value("assignment", pair))
 	}
 
 	// The Zellij launch gate sits exactly where bash's does
@@ -189,9 +266,15 @@ func runWith(exec runner, plat runtime.Platform, argv []string, stdin io.Reader,
 	facts.Env = envStore.Pairs()
 	facts.ZellijSession = zellijSession
 	if err != nil {
+		diagnostic.For(ctx, diagnostic.ComponentHost).Error("host and runtime facts probe failed",
+			diagnostic.ErrorAttr(err))
 		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
 		return cli.ExitFailure
 	}
+	diagnostic.For(ctx, diagnostic.ComponentHost).Info("project directory resolved",
+		diagnostic.String("project_dir", facts.ProjectDir),
+		diagnostic.Bool("worktree", facts.WorktreeMainRepo != ""),
+	)
 
 	// interrupts is installed here, immediately before the worktree-lock offer
 	// and the mutations that follow it, mirroring bash's trap installation at
@@ -201,7 +284,7 @@ func runWith(exec runner, plat runtime.Platform, argv []string, stdin io.Reader,
 	ints := catchInterrupts()
 	defer ints.stop()
 
-	e := &executor{stdout: stdout, stderr: stderr}
+	e := &executor{ctx: ctx, stdout: stdout, stderr: stderr}
 	// cleanup_on_exit (claude-contained:1551-1554): locks first, then
 	// placeholders. This also runs on every early return below -- including
 	// the unknown-tool and --share-skills-conflict paths -- closing a gap the
@@ -227,6 +310,8 @@ func runWith(exec runner, plat runtime.Platform, argv []string, stdin io.Reader,
 	}
 
 	argvRun := rt.RenderRun(*program.Run)
+	diagnostic.For(ctx, diagnostic.ComponentRuntime).Info("container runtime argv rendered",
+		diagnostic.Value("argv", runtime.DiagnosticArgv(argvRun)))
 	containerExit := exec(ctx, argvRun, stdin, stdout, stderr)
 
 	// A signal that arrived during the run wins over the container's own
@@ -246,6 +331,7 @@ func runWith(exec runner, plat runtime.Platform, argv []string, stdin io.Reader,
 // the plan: the worktree locks, which cleanup must release after the
 // container exits.
 type executor struct {
+	ctx                 context.Context
 	stdout, stderr      io.Writer
 	lockRepo, lockOwner string
 	locked              []string
@@ -259,7 +345,7 @@ func (e *executor) releaseLocks() {
 	if e.lockRepo == "" || len(e.locked) == 0 {
 		return
 	}
-	host.ReleaseWorktreeLocks(e.lockRepo, e.locked, e.lockOwner, e.stderr)
+	host.ReleaseWorktreeLocksContext(e.ctx, e.lockRepo, e.locked, e.lockOwner, e.stderr)
 	e.locked = nil
 }
 
@@ -345,7 +431,10 @@ func signalExitCode(sig os.Signal) int {
 // The file is read here and handed to the store as bytes: it is writable from
 // inside the container, so it is parsed literally and never evaluated. An absent
 // file is a silent success, matching bash's `[[ -f "$file" ]] || return 0`.
-func completeEnv(store *env.Store, h host.State, noProjectEnv bool, projectDir string, stderr io.Writer) int {
+func completeEnv(
+	ctx context.Context, store *env.Store, h host.State,
+	noProjectEnv bool, projectDir string, stderr io.Writer,
+) int {
 	if !noProjectEnv {
 		path := filepath.Join(projectDir, env.FileName)
 
@@ -356,6 +445,8 @@ func completeEnv(store *env.Store, h host.State, noProjectEnv bool, projectDir s
 		if info, err := os.Stat(path); err == nil && info.Mode().IsRegular() {
 			content, err := os.ReadFile(path)
 			if err != nil {
+				diagnostic.For(ctx, diagnostic.ComponentEnv).Error("project env file read failed",
+					diagnostic.String("path", path), diagnostic.ErrorAttr(err))
 				// Regular but unreadable. bash's `done < "$file"` redirection
 				// fails, the function returns non-zero, and its caller's
 				// `|| exit 2` turns that into status 2 -- which we match.
@@ -369,6 +460,8 @@ func completeEnv(store *env.Store, h host.State, noProjectEnv bool, projectDir s
 				return cli.ExitUsage
 			}
 			if err := store.LoadFile(content); err != nil {
+				diagnostic.For(ctx, diagnostic.ComponentEnv).Warn("project env file validation failed",
+					diagnostic.String("path", path), diagnostic.ErrorAttr(err))
 				_, _ = fmt.Fprintln(stderr, err.Error())
 				return cli.ExitUsage
 			}
@@ -379,12 +472,16 @@ func completeEnv(store *env.Store, h host.State, noProjectEnv bool, projectDir s
 	// than being emitted alongside it.
 	if h.Timezone != "" {
 		if err := store.Default("TZ="+h.Timezone, "host timezone", env.Builtin); err != nil {
+			diagnostic.For(ctx, diagnostic.ComponentEnv).Warn("host timezone environment default failed",
+				diagnostic.ErrorAttr(err))
 			_, _ = fmt.Fprintln(stderr, err.Error())
 			return cli.ExitUsage
 		}
 	}
 	if h.GHToken != "" {
 		if err := store.Default("GH_TOKEN="+h.GHToken, "AI_GH_TOKEN", env.Builtin); err != nil {
+			diagnostic.For(ctx, diagnostic.ComponentEnv).Warn("GitHub token environment default failed",
+				diagnostic.ErrorAttr(err))
 			_, _ = fmt.Fprintln(stderr, err.Error())
 			return cli.ExitUsage
 		}
@@ -409,12 +506,18 @@ func buildAndApply(
 
 	for {
 		program, err := plan.Build(cfg, h, facts, prof, answers)
+		diagnostic.For(e.ctx, diagnostic.ComponentPlan).Debug("execution plan built",
+			diagnostic.Value("summary", plan.Summarize(program, cfg)))
 
 		// Steps are applied even when Build reported an error: bash discovers
 		// an unknown tool only after these mutations have happened.
 		n, applyErr := e.apply(program.Steps, appliedCount)
 		appliedCount = n
 		if applyErr != nil {
+			diagnostic.For(e.ctx, diagnostic.ComponentPlan).Error("execution plan step failed",
+				diagnostic.Int("index", appliedCount),
+				diagnostic.String("step_kind", plan.DiagnosticStepKind(program.Steps[appliedCount])),
+				diagnostic.ErrorAttr(applyErr))
 			_, _ = fmt.Fprintf(e.stderr, "error: %v\n", applyErr)
 			return program, cli.ExitFailure
 		}
@@ -439,6 +542,8 @@ func buildAndApply(
 				return program, cli.ExitUsage
 			}
 			_, _ = fmt.Fprintf(e.stderr, "error: %v\n", err)
+			diagnostic.For(e.ctx, diagnostic.ComponentPlan).Error("execution plan build failed",
+				diagnostic.ErrorAttr(err))
 			return program, cli.ExitFailure
 		}
 
@@ -495,8 +600,9 @@ func (e *executor) apply(steps []plan.Step, from int) (int, error) {
 		case plan.WorktreeAutoLock:
 			e.lockRepo = s.Repo
 			e.lockOwner = s.Owner
-			e.locked = host.LockWorktrees(s.Repo, s.Worktrees, s.Owner, e.stdout, e.stderr)
+			e.locked = host.LockWorktreesContext(e.ctx, s.Repo, s.Worktrees, s.Owner, e.stdout, e.stderr)
 		}
+		plan.RecordAppliedStep(e.ctx, i, steps[i])
 	}
 	return len(steps), nil
 }
@@ -582,14 +688,17 @@ type prompter struct {
 	isTTY  bool
 }
 
-func newPrompter(stdin io.Reader, stderr io.Writer) *prompter {
-	tty := false
+func isTerminal(stdin io.Reader) bool {
 	if f, ok := stdin.(*os.File); ok {
 		if info, err := f.Stat(); err == nil {
-			tty = info.Mode()&os.ModeCharDevice != 0
+			return info.Mode()&os.ModeCharDevice != 0
 		}
 	}
-	return &prompter{reader: bufio.NewReader(stdin), out: stderr, isTTY: tty}
+	return false
+}
+
+func newPrompter(stdin io.Reader, terminal io.Writer, isTTY bool) *prompter {
+	return &prompter{reader: bufio.NewReader(stdin), out: terminal, isTTY: isTTY}
 }
 
 // ask returns the answer and whether one could be read at all. ok=false means

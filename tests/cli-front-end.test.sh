@@ -87,6 +87,7 @@ suite() {
       PATH="$stub_dir:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" \
       CLAUDE_CONTAINED_RUNTIME=apple \
       CLAUDE_CONTAINED_BUILD_CONTEXT='' \
+      CLAUDE_CONTAINED_LOG_LEVEL='' \
       AI_GH_TOKEN='' \
       CLAUDE_DNS='' \
       STUB_DIR="$stub_dir" \
