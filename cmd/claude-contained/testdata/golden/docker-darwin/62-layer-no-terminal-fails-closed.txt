@@ -1,0 +1,21 @@
+# case: 62-layer-no-terminal-fails-closed
+# desc: with an unbuilt tooling layer and no terminal to confirm on, the launcher fails closed and names both --build-layer and --no-layer
+# config: docker-darwin
+--- exit ---
+1
+--- runtime-args ---
+(empty)
+--- stdout ---
+(empty)
+--- stderr ---
+error: a tooling layer must be built and there is no terminal to confirm on.
+       Pass --build-layer to build it, or --no-layer to run the base image.
+--- filesystem ---
+HOME dir 755
+PROJ dir 755
+PROJ/.claude-contained dir 755
+PROJ/.claude-contained/layer dir 755
+PROJ/.claude-contained/layer/Dockerfile file 644
+  | ARG BASE_IMAGE=claude-contained:latest
+  | FROM ${BASE_IMAGE}
+  | RUN echo layer-marker > /usr/local/share/layer-marker

@@ -147,13 +147,15 @@ The Go launcher selects its container runtime in this order: `--container-runtim
 
 `--build-context DIR` names the checkout `--rebuild` builds from, ahead of `CLAUDE_CONTAINED_BUILD_CONTEXT` and self-location (see `docs/adr/0004-go-launcher-rewrite.md`).
 
+`--layer DIR` names the project's tooling layer directory, ahead of `CLAUDE_CONTAINED_LAYER` and the per-project `.claude-contained/layer` default (see `docs/adr/0006-tooling-layers.md`). Build labels are emitted on Docker only, mirroring the run path.
+
 Code above `internal/runtime` must not mention `container` or `docker` commands.
 
-See [ADR-0003](docs/adr/0003-flag-only-cli.md) for the flag-only CLI, [ADR-0004](docs/adr/0004-go-launcher-rewrite.md) for the Go port, and [ADR-0005](docs/adr/0005-diagnostic-stream.md) for the separate diagnostic stream.
+See [ADR-0003](docs/adr/0003-flag-only-cli.md) for the flag-only CLI, [ADR-0004](docs/adr/0004-go-launcher-rewrite.md) for the Go port, [ADR-0005](docs/adr/0005-diagnostic-stream.md) for the separate diagnostic stream, and [ADR-0006](docs/adr/0006-tooling-layers.md) for the base/derived image split.
 
 ### Add Diagnostic Records Deliberately
 
-Diagnostic records are selective observations for contributors, not a mirror of every user-facing print. Add one when the existing prose loses useful cause or decision detail. Retrieve the logger from `context.Context` through `internal/diagnostic` and bind exactly one of its closed components: `cli`, `host`, `env`, `plan`, `runtime`, `worktree`, `zellij`, `attach`, or `rebuild`. Never use package-level `slog` calls, `slog.Default`, or `slog.SetDefault` in production.
+Diagnostic records are selective observations for contributors, not a mirror of every user-facing print. Add one when the existing prose loses useful cause or decision detail. Retrieve the logger from `context.Context` through `internal/diagnostic` and bind exactly one of its closed components: `cli`, `host`, `env`, `plan`, `runtime`, `worktree`, `zellij`, `attach`, `rebuild`, or `layer`. Never use package-level `slog` calls, `slog.Default`, or `slog.SetDefault` in production.
 
 Records use `kind=diagnostic` plus `component`. Relocated output uses `kind=output` plus `stream=stdout|stderr` and bypasses the diagnostic level filter because discarding it would be data loss. Do not add `phase` or `operation`; put the action in the record message. Omit timestamps and source, and add an explicit `duration` only for elapsed work where it matters, such as runtime liveness or image rebuilds.
 

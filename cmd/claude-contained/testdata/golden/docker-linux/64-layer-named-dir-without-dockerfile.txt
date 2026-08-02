@@ -1,0 +1,15 @@
+# case: 64-layer-named-dir-without-dockerfile
+# desc: --layer naming a directory that holds no Dockerfile is a usage error rather than a silent fall-through to the base image
+# config: docker-linux
+--- exit ---
+2
+--- runtime-args ---
+(empty)
+--- stdout ---
+(empty)
+--- stderr ---
+error: --layer has no Dockerfile: <PROJ>/tools
+--- filesystem ---
+HOME dir 755
+PROJ dir 755
+PROJ/tools dir 755

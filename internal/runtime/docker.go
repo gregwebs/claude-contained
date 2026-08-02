@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"claude-contained/internal/diagnostic"
@@ -121,21 +122,21 @@ func (d *Docker) RenderExec(spec ExecSpec) []string {
 	return append(argv, spec.Command...)
 }
 
-// RenderBuild shares its shape with Apple's: only Bin() differs.
+// RenderBuild shares its shape with Apple's: only Bin() and the labels differ.
+// Docker records them; see BuildSpec.Labels for why Apple does not.
 func (d *Docker) RenderBuild(spec BuildSpec) []string {
-	argv := []string{d.Bin(), "build"}
-	// --pull before --no-cache, matching claude-contained:546 argument for
-	// argument: the corpus compares the emitted argv.
-	if spec.Pull {
-		argv = append(argv, "--pull")
-	}
-	if spec.NoCache {
-		argv = append(argv, "--no-cache")
-	}
-	for _, ba := range spec.BuildArgs {
-		argv = append(argv, "--build-arg", ba)
-	}
-	return append(argv, "-t", spec.Tag, spec.Context)
+	return renderBuild(d.Bin(), spec, spec.Labels)
+}
+
+// ImageID asks Docker for the image's config digest. `--format {{.Id}}` and
+// `image inspect --help` are both long-standing Docker CLI surface; the
+// capability probe in imageid.go still runs, because the cost is one process on
+// a path that already failed and the alternative is inferring absence from an
+// exit status we have not earned.
+func (d *Docker) ImageID(ctx context.Context, ref string) (string, bool, error) {
+	return probeImageID(ctx, d.Bin(), ref,
+		[]string{"--format", "{{.Id}}"},
+		func(raw []byte) string { return strings.TrimSpace(string(raw)) })
 }
 
 func (d *Docker) List(ctx context.Context) ([]string, error) {

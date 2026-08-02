@@ -175,39 +175,90 @@ func TestHelpTextsAreDistinct(t *testing.T) {
 }
 
 // RenderBuild rendering is shared too, mirroring TestMountRenderingIsShared:
-// both runtimes emit `build [--pull] [--no-cache] [--build-arg K=V]... -t TAG
-// CTX` in that order, differing only in the binary.
+// both runtimes emit `build [--pull] [--no-cache] [--build-arg K=V]...
+// [--label K=V]... -t TAG CTX` in that order, differing only in the binary --
+// with one deliberate exception, labels, which Docker records and Apple drops
+// (BuildSpec.Labels says why). want is the shared expectation; wantDocker
+// overrides it only for the cases that exercise that one divergence.
 func TestRenderBuildIsSharedApartFromTheBinary(t *testing.T) {
 	cases := []struct {
-		name string
-		spec BuildSpec
-		want []string
+		name       string
+		spec       BuildSpec
+		want       []string
+		wantDocker []string
 	}{
 		{
-			"tools refresh",
-			BuildSpec{Tag: "claude-contained:latest", Context: "/ctx", BuildArgs: []string{"AI_TOOLS_CACHE_BUST=20260729211507"}},
-			[]string{"build", "--build-arg", "AI_TOOLS_CACHE_BUST=20260729211507", "-t", "claude-contained:latest", "/ctx"},
+			name: "tools refresh",
+			spec: BuildSpec{Tag: "claude-contained:latest", Context: "/ctx", BuildArgs: []string{"AI_TOOLS_CACHE_BUST=20260729211507"}},
+			want: []string{"build", "--build-arg", "AI_TOOLS_CACHE_BUST=20260729211507", "-t", "claude-contained:latest", "/ctx"},
 		},
 		{
-			"full rebuild",
-			BuildSpec{Tag: "claude-contained:latest", Context: "/ctx", Pull: true, NoCache: true},
-			[]string{"build", "--pull", "--no-cache", "-t", "claude-contained:latest", "/ctx"},
+			name: "full rebuild",
+			spec: BuildSpec{Tag: "claude-contained:latest", Context: "/ctx", Pull: true, NoCache: true},
+			want: []string{"build", "--pull", "--no-cache", "-t", "claude-contained:latest", "/ctx"},
+		},
+		{
+			// The property that keeps every no-layer golden still: a spec that
+			// sets no labels must render exactly what it rendered before
+			// BuildSpec had a Labels field at all.
+			name: "no labels renders exactly as it did before labels existed",
+			spec: BuildSpec{Tag: "claude-contained:latest", Context: "/ctx", Labels: nil},
+			want: []string{"build", "-t", "claude-contained:latest", "/ctx"},
+		},
+		{
+			name: "one label",
+			spec: BuildSpec{
+				Tag: "claude-contained-layer:project-abc", Context: "/layer",
+				Labels: []LabelArg{{Key: "claude-contained.layer", Value: "1"}},
+			},
+			want:       []string{"build", "-t", "claude-contained-layer:project-abc", "/layer"},
+			wantDocker: []string{"build", "--label", "claude-contained.layer=1", "-t", "claude-contained-layer:project-abc", "/layer"},
+		},
+		{
+			name: "several labels keep their declared order, after build args and before -t",
+			spec: BuildSpec{
+				Tag: "claude-contained-layer:project-abc", Context: "/layer",
+				BuildArgs: []string{"BASE_IMAGE=sha256:base"},
+				Labels: []LabelArg{
+					{Key: "claude-contained.layer", Value: "1"},
+					{Key: "claude-contained.layer.project", Value: "/work/app"},
+					{Key: "claude-contained.layer.base", Value: "sha256:base"},
+				},
+			},
+			want: []string{
+				"build", "--build-arg", "BASE_IMAGE=sha256:base",
+				"-t", "claude-contained-layer:project-abc", "/layer",
+			},
+			wantDocker: []string{
+				"build", "--build-arg", "BASE_IMAGE=sha256:base",
+				"--label", "claude-contained.layer=1",
+				"--label", "claude-contained.layer.project=/work/app",
+				"--label", "claude-contained.layer.base=sha256:base",
+				"-t", "claude-contained-layer:project-abc", "/layer",
+			},
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
+			wantDocker := tc.wantDocker
+			if wantDocker == nil {
+				wantDocker = tc.want
+			}
 			apple := NewApple(Darwin).RenderBuild(tc.spec)
 			docker := NewDocker(Darwin).RenderBuild(tc.spec)
 
 			if !reflect.DeepEqual(apple[1:], tc.want) {
 				t.Errorf("apple rendered %#v, want %#v", apple[1:], tc.want)
 			}
-			if !reflect.DeepEqual(docker[1:], tc.want) {
-				t.Errorf("docker rendered %#v, want %#v", docker[1:], tc.want)
+			if !reflect.DeepEqual(docker[1:], wantDocker) {
+				t.Errorf("docker rendered %#v, want %#v", docker[1:], wantDocker)
 			}
 			if apple[0] != "container" || docker[0] != "docker" {
 				t.Errorf("wrong binaries: %q / %q", apple[0], docker[0])
+			}
+			if contains(apple, "--label") {
+				t.Errorf("apple rendered a --label: %#v", apple)
 			}
 		})
 	}
@@ -226,6 +277,27 @@ func TestHelpDocumentsBuildContext(t *testing.T) {
 		}
 		if !strings.Contains(help, "CLAUDE_CONTAINED_BUILD_CONTEXT") {
 			t.Errorf("%s help does not document CLAUDE_CONTAINED_BUILD_CONTEXT", name)
+		}
+	}
+}
+
+// Modeled on TestHelpDocumentsBuildContext: the flags and the environment
+// variable are launcher-only surface, so the two help texts are the only place
+// a user meets them.
+func TestHelpDocumentsToolingLayer(t *testing.T) {
+	for name, help := range map[string]string{
+		"apple":  NewApple(Darwin).Profile().Help,
+		"docker": NewDocker(Darwin).Profile().Help,
+	} {
+		for _, text := range []string{
+			"--layer DIR",
+			"--build-layer",
+			"--no-layer",
+			"CLAUDE_CONTAINED_LAYER",
+		} {
+			if !strings.Contains(help, text) {
+				t.Errorf("%s help does not document %q", name, text)
+			}
 		}
 	}
 }

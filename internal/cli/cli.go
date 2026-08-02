@@ -50,6 +50,29 @@ const RuntimeFlag = "--container-runtime"
 // tests/arg-parsing.test.sh rather than left accidental.
 const BuildContextFlag = "--build-context"
 
+// LayerFlag names the project's tooling layer directory. BuildContextFlag is
+// the precedent for a launcher-only value flag; "tooling layer" is CONTEXT.md's
+// term and --layer its natural short form.
+const LayerFlag = "--layer"
+
+// BuildLayerFlag skips the build confirmation and builds; NoLayerFlag ignores
+// the layer and runs the base image. Deliberately imperative and deliberately
+// matching the existing --no-project-env / --no-sandbox convention.
+//
+// Neither has an environment variable, and that is a decision rather than an
+// omission. An environment variable is a stored approval by another name:
+// exported once in a shell profile and forgotten, it defeats the confirmation
+// the spec's Trust section exists to establish. NoLayerFlag is refused one for
+// the mirror-image reason -- silently skipping the layer produces a container
+// that looks healthy while missing its toolchain.
+//
+// Rejected names: --approve-layer (approval implies storage, which the spec
+// refuses) and --no-confirm-layer (a double negative).
+const (
+	BuildLayerFlag = "--build-layer"
+	NoLayerFlag    = "--no-layer"
+)
+
 const (
 	// LogLevelFlag selects contributor-facing diagnostic detail.
 	LogLevelFlag = "--log-level"
@@ -101,7 +124,16 @@ type Config struct {
 	ContainerRuntime string
 	// BuildContext is --build-context's value, unvalidated: internal/host checks
 	// for a Dockerfile when a rebuild actually needs one.
-	BuildContext         string
+	BuildContext string
+	// LayerDir is --layer's value, unvalidated: internal/host checks for a
+	// Dockerfile when a run actually needs one, the same split as BuildContext.
+	LayerDir string
+	// BuildLayer skips the build confirmation; NoLayer ignores the layer
+	// entirely. Inert with --attach and --rebuild, which return above the layer
+	// step -- not refused, because unlike --name with --attach they are merely
+	// unused rather than actively misleading.
+	BuildLayer           bool
+	NoLayer              bool
 	LogLevel             string
 	LogLevelSet          bool
 	LogFile              string
@@ -275,6 +307,27 @@ func Parse(args []string, progName string, shareHostClaudeEnv bool) Config {
 			v := strings.TrimPrefix(arg, BuildContextFlag+"=")
 			cfg.BuildContext = v
 			recordInlineValue(BuildContextFlag, v, "a non-empty directory")
+
+		// Mirrors BuildContextFlag exactly, including its asymmetric `what`
+		// strings: the separate form asks for "a directory", the inline form for
+		// "a non-empty directory", because `--layer=` is a different mistake
+		// from `--layer` with nothing after it.
+		case arg == LayerFlag:
+			if recordRequiredValue(LayerFlag, next, "a directory") {
+				cfg.LayerDir = next
+			}
+			if hasNext {
+				i++
+			}
+		case strings.HasPrefix(arg, LayerFlag+"="):
+			v := strings.TrimPrefix(arg, LayerFlag+"=")
+			cfg.LayerDir = v
+			recordInlineValue(LayerFlag, v, "a non-empty directory")
+
+		case arg == BuildLayerFlag:
+			cfg.BuildLayer = true
+		case arg == NoLayerFlag:
+			cfg.NoLayer = true
 
 		case arg == LogLevelFlag:
 			if recordRequiredValue(LogLevelFlag, next, "debug, info, warn, error, or off") {
@@ -568,6 +621,21 @@ func ValidateContext(ctx context.Context, cfg *Config, stderr io.Writer) error {
 		_, _ = fmt.Fprintln(stderr, "       created with, so the variable would silently never reach the tool.")
 		_, _ = fmt.Fprintln(stderr, "       Set it when the session is created instead.")
 		return fail("zellij-attach-environment")
+	}
+	// Last, immediately before the return, and that placement is load-bearing
+	// rather than stylistic. This function's message order is observable, and
+	// "after the Zellij checks" would have been ambiguous -- there are Zellij
+	// checks on both sides of the --name rewrite above. Last is the only
+	// position that is strictly additive: every input that failed before still
+	// fails on the same earlier check with the same message and the same
+	// validation_kind, so no existing test or golden can move. The --name
+	// rewrite running first is harmless, since a conflict exits.
+	if cfg.NoLayer && (cfg.LayerDir != "" || cfg.BuildLayer) {
+		_, _ = fmt.Fprintf(stderr, "error: %s cannot be combined with %s or %s\n",
+			NoLayerFlag, LayerFlag, BuildLayerFlag)
+		_, _ = fmt.Fprintf(stderr, "       %s runs the base image; the others select or build a tooling layer.\n",
+			NoLayerFlag)
+		return fail("layer-flag-conflict")
 	}
 	return nil
 }

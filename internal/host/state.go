@@ -39,6 +39,9 @@ type State struct {
 	// BuildContext is CLAUDE_CONTAINED_BUILD_CONTEXT: the checkout --rebuild
 	// builds from. Empty means unset; there is no set-but-empty distinction.
 	BuildContext string
+	// Layer is CLAUDE_CONTAINED_LAYER: the project's tooling layer directory.
+	// Empty means unset; there is no set-but-empty distinction.
+	Layer string
 	// LogLevel is CLAUDE_CONTAINED_LOG_LEVEL. The command-line flag may replace
 	// it after probing; the raw value is never part of State.LogValue.
 	LogLevel string
@@ -70,6 +73,7 @@ func Probe() State {
 		ShareHostClaude:  os.Getenv("CLAUDE_CONTAINED_SHARE_HOST_CLAUDE") == "1",
 		ContainerRuntime: os.Getenv("CLAUDE_CONTAINED_RUNTIME"),
 		BuildContext:     os.Getenv(BuildContextEnvVar),
+		Layer:            os.Getenv(LayerEnvVar),
 		LogLevel:         os.Getenv("CLAUDE_CONTAINED_LOG_LEVEL"),
 	}
 }
@@ -88,6 +92,10 @@ func (s State) LogValue() slog.Value {
 		slog.Bool("share_host_claude", s.ShareHostClaude),
 		slog.Bool("runtime_env_set", s.ContainerRuntime != ""),
 		slog.Bool("build_context_env_set", s.BuildContext != ""),
+		// Presence only, matching build_context_env_set: a path is not a secret
+		// but it is the user's, and the decision this record exists to explain
+		// is "did an ambient variable participate", not "which directory".
+		slog.Bool("layer_env_set", s.Layer != ""),
 		slog.Bool("log_level_env_set", s.LogLevel != ""),
 	)
 }

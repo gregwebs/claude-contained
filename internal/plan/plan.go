@@ -368,7 +368,14 @@ func Build(cfg cli.Config, h host.State, f Facts, prof runtime.Profile, ans Answ
 		command = zellij.RunCommand(f.ZellijSession, prof.Name, command)
 	}
 
-	p.Run = &runtime.RunSpec{Args: args, Image: Image, Command: command}
+	// A project with a tooling layer runs its derived image in place of the
+	// base one. Nothing else about the run changes: same args, same command,
+	// only the image operand moves.
+	image := Image
+	if f.DerivedImage != "" {
+		image = f.DerivedImage
+	}
+	p.Run = &runtime.RunSpec{Args: args, Image: image, Command: command}
 	return p, nil
 }
 

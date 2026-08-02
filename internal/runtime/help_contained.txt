@@ -32,6 +32,9 @@ Options:
   --new-session      With --zellij, start even when another session is live
   --container-runtime NAME  Container runtime: apple or docker (default: per host)
   --build-context DIR  Checkout holding the Dockerfile for --rebuild
+  --layer DIR        Tooling layer directory (default: .claude-contained/layer)
+  --build-layer      Build the tooling layer without confirming
+  --no-layer         Ignore the tooling layer and run the base image
   --log-level LEVEL  Diagnostic detail: debug, info, warn, error, or off
   --log-file PATH    Write the diagnostic stream to a secured, truncated file
   --log-only         Carry user-facing output on the diagnostic stream
@@ -67,6 +70,12 @@ Behavior:
   - --rebuild finds the Dockerfile via --build-context, else
     CLAUDE_CONTAINED_BUILD_CONTEXT, else this executable's own directory or the
     Git repository containing it.
+  - A project can check in a tooling layer Dockerfile at
+    .claude-contained/layer/Dockerfile (or --layer DIR, else
+    CLAUDE_CONTAINED_LAYER). It builds on top of the base image, is confirmed
+    once per change, and is tagged claude-contained-layer:<project>-<hash>.
+    --build-layer skips the confirmation; --no-layer runs the base image.
+    Rebuilding the base image invalidates every derived image.
   - Diagnostics default to off. --log-level wins over
     CLAUDE_CONTAINED_LOG_LEVEL; --log-only implies info only when neither set a
     level. --log-file is mode 0600 and never falls back to stderr on failure.
@@ -105,6 +114,8 @@ Examples:
   claude-contained -s                  # Debug shell in current directory
   claude-contained --rebuild           # Refresh AI tools, then exit
   claude-contained --rebuild=full      # Full fresh rebuild, then exit
+  claude-contained --build-layer       # Build this project's tooling layer, no prompt
+  claude-contained --no-layer          # Run the base image, ignoring the layer
   claude-contained -p 8080:8080        # Expose port 8080
   claude-contained -H 3845             # Forward host:3845 to container localhost:3845
   claude-contained -e API_URL=http://host.local:8080  # Set an env var

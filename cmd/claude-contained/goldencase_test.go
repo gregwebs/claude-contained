@@ -19,6 +19,8 @@ import (
 	"time"
 
 	"claude-contained/internal/host"
+	"claude-contained/internal/layer"
+	"claude-contained/internal/plan"
 )
 
 // goldenExtras is everything a case's Setup may hand back to the driver
@@ -42,6 +44,11 @@ type goldenExtras struct {
 	// that exist to exercise an ambient variable (CLAUDE_DNS, the rebuild
 	// build-context override) rather than a flag.
 	Env map[string]string
+	// ImageIDs maps an image reference to the identifier the stubs' `image
+	// inspect` arm reports for it. A reference absent from this map is absent
+	// from the runtime's image store, which is how a case says "the base image
+	// is not built" or "this derived image has not been built yet".
+	ImageIDs map[string]string
 }
 
 // goldenCase is one corpus entry, transcribed.
@@ -62,6 +69,12 @@ type goldenCase struct {
 	// must be the common case, and 48 of 59 entries expect runtime args
 	// (liveness guard 2 in golden_test.go).
 	NoRuntimeArgs bool
+	// Terminal forces isTerminal to report a terminal for this case. The
+	// driver hands runWith a strings.Reader, which is never a character
+	// device, so without this no case could reach a prompt that is gated on
+	// having one -- the tooling layer's build confirmation, which fails closed
+	// rather than prompting when there is no terminal.
+	Terminal bool
 	// HostGOOS restricts the case to hosts whose compile-time GOOS matches
 	// (only "darwin", for case 49 -- see its own comment). Empty means no
 	// restriction. This is a *host* skip, not a tree skip: what varies is
@@ -122,6 +135,34 @@ func writeEnvFile(t *testing.T, proj, content string) {
 func mkExtraDir(t *testing.T, proj string) {
 	t.Helper()
 	mustMkdirAll(t, filepath.Join(proj, "extra"))
+}
+
+// goldenBaseImageID is the identifier the stub runtime reports for the base
+// image in the tooling-layer cases (60-64). A fixture constant, not a probe:
+// it is one of the three hash inputs, so it has to be as fixed as the layer
+// directory's own contents for the derived tag to be reproducible.
+const goldenBaseImageID = "sha256:base00"
+
+// goldenLayerDockerfile is the layer every tooling-layer case checks in. Its
+// bytes are a hash input, so they are a constant rather than written inline
+// per case.
+const goldenLayerDockerfile = "ARG BASE_IMAGE=claude-contained:latest\n" +
+	"FROM ${BASE_IMAGE}\n" +
+	"RUN echo layer-marker > /usr/local/share/layer-marker\n"
+
+// writeGoldenLayer checks a tooling layer into the case's project directory at
+// the default location and returns its resolved identity, so a case can name
+// the derived tag before the launcher computes it -- which is the only way to
+// present a derived image as *already built*.
+func writeGoldenLayer(t *testing.T, proj string) layer.Identity {
+	t.Helper()
+	dir := filepath.Join(proj, host.LayerDirName)
+	mustWriteFile(t, filepath.Join(dir, "Dockerfile"), goldenLayerDockerfile)
+	id, err := layer.Resolve(dir, proj, goldenBaseImageID)
+	if err != nil {
+		t.Fatalf("resolving the fixture layer: %v", err)
+	}
+	return id
 }
 
 var goldenCases = []goldenCase{
@@ -660,6 +701,64 @@ var goldenCases = []goldenCase{
 		Slug:          "59-rebuild-unknown-mode",
 		Desc:          "an unknown rebuild mode is rejected before any build runs",
 		Args:          func(proj, home string) []string { return []string{"-R", "nonsense"} },
+		NoRuntimeArgs: true,
+	},
+	// 60-64 are the tooling layer. Appended rather than interleaved so no
+	// existing slug moves and no existing golden file is renamed.
+	{
+		Slug: "60-layer-build-confirmed",
+		Desc: "a checked-in tooling layer that has not been built is confirmed, built with the base image's resolved ID as BASE_IMAGE, and run in place of the base image",
+		Setup: func(t *testing.T, proj, home string) goldenExtras {
+			writeGoldenLayer(t, proj)
+			// Only the base image exists; the derived tag is absent, which is
+			// what makes the launcher prompt.
+			return goldenExtras{ImageIDs: map[string]string{plan.Image: goldenBaseImageID}}
+		},
+		Args:     func(proj, home string) []string { return []string{"-N", "-s", "-C", proj} },
+		Stdin:    "y\n",
+		Terminal: true,
+	},
+	{
+		Slug: "61-layer-already-built",
+		Desc: "a derived image that already carries the current tag is run with no prompt and no build",
+		Setup: func(t *testing.T, proj, home string) goldenExtras {
+			id := writeGoldenLayer(t, proj)
+			return goldenExtras{ImageIDs: map[string]string{
+				plan.Image: goldenBaseImageID,
+				id.Tag:     "sha256:derived00",
+			}}
+		},
+		Args: func(proj, home string) []string { return []string{"-N", "-s", "-C", proj} },
+	},
+	{
+		Slug: "62-layer-no-terminal-fails-closed",
+		Desc: "with an unbuilt tooling layer and no terminal to confirm on, the launcher fails closed and names both --build-layer and --no-layer",
+		Setup: func(t *testing.T, proj, home string) goldenExtras {
+			writeGoldenLayer(t, proj)
+			return goldenExtras{ImageIDs: map[string]string{plan.Image: goldenBaseImageID}}
+		},
+		Args:          func(proj, home string) []string { return []string{"-N", "-s", "-C", proj} },
+		NoRuntimeArgs: true,
+	},
+	{
+		Slug: "63-layer-no-layer-flag",
+		Desc: "--no-layer runs the base image even with a tooling layer checked in, without probing the runtime for any image",
+		Setup: func(t *testing.T, proj, home string) goldenExtras {
+			writeGoldenLayer(t, proj)
+			return goldenExtras{}
+		},
+		Args: func(proj, home string) []string { return []string{"-N", "-s", "--no-layer", "-C", proj} },
+	},
+	{
+		Slug: "64-layer-named-dir-without-dockerfile",
+		Desc: "--layer naming a directory that holds no Dockerfile is a usage error rather than a silent fall-through to the base image",
+		Setup: func(t *testing.T, proj, home string) goldenExtras {
+			mustMkdirAll(t, filepath.Join(proj, "tools"))
+			return goldenExtras{}
+		},
+		Args: func(proj, home string) []string {
+			return []string{"-N", "-s", "-C", proj, "--layer", filepath.Join(proj, "tools")}
+		},
 		NoRuntimeArgs: true,
 	},
 }

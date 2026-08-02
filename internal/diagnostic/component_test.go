@@ -10,7 +10,7 @@ import (
 )
 
 func TestComponentsAreClosedAndEveryRecordCarriesMetadata(t *testing.T) {
-	want := []string{"cli", "host", "env", "plan", "runtime", "worktree", "zellij", "attach", "rebuild"}
+	want := []string{"cli", "host", "env", "plan", "runtime", "worktree", "zellij", "attach", "rebuild", "layer"}
 	components := Components()
 	if len(components) != len(want) {
 		t.Fatalf("Components length = %d, want %d", len(components), len(want))

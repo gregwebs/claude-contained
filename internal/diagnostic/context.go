@@ -39,6 +39,12 @@ type Attr struct{ attr slog.Attr }
 func String(key, value string) Attr    { return Attr{attr: slog.String(key, value)} }
 func Bool(key string, value bool) Attr { return Attr{attr: slog.Bool(key, value)} }
 func Int(key string, value int) Attr   { return Attr{attr: slog.Int(key, value)} }
+
+// Int64 exists alongside Int for quantities that are int64 at their source --
+// a byte count from os.FileInfo.Size, for instance. Converting one to int at
+// the call site would be a silent truncation on a 32-bit build, in a record
+// whose whole purpose is reporting that a number got large.
+func Int64(key string, value int64) Attr { return Attr{attr: slog.Int64(key, value)} }
 func Duration(key string, value time.Duration) Attr {
 	return Attr{attr: slog.Duration(key, value)}
 }
