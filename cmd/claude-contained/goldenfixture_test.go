@@ -32,6 +32,7 @@ var launcherEnvVars = []string{
 	"CLAUDE_CONTAINED_RUNTIME",
 	"CLAUDE_CONTAINED_LOG_LEVEL",
 	"CLAUDE_CONTAINED_BUILD_CONTEXT",
+	"CLAUDE_CONTAINED_LAYER",
 	"SSH_AUTH_SOCK",
 }
 
@@ -68,12 +69,13 @@ func clearEnv(t *testing.T, keys ...string) {
 // golden's --name argument (isolate.sh:146-157 gives the same reason).
 type goldenFixture struct {
 	root, home, proj, stub string
-	// stubList and stubInspectDir are fixed, root-relative locations the
-	// golden stub scripts read via GOLDEN_LIST_OUTPUT/GOLDEN_INSPECT_DIR.
-	// Fixed paths (not under home, which a case's own Setup may rewrite)
-	// keep the stub configuration stable regardless of what a case does to
-	// HOME.
-	stubList, stubInspectDir string
+	// stubList, stubInspectDir and stubImageIDDir are fixed, root-relative
+	// locations the golden stub scripts read via
+	// GOLDEN_LIST_OUTPUT/GOLDEN_INSPECT_DIR/GOLDEN_IMAGE_ID_DIR. Fixed paths
+	// (not under home, which a case's own Setup may rewrite) keep the stub
+	// configuration stable regardless of what a case does to HOME. All three
+	// sit outside home and proj, so none of them reaches the manifest.
+	stubList, stubInspectDir, stubImageIDDir string
 }
 
 func newGoldenFixture(t *testing.T) goldenFixture {
@@ -89,8 +91,9 @@ func newGoldenFixture(t *testing.T) goldenFixture {
 		stub:           filepath.Join(root, "stub"),
 		stubList:       filepath.Join(root, "golden-stub-list"),
 		stubInspectDir: filepath.Join(root, "golden-stub-inspect"),
+		stubImageIDDir: filepath.Join(root, "golden-stub-imageid"),
 	}
-	for _, d := range []string{fx.home, fx.proj, fx.stub, fx.stubInspectDir} {
+	for _, d := range []string{fx.home, fx.proj, fx.stub, fx.stubInspectDir, fx.stubImageIDDir} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
@@ -99,15 +102,36 @@ func newGoldenFixture(t *testing.T) goldenFixture {
 	return fx
 }
 
+// goldenImageIDArm is the `image inspect` arm shared by both stubs, minus the
+// one line that renders the answer. It must implement Runtime.ImageID's
+// contract rather than falling through to the scripts' `*) exit 0 ;;` default,
+// because that default means "exit 0 with no output", which probeImageID
+// classifies as a fault -- the stub would turn every layer probe into a
+// runtime error.
+//
+// `--help` anywhere exits 0 with no output: the capability probe asks only
+// whether the subcommand exists, and here it always does. Otherwise the last
+// argument is the reference, and an id file under GOLDEN_IMAGE_ID_DIR decides
+// present (exit 0, print) versus absent (exit 1). The key sanitization -- ':'
+// and '/' to '_' -- is mirrored by goldenImageIDKey in golden_test.go.
+const goldenImageIDArm = "  image)\n" +
+	"    for a in \"$@\"; do\n" +
+	"      [ \"$a\" = --help ] && exit 0\n" +
+	"    done\n" +
+	"    ref=\"\"\n" +
+	"    for a in \"$@\"; do ref=\"$a\"; done\n" +
+	"    idfile=\"${GOLDEN_IMAGE_ID_DIR:-}/$(printf '%s' \"$ref\" | tr ':/' '__').id\"\n" +
+	"    [ -f \"$idfile\" ] || exit 1\n"
+
 // writeGoldenStubs installs fake `container` and `docker` executables that
-// answer only the three subcommands the launcher still shells out for
-// directly: EnsureUp's liveness probe, List and InspectEnv. The `run`/`exec`/
-// `build` invocations never reach these scripts at all -- the injected
-// runner (captureRunner in golden_test.go) and the swapped replaceProcess
-// carry those instead, which is what makes DIFF_ARGV_LOG's whole env-var
-// contract (lib/isolate.sh) unnecessary here. Port of
-// lib/isolate.sh:write_stub_runtimes, minus the branches the runner seam
-// replaces.
+// answer only the four subcommands the launcher still shells out for
+// directly: EnsureUp's liveness probe, List, InspectEnv and the tooling
+// layer's ImageID probe. The `run`/`exec`/`build` invocations never reach these
+// scripts at all -- the injected runner (captureRunner in golden_test.go) and
+// the swapped replaceProcess carry those instead, which is what makes
+// DIFF_ARGV_LOG's whole env-var contract (lib/isolate.sh) unnecessary here.
+// Port of lib/isolate.sh:write_stub_runtimes, minus the branches the runner
+// seam replaces.
 func writeGoldenStubs(t *testing.T, dir string) {
 	t.Helper()
 	container := "#!/bin/sh\n" +
@@ -115,6 +139,11 @@ func writeGoldenStubs(t *testing.T, dir string) {
 		"sub=\"${1:-}\"\n" +
 		"case \"$sub\" in\n" +
 		"  system) exit 0 ;;\n" +
+		// Apple Containers' inspect output is JSON, which is what
+		// parseAppleImageID reads; Docker's is the bare formatted id.
+		goldenImageIDArm +
+		"    printf '[{\"descriptor\":{\"digest\":\"%s\"}}]\\n' \"$(cat \"$idfile\")\"\n" +
+		"    exit 0 ;;\n" +
 		"  list)\n" +
 		"    [ -n \"${GOLDEN_LIST_OUTPUT:-}\" ] && [ -f \"$GOLDEN_LIST_OUTPUT\" ] && cat \"$GOLDEN_LIST_OUTPUT\"\n" +
 		"    exit 0 ;;\n" +
@@ -142,6 +171,9 @@ func writeGoldenStubs(t *testing.T, dir string) {
 		"sub=\"${1:-}\"\n" +
 		"case \"$sub\" in\n" +
 		"  info) exit 0 ;;\n" +
+		goldenImageIDArm +
+		"    cat \"$idfile\"\n" +
+		"    exit 0 ;;\n" +
 		"  ps)\n" +
 		"    [ -n \"${GOLDEN_LIST_OUTPUT:-}\" ] && [ -f \"$GOLDEN_LIST_OUTPUT\" ] && cat \"$GOLDEN_LIST_OUTPUT\"\n" +
 		"    exit 0 ;;\n" +
@@ -380,6 +412,23 @@ var (
 	// load-bearing -- see goldencase_test.go's discussion of why the owner
 	// file's bytes are never actually inlined into a golden.
 	rePIDEpoch = regexp.MustCompile(`(?m)^[0-9]+ [0-9]+$`)
+	// N11: the derived image's content digest. The repository name and project
+	// slug stay literal -- those are shape, and a change to either is a
+	// behavior change worth seeing in a diff. The 32 hex characters are not:
+	// they are a deterministic function of the enumeration rules in
+	// internal/layer/hash.go, which carries its own v1 scheme tag precisely so
+	// those rules can change. hash_test.go's
+	// TestCanonicalStreamIsExactlyTheDocumentedFormat pins the hashed bytes far
+	// more legibly than an opaque digest in fifteen files can, and an
+	// intentional scheme bump must not churn fifteen goldens in a way a
+	// reviewer cannot tell from a regression -- CONTRIBUTING.md makes a changed
+	// golden a behavior change, so a golden that changes for a non-behavioral
+	// reason poisons that rule.
+	//
+	// The slug bound matches host.SanitizeFolderName's: 1..20 characters of
+	// [a-z0-9-] after an alphanumeric first character. It may end in a dash, so
+	// the rendered form can legitimately read slug--<LHASH>.
+	reLayerHash = regexp.MustCompile(`(claude-contained-layer:[a-z0-9][a-z0-9-]{0,19})-[0-9a-f]{32}`)
 )
 
 // normalizeText applies every named substitution. Order is load-bearing: the
@@ -395,6 +444,7 @@ func normalizeText(s string, n normContext) string {
 	s = reContainerTime.ReplaceAllString(s, "${1}-<TIME>${2}")
 	s = reCacheBust.ReplaceAllString(s, "AI_TOOLS_CACHE_BUST=<TOKEN>")
 	s = rePIDEpoch.ReplaceAllString(s, "<PID> <EPOCH>")
+	s = reLayerHash.ReplaceAllString(s, "${1}-<LHASH>")
 	if n.uid != "" {
 		s = strings.ReplaceAll(s, "HOST_UID="+n.uid, "HOST_UID=<UID>")
 	}

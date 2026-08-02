@@ -1,0 +1,104 @@
+# case: 60-layer-build-confirmed
+# desc: a checked-in tooling layer that has not been built is confirmed, built with the base image's resolved ID as BASE_IMAGE, and run in place of the base image
+# config: docker-linux
+--- exit ---
+0
+--- runtime-args ---
+== docker build ==
+--build-arg
+BASE_IMAGE=sha256:base00
+--label
+claude-contained.layer=1
+--label
+claude-contained.layer.project=<PROJ>
+--label
+claude-contained.layer.dockerfile=<PROJ>/.claude-contained/layer/Dockerfile
+--label
+claude-contained.layer.base=sha256:base00
+-t
+claude-contained-layer:project-<LHASH>
+<PROJ>/.claude-contained/layer
+
+== docker run ==
+--rm
+-it
+--memory
+8g
+--name
+aic-project-<TIME>
+-e
+HOST_HOME=<HOME>
+-e
+HOST_UID=<UID>
+-e
+HOST_GID=<GID>
+-w
+<PROJ>
+--mount
+type=bind,src=<HOME>/.claude-contained/claude,dst=<HOME>/.claude
+--mount
+type=bind,src=<HOME>/.codex,dst=<HOME>/.codex
+--mount
+type=bind,src=<HOME>/.copilot,dst=<HOME>/.copilot
+--mount
+type=bind,src=<HOME>/.gemini,dst=<HOME>/.gemini
+--mount
+type=bind,src=<HOME>/.vibe,dst=<HOME>/.vibe
+--mount
+type=bind,src=<HOME>/.m2,dst=<HOME>/.m2
+--mount
+type=bind,src=<HOME>/.vaadin,dst=<HOME>/.vaadin
+--mount
+type=bind,src=<PROJ>,dst=<PROJ>
+-e
+TZ=UTC
+--mount
+type=bind,src=<HOME>/.claude/skills,dst=<HOME>/.claude/skills
+--mount
+type=bind,src=<HOME>/.claude/agents,dst=<HOME>/.claude/agents
+--mount
+type=bind,src=<HOME>/.claude/commands,dst=<HOME>/.claude/commands
+--mount
+type=bind,src=<HOME>/.claude/plugins,dst=<HOME>/.claude/plugins
+-e
+GIT_PROTECT_DIRS=<PROJ>
+--add-host
+host.docker.internal:host-gateway
+--mount
+type=bind,src=<HOME>/.claude-contained,dst=<HOME>/.claude-contained
+claude-contained-layer:project-<LHASH>
+/usr/local/bin/shell-run
+
+--- stdout ---
+(empty)
+--- stderr ---
+Tooling layer found: <PROJ>/.claude-contained/layer/Dockerfile
+It has not been built for the current base image. Building runs its
+instructions on this host with unrestricted network access.
+Build the tooling layer for this project? [y/N] 
+--- filesystem ---
+HOME dir 755
+HOME/.claude dir 755
+HOME/.claude-contained dir 755
+HOME/.claude-contained/claude dir 755
+HOME/.claude-contained/claude/agents dir 755
+HOME/.claude-contained/claude/commands dir 755
+HOME/.claude-contained/claude/plugins dir 755
+HOME/.claude-contained/claude/skills dir 755
+HOME/.claude/agents dir 755
+HOME/.claude/commands dir 755
+HOME/.claude/plugins dir 755
+HOME/.claude/skills dir 755
+HOME/.codex dir 755
+HOME/.copilot dir 755
+HOME/.gemini dir 755
+HOME/.m2 dir 755
+HOME/.vaadin dir 755
+HOME/.vibe dir 755
+PROJ dir 755
+PROJ/.claude-contained dir 755
+PROJ/.claude-contained/layer dir 755
+PROJ/.claude-contained/layer/Dockerfile file 644
+  | ARG BASE_IMAGE=claude-contained:latest
+  | FROM ${BASE_IMAGE}
+  | RUN echo layer-marker > /usr/local/share/layer-marker

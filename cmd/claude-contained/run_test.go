@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"claude-contained/internal/host"
+	"claude-contained/internal/layer"
+	"claude-contained/internal/plan"
 	"claude-contained/internal/runtime"
 )
 
@@ -32,6 +34,8 @@ import (
 // `inspect` echoes $STUB_INSPECT verbatim -- the Apple JSON shape
 // runtime.Apple.InspectEnv parses -- letting Zellij driver tests present a
 // marked container. Unset, it stays silent, same as `list`.
+//
+// `image` answers Runtime.ImageID; see stubImageArm.
 func writeStubContainer(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -39,12 +43,43 @@ func writeStubContainer(t *testing.T) string {
 		"  system) exit 0 ;;\n" +
 		"  list) [ -n \"$STUB_LIST\" ] && printf '%s\\n' \"$STUB_LIST\"; exit 0 ;;\n" +
 		"  inspect) [ -n \"$STUB_INSPECT\" ] && printf '%s' \"$STUB_INSPECT\"; exit 0 ;;\n" +
+		// Apple Containers' inspect output is JSON; parseAppleImageID reads it.
+		stubImageArm("    printf '[{\"descriptor\":{\"digest\":\"%s\"}}]\\n' \"$(cat \"$idfile\")\"\n") +
 		"  *) exit 0 ;;\n" +
 		"esac\n"
 	if err := os.WriteFile(filepath.Join(dir, "container"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	return dir
+}
+
+// stubImageArm is the `image inspect` arm both stubs share, parameterized only
+// by the line that renders a present image's identifier.
+//
+// It implements Runtime.ImageID's contract rather than relying on the scripts'
+// `*) exit 0 ;;` default: that default means "exit 0 with no output", which
+// probeImageID classifies as a *fault*, so a stub without this arm would turn
+// every layer probe into a runtime error rather than the absence it means.
+//
+//   - $STUB_IMAGE_LOG, when set, records every invocation, which is how a test
+//     asserts that a no-layer run never probes an image at all.
+//   - `--help` exits $STUB_IMAGE_HELP_EXIT (0 by default). Setting it nonzero
+//     is how a test presents a CLI that does not have the subcommand, which
+//     must be a named fault and never a false absence.
+//   - Otherwise the last argument is the reference, and an id file under
+//     $STUB_IMAGE_ID_DIR decides present (exit 0, print it) or absent (exit 1).
+func stubImageArm(render string) string {
+	return "  image)\n" +
+		"    [ -n \"${STUB_IMAGE_LOG:-}\" ] && printf '%s\\n' \"$*\" >> \"$STUB_IMAGE_LOG\"\n" +
+		"    for a in \"$@\"; do\n" +
+		"      [ \"$a\" = --help ] && exit \"${STUB_IMAGE_HELP_EXIT:-0}\"\n" +
+		"    done\n" +
+		"    ref=\"\"\n" +
+		"    for a in \"$@\"; do ref=\"$a\"; done\n" +
+		"    idfile=\"${STUB_IMAGE_ID_DIR:-}/$(printf '%s' \"$ref\" | tr ':/' '__').id\"\n" +
+		"    [ -f \"$idfile\" ] || exit 1\n" +
+		render +
+		"    exit 0 ;;\n"
 }
 
 func runGitTest(t *testing.T, dir string, args ...string) string {
@@ -115,6 +150,8 @@ func writeStubDocker(t *testing.T, dir string) {
 		"  info) exit 0 ;;\n" +
 		"  ps) [ -n \"$STUB_LIST\" ] && printf '%s\\n' \"$STUB_LIST\"; exit 0 ;;\n" +
 		"  inspect) [ -n \"$STUB_INSPECT\" ] && printf '%s' \"$STUB_INSPECT\"; exit 0 ;;\n" +
+		// Docker's --format {{.Id}} output is the bare identifier.
+		stubImageArm("    cat \"$idfile\"\n") +
 		"  *) exit 0 ;;\n" +
 		"esac\n"
 	if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(script), 0o755); err != nil {
@@ -422,5 +459,52 @@ func TestNoUpdateCheckAfterARun(t *testing.T) {
 		t.Error("FETCH_HEAD changed during the run: something fetched")
 	case beforeErr != nil && afterErr == nil:
 		t.Error("FETCH_HEAD appeared during the run: something fetched")
+	}
+}
+
+// Checklist item 12 as a property rather than as a diff against fifteen golden
+// files: a project with no tooling layer produces the same run, naming the base
+// image, in every runtime/platform configuration. The golden suite asserts the
+// same thing byte for byte; this states *why* it holds, so a future change that
+// breaks it fails with a sentence instead of a wall of golden diff.
+func TestNoLayerRunSpecIsRuntimeIndependent(t *testing.T) {
+	for _, gc := range goldenTrees {
+		t.Run(gc.tree, func(t *testing.T) {
+			project := host.ResolvePath(t.TempDir())
+			withStubbedHostAndPath(t)
+			// Explicit rather than inherited: the point of the case is that
+			// nothing outside the argv decides which image is run.
+			t.Setenv(host.LayerEnvVar, "")
+			t.Setenv("CLAUDE_CONTAINED_RUNTIME", "")
+			if gc.dockerEnv {
+				t.Setenv("CLAUDE_CONTAINED_RUNTIME", "docker")
+			}
+
+			var calls [][]string
+			fake := func(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
+				calls = append(calls, append([]string(nil), argv...))
+				return 0
+			}
+
+			var stdout, stderr bytes.Buffer
+			code := runWith(fake, gc.plat,
+				[]string{"claude-contained", "-N", "-s", "-C", project},
+				strings.NewReader(""), &stdout, &stderr)
+
+			if code != 0 {
+				t.Fatalf("exit = %d, want 0\nstderr:\n%s", code, stderr.String())
+			}
+			if len(calls) != 1 {
+				t.Fatalf("recorded %d runner calls, want exactly the container run: %#v", len(calls), calls)
+			}
+			if !contains(t, calls[0], plan.Image) {
+				t.Errorf("run argv must carry %q and nothing derived: %v", plan.Image, calls[0])
+			}
+			for _, a := range calls[0] {
+				if strings.HasPrefix(a, layer.Repo+":") {
+					t.Errorf("a project with no layer must never name a derived image: %q", a)
+				}
+			}
+		})
 	}
 }

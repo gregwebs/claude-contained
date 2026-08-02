@@ -259,12 +259,42 @@ func runWith(exec runner, plat runtime.Platform, argv []string, stdin io.Reader,
 		}
 	}
 
+	// The tooling layer step sits here for two reasons, both about what a
+	// refusal costs.
+	//
+	// Late, because by this point every failure diagnosable without the
+	// container runtime has already fired -- a bad -e, a missing --share-skills
+	// directory, a rejected or unreadable project env file, a Zellij gate
+	// refusal. Asking for a minutes-long build for a run that was going to exit
+	// 2 anyway is the annoyance worth avoiding; completeEnv's own comment makes
+	// the same argument for sitting ahead of the worktree prompt. The accepted
+	// cost is that a *declined* build has already printed the loaded-environment
+	// summary, so the run announces its environment and then aborts. Slightly
+	// odd, and better than prompting before the env file has been validated.
+	//
+	// Not later, because the derived tag has to be in plan.Facts before
+	// plan.Build assembles the RunSpec, and because nothing is held yet: the
+	// signal handlers, the worktree locks and the deferred cleanup all come
+	// after, so a declined or failed build unwinds nothing -- the same reason
+	// runRebuild runs before any handler exists. The one mutation above this
+	// point sweeps the launcher's own zero-byte droppings, which is
+	// launcher-owned state rather than the user's.
+	derivedImage, code := resolveLayerImage(ctx, exec, rt, cfg,
+		host.LayerSources{Flag: cfg.LayerDir, Env: h.Layer, ProjectDir: mainHost},
+		plan.Image, prompter, stdin, stdout, stderr)
+	if code != 0 {
+		return code
+	}
+
 	mountedRoots := append([]string{mainHost}, extraMounts...)
 	host.CleanupPlaceholderFiles(mountedRoots...)
 
+	// probeFacts returns a fresh plan.Facts *by value*, so these assignments
+	// must follow it. Setting DerivedImage any earlier would be discarded.
 	facts, err := probeFacts(ctx, rt, h, cfg, mainHost, extraMounts, extraModes, shareSkillsDir, mountedRoots)
 	facts.Env = envStore.Pairs()
 	facts.ZellijSession = zellijSession
+	facts.DerivedImage = derivedImage
 	if err != nil {
 		diagnostic.For(ctx, diagnostic.ComponentHost).Error("host and runtime facts probe failed",
 			diagnostic.ErrorAttr(err))
@@ -688,7 +718,12 @@ type prompter struct {
 	isTTY  bool
 }
 
-func isTerminal(stdin io.Reader) bool {
+// isTerminal is a package-level var rather than a plain function so a test can
+// force the answer, the way replaceProcess (attach.go) is a seam for the same
+// reason. The tooling-layer step fails closed with no terminal, and there is no
+// other way to drive that branch from an in-process test: the golden suite
+// hands runWith a strings.Reader, which is never a character device.
+var isTerminal = func(stdin io.Reader) bool {
 	if f, ok := stdin.(*os.File); ok {
 		if info, err := f.Stat(); err == nil {
 			return info.Mode()&os.ModeCharDevice != 0

@@ -98,6 +98,17 @@ type BuildSpec struct {
 	Pull      bool
 	NoCache   bool
 	BuildArgs []string
+	// Labels is informational metadata for the build. Docker records these; the
+	// Apple renderer drops them, mirroring LabelArg on the run path (apple.go's
+	// RenderRun) for a sharper reason: Apple Containers' documented `container
+	// build --label` has never been run against a real install here, and a
+	// rejected flag would fail the *build* rather than merely lose metadata.
+	// Since nothing ever reads a label back (plan.go's Zellij labels record the
+	// same rule), dropping them on Apple costs human-readable provenance and
+	// nothing else; the cleanup handle on both runtimes is the repository name
+	// and the tag. Add the Apple arm once someone has actually run the probe in
+	// USAGE-verification #17.
+	Labels []LabelArg
 }
 
 // Profile is the pure, data-only half of a runtime: everything plan building
@@ -154,6 +165,26 @@ type Runtime interface {
 	RenderExec(ExecSpec) []string
 	// RenderBuild returns the complete argv for an image build (ticket 10).
 	RenderBuild(BuildSpec) []string
+	// ImageID reports a stable, runtime-assigned identifier for a locally
+	// present image reference. Three outcomes, and the difference between the
+	// last two is the whole point of the method's shape:
+	//
+	//	(id, true,  nil)  the reference names a local image
+	//	("", false, nil)  the runtime answered, and no local image carries it
+	//	("", false, err)  the question could not be asked at all
+	//
+	// Absence is load-bearing: it sends the caller to "the base image is not
+	// built, run --rebuild=full first", which is actively wrong advice on a
+	// machine where the image is right there and the real problem is that this
+	// build of the CLI spells the probe subcommand differently. So absence is
+	// reported only when the probe subcommand is known to exist, and every
+	// other failure is a fault. See imageid.go for the discrimination.
+	//
+	// The value is opaque above this package: callers may compare it and hash
+	// it, never parse it. Docker reports a config digest and Apple Containers a
+	// manifest digest, which is why nothing above here may assume a shape --
+	// and why switching runtimes legitimately rebuilds every derived image.
+	ImageID(ctx context.Context, ref string) (id string, ok bool, err error)
 	// List reports the names of running containers.
 	List(ctx context.Context) ([]string, error)
 	// InspectEnv reports a container's environment as KEY=VALUE lines -- the
@@ -295,6 +326,36 @@ func renderMount(m MountArg) []string {
 		opt += ",readonly"
 	}
 	return []string{"--mount", opt}
+}
+
+// renderBuild is the whole build argv, shared because the two implementations
+// were byte-identical apart from Bin() and hand-editing both invites drift.
+//
+// labels is a parameter rather than being read off spec so the *renderer*
+// decides whether its runtime carries them, without the caller learning that
+// the two differ: Docker passes spec.Labels, Apple passes nil. See
+// BuildSpec.Labels for why the asymmetry is chosen rather than discovered.
+//
+// Label position is load-bearing: after the --build-args and before -t, so a
+// spec with no labels renders byte-identically to what this rendered before
+// labels existed, with `-t TAG CTX` still trailing.
+func renderBuild(bin string, spec BuildSpec, labels []LabelArg) []string {
+	argv := []string{bin, "build"}
+	// --pull before --no-cache, matching claude-contained:546 argument for
+	// argument: the corpus compares the emitted argv.
+	if spec.Pull {
+		argv = append(argv, "--pull")
+	}
+	if spec.NoCache {
+		argv = append(argv, "--no-cache")
+	}
+	for _, ba := range spec.BuildArgs {
+		argv = append(argv, "--build-arg", ba)
+	}
+	for _, l := range labels {
+		argv = append(argv, "--label", l.Key+"="+l.Value)
+	}
+	return append(argv, "-t", spec.Tag, spec.Context)
 }
 
 // renderCommonArg handles every arg whose syntax the two runtimes share. It

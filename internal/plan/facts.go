@@ -90,6 +90,19 @@ type Facts struct {
 	// driver before Build runs, because the gate needs the container runtime and
 	// Build must stay pure (claude-contained:1439-1471).
 	ZellijSession string
+
+	// DerivedImage is the tooling layer's image reference for this run, or ""
+	// to run the base image. Named DerivedImage, not Image, because `Image` is
+	// already this package's base-image constant and `image := Image` next to
+	// `f.Image` is a mis-read waiting to happen.
+	//
+	// It lives on Facts for the same reason ZellijSession does: it is a runtime
+	// observation Build is not allowed to make itself. Resolving it needs the
+	// container runtime, a prompt, and possibly a multi-minute build, none of
+	// which a pure function may do -- but Build is still the single assembler
+	// of the RunSpec, so the answer has to arrive as an input rather than as a
+	// later mutation of what Build produced.
+	DerivedImage string
 }
 
 // WorktreeLockCandidates is the auto-lock offer's input for one of the two

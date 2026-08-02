@@ -15,6 +15,10 @@ const (
 	ComponentZellij
 	ComponentAttach
 	ComponentRebuild
+	// ComponentLayer is appended, never inserted: the numeric values are a
+	// closed set several tests index positionally, and renumbering an existing
+	// component would silently re-attribute records rather than fail.
+	ComponentLayer
 	componentCount
 )
 
@@ -28,6 +32,7 @@ var components = [...]Component{
 	ComponentZellij,
 	ComponentAttach,
 	ComponentRebuild,
+	ComponentLayer,
 }
 
 // Components returns the closed set in help/documentation order.
@@ -57,6 +62,8 @@ func (c Component) String() string {
 		return "attach"
 	case ComponentRebuild:
 		return "rebuild"
+	case ComponentLayer:
+		return "layer"
 	default:
 		return "invalid"
 	}

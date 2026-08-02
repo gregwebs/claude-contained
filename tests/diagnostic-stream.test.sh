@@ -53,6 +53,7 @@ for target in "${targets[@]}"; do
       PATH="$stub_dir:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin" \
       CLAUDE_CONTAINED_RUNTIME='' \
       CLAUDE_CONTAINED_BUILD_CONTEXT='' \
+      CLAUDE_CONTAINED_LAYER='' \
       CLAUDE_CONTAINED_SHARE_HOST_CLAUDE='' \
       CLAUDE_CONTAINED_LOG_LEVEL="${TEST_LOG_LEVEL:-}" \
       CLAUDE_MEMORY='' CLAUDE_DNS='system' TZ='' \

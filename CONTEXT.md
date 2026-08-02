@@ -16,9 +16,26 @@ _Avoid_: extra dir, volume, bind
 The engine that executes contained sessions — either Apple Containers or Docker.
 _Avoid_: backend, engine, driver, provider
 
+**Base image**:
+The image built from this repository's Dockerfile, tagged `claude-contained:latest`, and run directly when a project supplies no tooling layer.
+_Avoid_: the image, main image, parent image
+
 **Build context**:
-The directory handed to the container runtime's build command — the repository checkout root, which holds the Dockerfile and `image/`.
+The directory handed to the container runtime's build command for the base image — the repository checkout root, which holds the Dockerfile and `image/`. A tooling layer has its own, separate context.
 _Avoid_: build dir, source dir, Docker context
+
+**Tooling layer**:
+A complete Dockerfile a project checks in, built `FROM` the base image to add that project's toolchain. It lives in `.claude-contained/layer/` inside the project, which is both its home and its build context.
+_Avoid_: layer, custom image, overlay, Dockerfile snippet
+_Note_: "Java layer" and `INCLUDE_JAVA_LAYER` still appear in `USAGE.md` and the `Dockerfile`. They name the retired built-in, not a tooling layer, and go away with it (ADR-0006).
+
+**Derived image**:
+The image built from a project's tooling layer and run in place of the base image, tagged under `claude-contained-layer` with a content hash of the base image's identity and the layer's build context.
+_Avoid_: layered image, project image, child image
+
+**Layer env fragment**:
+A `KEY=VALUE` file a tooling layer installs into a directory the entrypoint reads, contributing runtime environment the image alone cannot express — such as a cache path under the host home directory, which is unknown at build time.
+_Avoid_: layer env file, dotenv, ENV
 
 **Host Claude profile**:
 The user's normal Claude Code profile directory at `~/.claude`, used by uncontained Claude Code.

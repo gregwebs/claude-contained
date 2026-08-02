@@ -83,6 +83,7 @@ func runGoldenCase(t *testing.T, tc goldenCase, gc goldenTreeConfig) {
 	t.Setenv("TZ", "UTC")
 	t.Setenv("GOLDEN_LIST_OUTPUT", fx.stubList)
 	t.Setenv("GOLDEN_INSPECT_DIR", fx.stubInspectDir)
+	t.Setenv("GOLDEN_IMAGE_ID_DIR", fx.stubImageIDDir)
 
 	if gc.dockerEnv {
 		t.Setenv("CLAUDE_CONTAINED_RUNTIME", "docker")
@@ -106,6 +107,19 @@ func runGoldenCase(t *testing.T, tc goldenCase, gc goldenTreeConfig) {
 	}
 	for name, lines := range extras.InspectEnv {
 		mustWriteFile(t, filepath.Join(fx.stubInspectDir, name+".env"), strings.Join(lines, "\n")+"\n")
+	}
+	for ref, id := range extras.ImageIDs {
+		mustWriteFile(t, filepath.Join(fx.stubImageIDDir, goldenImageIDKey(ref)+".id"), id+"\n")
+	}
+
+	// The terminal answer is a package-level var for exactly this: the driver
+	// hands runWith a strings.Reader, so a case that needs a prompt gated on
+	// having a terminal has no other way to reach it. Swapped and restored the
+	// same way replaceProcess is, below.
+	if tc.Terminal {
+		origTerminal := isTerminal
+		isTerminal = func(io.Reader) bool { return true }
+		t.Cleanup(func() { isTerminal = origTerminal })
 	}
 
 	args := append([]string{"claude-contained"}, tc.Args(fx.proj, fx.home)...)
@@ -195,6 +209,13 @@ func resultIsEmpty(stdout, stderr, argvLog string, exitCode int, baseline, post 
 		}
 	}
 	return true
+}
+
+// goldenImageIDKey turns an image reference into the id file's basename. It
+// mirrors the `tr ':/' '__'` in goldenImageIDArm exactly; the two must agree or
+// every layer case reads as "no such image".
+func goldenImageIDKey(ref string) string {
+	return strings.NewReplacer(":", "_", "/", "_").Replace(ref)
 }
 
 // extractDashC finds -C's value in a rendered argv, for N4/PHASH. Cases with

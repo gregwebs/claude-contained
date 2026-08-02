@@ -89,22 +89,25 @@ func (a *Apple) RenderExec(spec ExecSpec) []string {
 	return append(argv, spec.Command...)
 }
 
-// RenderBuild shares its shape with Docker's: only Bin() differs. See
-// renderCommonArg for the analogous split on the run path.
+// RenderBuild shares its shape with Docker's: only Bin() and the labels differ.
+// See renderCommonArg for the analogous split on the run path.
+//
+// nil, not spec.Labels, mirroring the `case LabelArg:` arm above -- but for a
+// harder reason than "no equivalent". Apple Containers does document
+// `container build --label`; it has simply never been run here, and a rejected
+// build flag *fails the build* on the primary platform, where a build failure
+// is a hard error with no fallback by design. Nothing reads a label back, so
+// dropping them costs provenance only. See BuildSpec.Labels.
 func (a *Apple) RenderBuild(spec BuildSpec) []string {
-	argv := []string{a.Bin(), "build"}
-	// --pull before --no-cache, matching claude-contained:546 argument for
-	// argument: the corpus compares the emitted argv.
-	if spec.Pull {
-		argv = append(argv, "--pull")
-	}
-	if spec.NoCache {
-		argv = append(argv, "--no-cache")
-	}
-	for _, ba := range spec.BuildArgs {
-		argv = append(argv, "--build-arg", ba)
-	}
-	return append(argv, "-t", spec.Tag, spec.Context)
+	return renderBuild(a.Bin(), spec, nil)
+}
+
+// ImageID asks Apple Containers for the image's manifest digest. Neither the
+// subcommand spelling nor the JSON shape has been run against a real install;
+// probeImageID's capability probe is what turns a wrong noun into a named
+// fault instead of a false "the base image is not built".
+func (a *Apple) ImageID(ctx context.Context, ref string) (string, bool, error) {
+	return probeImageID(ctx, a.Bin(), ref, nil, parseAppleImageID)
 }
 
 func (a *Apple) List(ctx context.Context) ([]string, error) {

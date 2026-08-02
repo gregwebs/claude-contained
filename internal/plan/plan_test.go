@@ -789,6 +789,41 @@ func TestNoHostForwardNoticeWithoutFlag(t *testing.T) {
 	}
 }
 
+// A derived image replaces the base image in the run spec and changes nothing
+// else. The DeepEqual on Args is the load-bearing half: checklist item 12 says
+// a project with no layer produces byte-identical arguments, and this pins the
+// converse -- a project *with* one moves only the image operand.
+func TestDerivedImageReplacesOnlyTheImage(t *testing.T) {
+	cfg := cli.Config{Tool: "claude", ShellMode: true, ContainedNodeModules: true}
+	base := Facts{ProjectDir: "/home/dev/work/app"}
+	derived := base
+	derived.DerivedImage = "claude-contained-layer:app-0123456789abcdef0123456789abcdef"
+
+	baseProgram, err := Build(cfg, testHost(), base, appleProfile(), Answers{})
+	if err != nil {
+		t.Fatalf("Build (base): %v", err)
+	}
+	derivedProgram, err := Build(cfg, testHost(), derived, appleProfile(), Answers{})
+	if err != nil {
+		t.Fatalf("Build (derived): %v", err)
+	}
+
+	if baseProgram.Run.Image != Image {
+		t.Errorf("an empty DerivedImage must yield %q, got %q", Image, baseProgram.Run.Image)
+	}
+	if derivedProgram.Run.Image != derived.DerivedImage {
+		t.Errorf("Image = %q, want %q", derivedProgram.Run.Image, derived.DerivedImage)
+	}
+	if !reflect.DeepEqual(baseProgram.Run.Args, derivedProgram.Run.Args) {
+		t.Errorf("nothing but the image may move:\nbase:    %#v\nderived: %#v",
+			baseProgram.Run.Args, derivedProgram.Run.Args)
+	}
+	if !reflect.DeepEqual(baseProgram.Run.Command, derivedProgram.Run.Command) {
+		t.Errorf("the container command must not move:\nbase:    %#v\nderived: %#v",
+			baseProgram.Run.Command, derivedProgram.Run.Command)
+	}
+}
+
 func printSteps(steps []Step) []Step {
 	var out []Step
 	for _, s := range steps {

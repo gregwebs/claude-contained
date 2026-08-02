@@ -456,6 +456,103 @@ func TestBuildContextValueIsNotValidatedByCLI(t *testing.T) {
 	}
 }
 
+func TestLayerFlagFormsAndLastOccurrence(t *testing.T) {
+	cfg, stderr, err := validateArgs("--layer", "/a", "--layer=/b")
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q, want empty", stderr)
+	}
+	if cfg.LayerDir != "/b" {
+		t.Errorf("LayerDir = %q, want the last occurrence %q", cfg.LayerDir, "/b")
+	}
+}
+
+func TestLayerValueIsNotValidatedByCLI(t *testing.T) {
+	cfg, stderr, err := validateArgs("--layer", "/definitely/does/not/exist")
+	if err != nil {
+		t.Fatalf("Validate should accept an unvalidated directory: %v", err)
+	}
+	if cfg.LayerDir != "/definitely/does/not/exist" {
+		t.Errorf("LayerDir = %q, want the raw value", cfg.LayerDir)
+	}
+	if stderr != "" {
+		t.Errorf("stderr = %q, want empty", stderr)
+	}
+}
+
+// The asymmetric `what` strings, mirroring --build-context: the separate form
+// wants "a directory", the inline form "a non-empty directory".
+func TestLayerFlagRequiredValueGrammar(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"separate form with no value", []string{"--layer"}, "error: --layer requires a directory\n"},
+		{"inline form with an empty value", []string{"--layer="}, "error: --layer requires a non-empty directory\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, stderr, err := validateArgs(tc.args...)
+			requireUsageError(t, err)
+			if stderr != tc.want {
+				t.Errorf("stderr = %q, want %q", stderr, tc.want)
+			}
+		})
+	}
+}
+
+func TestLayerBooleanFlags(t *testing.T) {
+	cfg, stderr, err := validateArgs("--build-layer")
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if stderr != "" || !cfg.BuildLayer || cfg.NoLayer {
+		t.Errorf("--build-layer: BuildLayer=%v NoLayer=%v stderr=%q", cfg.BuildLayer, cfg.NoLayer, stderr)
+	}
+
+	cfg, stderr, err = validateArgs("--no-layer")
+	if err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+	if stderr != "" || !cfg.NoLayer || cfg.BuildLayer {
+		t.Errorf("--no-layer: BuildLayer=%v NoLayer=%v stderr=%q", cfg.BuildLayer, cfg.NoLayer, stderr)
+	}
+}
+
+func TestNoLayerConflictsWithSelectingOrBuildingOne(t *testing.T) {
+	want := "error: --no-layer cannot be combined with --layer or --build-layer\n" +
+		"       --no-layer runs the base image; the others select or build a tooling layer.\n"
+
+	for _, args := range [][]string{
+		{"--no-layer", "--build-layer"},
+		{"--no-layer", "--layer", "/some/dir"},
+		{"--no-layer", "--layer=/some/dir", "--build-layer"},
+	} {
+		t.Run(strings.Join(args, " "), func(t *testing.T) {
+			_, stderr, err := validateArgs(args...)
+			requireUsageError(t, err)
+			if stderr != want {
+				t.Errorf("stderr = %q, want %q", stderr, want)
+			}
+		})
+	}
+}
+
+// The conflict check is last in ValidateContext, so it is strictly additive:
+// an input that already failed an earlier check still reports that earlier
+// message, unchanged.
+func TestAnEarlierValidationStillWinsOverTheLayerConflict(t *testing.T) {
+	_, stderr, err := validateArgs("--session", "review", "--no-layer", "--build-layer")
+	requireUsageError(t, err)
+	if want := "error: --session is valid only with --zellij\n"; stderr != want {
+		t.Errorf("stderr = %q, want the earlier check's message %q", stderr, want)
+	}
+}
+
 func TestDiagnosticFlagFormsAndLastOccurrence(t *testing.T) {
 	cfg, stderr, err := validateArgs(
 		"--log-level", "debug",

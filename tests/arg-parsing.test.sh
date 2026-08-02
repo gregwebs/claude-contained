@@ -19,9 +19,10 @@ set -uo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(dirname "$here")"
 
-# A developer's exported build-context override must not change any result
-# here, the same way an ambient CLAUDE_CONTAINED_RUNTIME must not.
+# A developer's exported build-context or tooling-layer override must not change
+# any result here, the same way an ambient CLAUDE_CONTAINED_RUNTIME must not.
 unset CLAUDE_CONTAINED_BUILD_CONTEXT
+unset CLAUDE_CONTAINED_LAYER
 unset CLAUDE_CONTAINED_LOG_LEVEL
 
 stub_dir="$(mktemp -d)"

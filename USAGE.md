@@ -27,6 +27,9 @@ There are no positional arguments. Use `-C` for the project directory, `-m` for 
 | `--no-sandbox` | Disable the srt sandbox for this run |
 | `--container-runtime NAME` | Container runtime: `apple` or `docker` |
 | `--build-context DIR` | Checkout holding the Dockerfile for `--rebuild` |
+| `--layer DIR` | Tooling layer directory (default: the project's `.claude-contained/layer`) |
+| `--build-layer` | Build the tooling layer without confirming |
+| `--no-layer` | Ignore the tooling layer and run the base image |
 | `--log-level LEVEL` | Diagnostic detail: `debug`, `info`, `warn`, `error`, or `off` (default) |
 | `--log-file PATH` | Write the diagnostic stream to a secured, truncated file |
 | `--log-only` | Carry user-facing output on the diagnostic stream |
@@ -73,7 +76,7 @@ By default, enabled diagnostics use stderr. `--log-file PATH` instead creates or
 
 Attach and Zellij attach normally replace the launcher process. With `--log-only`, the launcher instead proxies that command as a child so its later stdout and stderr can continue through the diagnostic stream; the child exit status is preserved.
 
-Launcher-generated records use `kind=diagnostic` and exactly one component from `cli`, `host`, `env`, `plan`, `runtime`, `worktree`, `zellij`, `attach`, or `rebuild`. They never include environment assignment values or the value of `AI_GH_TOKEN`; rendered runtime arguments replace every `-e` operand with a redacted form at every level. Paths, mount information, and non-`-e` tool arguments can remain visible, and the redacted argv is not a pasteable reproduction of the real command.
+Launcher-generated records use `kind=diagnostic` and exactly one component from `cli`, `host`, `env`, `plan`, `runtime`, `worktree`, `zellij`, `attach`, `rebuild`, or `layer`. They never include environment assignment values or the value of `AI_GH_TOKEN`; rendered runtime arguments replace every `-e` operand with a redacted form at every level. Paths, mount information, and non-`-e` tool arguments can remain visible, and the redacted argv is not a pasteable reproduction of the real command.
 
 Relocated output has a different security boundary: it is existing launcher, runtime, or child-process output carried verbatim and can contain arbitrary sensitive text. Mode `0600` limits file access but does not make a diagnostic file safe to share. If writing or flushing the stream fails, process replacement is blocked and a successful launcher result becomes a failure; an already nonzero primary result remains primary.
 
@@ -181,6 +184,83 @@ Rebuilding needs to find the checkout that holds the Dockerfile. It resolves in 
 
 JBR, HotswapAgent, jdtls, Maven, and JBang are included with `--build arg INCLUDE_JAVA_LAYER=true`.
 
+## Tooling Layers
+
+A project can add its own toolchain to the container by checking in a **tooling layer**: a complete Dockerfile built on top of the base image. The launcher builds it into a **derived image** and runs that instead of `claude-contained:latest`. A project with no layer behaves exactly as it always has.
+
+The layer lives in `.claude-contained/layer/` inside the project directory. That directory is both the layer's home and its build context. Override it with `--layer DIR`, else `CLAUDE_CONTAINED_LAYER=DIR`; the default applies when neither is set.
+
+### The contract
+
+A layer is a whole Dockerfile, not a snippet. It must start with this preamble:
+
+```dockerfile
+ARG BASE_IMAGE=claude-contained:latest
+FROM ${BASE_IMAGE}
+RUN ...
+```
+
+The launcher overrides `BASE_IMAGE` with the base image's resolved ID, so the image built is the image that was hashed. The default in the file is what keeps the layer buildable by hand — `cd .claude-contained/layer && docker build -t my-layer .` — and inside a devcontainer that never runs the launcher. A layer that omits the `ARG` still builds, but draws an unconsumed-build-argument warning from the builder.
+
+Nothing validates the layer's contents. It can break the base image's invariants, and the container belongs to the project, so examples and this documentation carry that weight rather than a checker.
+
+### Identity and staleness
+
+The derived image is tagged `claude-contained-layer:<project>-<hash>`, where the hash covers the base image's resolved ID, the layer Dockerfile, and every file in the layer directory. The tag *is* the staleness check: if that image exists the launcher runs it, and if it does not the launcher offers to build it. There is no state file and no explicit build step.
+
+Consequences worth knowing:
+
+- An unchanged layer never rebuilds; a changed one always does.
+- `--rebuild` invalidates every derived image, because the base image ID they were named after no longer exists. It never builds a layer itself — the next ordinary run does.
+- Switching container runtimes rebuilds the derived image: the two report different identities for the same base image.
+- Everything in the layer directory is hashed and no `.dockerignore` is interpreted, so a large layer directory makes every run slower. The launcher warns rather than refusing, because the directory is writable from inside the container and a refusal would let a contained agent disable its own toolchain.
+- File modes are hashed the way Git tracks them — the execute bit and nothing else — so a checked-out layer hashes identically regardless of umask. `chmod +x` invalidates; `chmod 0640` does not.
+
+### Confirmation
+
+Building a layer makes the host's container runtime execute arbitrary steps with unrestricted network egress, so every build is confirmed:
+
+```text
+Tooling layer found: /path/to/project/.claude-contained/layer/Dockerfile
+It has not been built for the current base image. Building runs its
+instructions on this host with unrestricted network access.
+Build the tooling layer for this project? [y/N]
+```
+
+Unlike the launcher's other prompts, this one defaults to **no**. Nothing is remembered between runs; the prompt appears only when the tag is missing, which is once per actual change.
+
+`--build-layer` answers it ahead of time and builds. `--no-layer` ignores the layer and runs the base image. Neither has an environment variable, deliberately: an exported variable is a stored approval that defeats the confirmation, and a forgotten `CLAUDE_CONTAINED_NO_LAYER` would silently produce a container missing its toolchain. `--no-layer` cannot be combined with `--layer` or `--build-layer`.
+
+With no terminal to confirm on and an unbuilt layer, the launcher exits nonzero and names both flags rather than building unattended.
+
+### Failure
+
+A failed layer build is a hard error carrying the builder's own exit status. The launcher never falls back to the base image, because that would start a container that looks healthy while missing its toolchain.
+
+A missing base image is reported rather than built:
+
+```text
+error: the base image claude-contained:latest is not built.
+       Run 'claude-contained --rebuild=full' first; a tooling layer builds on top of it.
+```
+
+A layer directory named by `--layer` or `CLAUDE_CONTAINED_LAYER` that holds no `Dockerfile` is a usage error. The *default* directory holding no `Dockerfile` is simply "no layer" — nobody named it — and is silent on the terminal; `--log-level=debug` reports it as `tooling layer absent` with `reason=no-dockerfile`.
+
+### Cleanup
+
+Derived images accumulate at roughly a gigabyte each, one per project per layer version per base version, and `image prune` does not remove tagged images. Cleanup is manual by design: a launcher that deleted images it cannot prove are unused would be worse than disk growth.
+
+The tag is the handle on both runtimes:
+
+```bash
+docker image ls claude-contained-layer
+docker image rm claude-contained-layer:my-app-0123456789abcdef0123456789abcdef
+
+container image list
+container image delete claude-contained-layer:my-app-0123456789abcdef0123456789abcdef
+```
+
+Images built by the Docker runtime additionally carry `claude-contained.layer`, `claude-contained.layer.project`, `claude-contained.layer.dockerfile` and `claude-contained.layer.base` labels, visible with `docker image inspect`. Images built by Apple Containers do not; the labels are provenance for a human and are never read by the launcher.
 
 ## Zellij Workspaces
 
@@ -295,6 +375,8 @@ The launchers reject variables that could subvert container setup:
 - Names starting with `HOST_`, `SRT_`, or `CLAUDE_CONTAINED_`
 
 Use `--ssh` instead of setting `SSH_AUTH_SOCK`. `LD_PRELOAD`, `LD_LIBRARY_PATH`, and `NODE_OPTIONS` are accepted as command-line flags but refused from the project env file.
+
+The `CLAUDE_CONTAINED_` prefix is reserved because the launcher reads it for its own configuration: `CLAUDE_CONTAINED_RUNTIME` (see the runtime selection table above), `CLAUDE_CONTAINED_BUILD_CONTEXT` (see [Rebuilding the Image](#rebuilding-the-image)), `CLAUDE_CONTAINED_LAYER` (see [Tooling Layers](#tooling-layers)), `CLAUDE_CONTAINED_LOG_LEVEL` (see [Diagnostic Stream](#diagnostic-stream)), and `CLAUDE_CONTAINED_SHARE_HOST_CLAUDE`. These are host-side settings; the refusal above is what stops a contained agent from setting them for the next run through the project env file.
 
 ### Security Considerations
 

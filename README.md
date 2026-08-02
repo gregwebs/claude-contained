@@ -107,5 +107,6 @@ The contained Claude profile and the other tools' config directories are bind-mo
 - **Defense in depth**: The container or VM is the isolation boundary. The included sandbox runtime adds a deny-by-default network guardrail around the tool process.
 - **Host services**: Containers use `host.local` for reachable host services; Docker can additionally forward localhost-bound services with `-H`.
 - **Image files**: Files under `image/` are copied into the image and kept out of the Dockerfile so the Dockerfile stays below Apple Containers' 16k file limit.
+- **Project toolchains**: a project can check in a tooling layer Dockerfile that the launcher builds on top of the base image and runs in its place. See [Tooling Layers](USAGE.md#tooling-layers).
 
 For implementation details and architectural constraints, see [CONTRIBUTING.md](CONTRIBUTING.md) and the decisions under [`docs/adr/`](docs/adr/).
