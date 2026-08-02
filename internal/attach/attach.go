@@ -1,7 +1,7 @@
 // Package attach reconnects to an already-running container.
 //
-// `exec` bypasses the image entrypoint, so this package -- not the entrypoint --
-// prepends the sandbox wrapper and supplies HOME/JAVA_HOME/PATH. Nothing here
+// `exec` bypasses the image entrypoint, so this package routes the command
+// through the image's environment resolver and sandbox wrapper. Nothing here
 // is runtime-specific: internal/runtime turns the ExecSpec into a command line.
 package attach
 
@@ -23,17 +23,11 @@ import (
 const Prefix = "aic-"
 
 const (
-	sandboxWrapper = "srt-run"                  // claude-contained:148
+	sandboxWrapper = "/usr/local/bin/srt-run" // claude-contained:148
+	ToolEnvPath    = "/usr/local/bin/tool-env"
 	shellPath      = "/usr/local/bin/shell-run" // claude-contained:140
 	claudePath     = "/opt/claude/claude"       // claude-contained:134
-	javaHome       = "/opt/jbr"
 )
-
-// containerPathFmt is the PATH the exec'd process gets (claude-contained:177).
-// %s is the *host* HOME, exactly as bash expands $HOME there.
-const containerPathFmt = "/opt/claude:/home/dev/.sdkman/candidates/maven/current/bin:" +
-	"/home/dev/.sdkman/candidates/jbang/current/bin:/opt/jbr/bin:%s/.local/bin:" +
-	"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 var selectionPattern = regexp.MustCompile(`^[0-9]+$`)
 
@@ -194,7 +188,7 @@ func buildSpec(req Request, name string) *runtime.ExecSpec {
 // build_attach_shell_cmd, claude-contained:143-165). --shell ignores the tool
 // and the yolo flag entirely.
 func Command(req Request) []string {
-	var cmd []string
+	cmd := []string{ToolEnvPath}
 	if !req.SrtDisable {
 		cmd = append(cmd, sandboxWrapper)
 	}
@@ -231,13 +225,11 @@ func toolPath(tool string) string {
 	return tool
 }
 
-// ExecEnv mirrors exec_env_args (claude-contained:175-178): HOME, JAVA_HOME,
-// PATH, then the user's --env pairs in order.
+// ExecEnv carries only host-known values. Tool paths and layer fragments are
+// resolved inside the container by tool-env, for both run and attach paths.
 func ExecEnv(home string, pairs []env.Pair) []runtime.EnvArg {
 	out := []runtime.EnvArg{
 		{Key: "HOME", Value: home},
-		{Key: "JAVA_HOME", Value: javaHome},
-		{Key: "PATH", Value: fmt.Sprintf(containerPathFmt, home)},
 	}
 	for _, p := range pairs {
 		out = append(out, runtime.EnvArg{Key: p.Key, Value: p.Value})

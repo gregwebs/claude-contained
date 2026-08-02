@@ -103,27 +103,27 @@ suite() {
   # entrypoint, so the sandbox wrapper and yolo placement have to come from
   # the launcher's attach path itself.
   out="$(attach_argv "$target" -a live)"
-  grep -Fq 'aic-live srt-run /opt/claude/claude' <<<"$out"
+  grep -Fq 'aic-live /usr/local/bin/tool-env /usr/local/bin/srt-run /opt/claude/claude' <<<"$out"
   _check "attach by name runs the tool behind the sandbox wrapper" $?
 
   out="$(attach_argv "$target" -a live --no-sandbox)"
-  grep -Fq 'aic-live /opt/claude/claude' <<<"$out" && ! grep -Fq 'srt-run' <<<"$out"
+  grep -Fq 'aic-live /usr/local/bin/tool-env /opt/claude/claude' <<<"$out" && ! grep -Fq 'srt-run' <<<"$out"
   _check "--no-sandbox drops the wrapper on attach" $?
 
   out="$(attach_argv "$target" -a live -s)"
-  grep -Fq 'aic-live srt-run /usr/local/bin/shell-run' <<<"$out"
+  grep -Fq 'aic-live /usr/local/bin/tool-env /usr/local/bin/srt-run /usr/local/bin/shell-run' <<<"$out"
   _check "attach debug shell runs behind the sandbox wrapper" $?
 
   out="$(attach_argv "$target" -a live -s --no-sandbox)"
-  grep -Fq 'aic-live /usr/local/bin/shell-run' <<<"$out" && ! grep -Fq 'srt-run' <<<"$out"
+  grep -Fq 'aic-live /usr/local/bin/tool-env /usr/local/bin/shell-run' <<<"$out" && ! grep -Fq 'srt-run' <<<"$out"
   _check "--no-sandbox drops the wrapper on attach debug shell" $?
 
   out="$(attach_argv "$target" -a live -y)"
-  grep -Fq 'srt-run /opt/claude/claude --dangerously-skip-permissions' <<<"$out"
+  grep -Fq '/usr/local/bin/tool-env /usr/local/bin/srt-run /opt/claude/claude --dangerously-skip-permissions' <<<"$out"
   _check "attach yolo flag lands after the tool, behind the wrapper" $?
 
   out="$(attach_argv "$target" -a live -y -t codex)"
-  grep -Fq 'srt-run codex --yolo' <<<"$out"
+  grep -Fq '/usr/local/bin/tool-env /usr/local/bin/srt-run codex --yolo' <<<"$out"
   _check "attach yolo flag for a non-claude tool" $?
 
   # Attach builders (`build_attach_cmd`/`build_attach_shell_cmd`, which prefix

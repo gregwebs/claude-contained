@@ -115,6 +115,36 @@ missing its toolchain.
 
 **Accepted cost:** a base rebuild re-prompts once per project.
 
+## Runtime environment is resolved inside the container
+
+A tooling layer installs declarative `KEY=VALUE` fragments under
+`/etc/claude-contained/env.d/`. One resolver reads them after root setup and
+sandbox-policy generation, at the point the entrypoint drops to the dev user.
+Attach invokes that same resolver because container exec bypasses the
+entrypoint. The host therefore supplies only host facts such as `HOME`; it does
+not encode Java or toolchain paths.
+
+The parser follows the project-env file's literal line and quote rules, but
+expands only complete `$HOME`/`${HOME}` and `$PATH`/`${PATH}` references. An
+explicit process environment value wins over a fragment, while `PATH` and
+`JAVA_HOME` remain fragment-owned because the launcher refuses users from
+setting them. Files are applied in lexical order so later fragments can extend
+the environment resolved by earlier ones.
+
+**Rejected: sourcing fragments.** It would turn a data file into code executed
+before the sandbox. Keys that affect privilege setup, dynamic loading, shell
+startup, or the sandbox are refused, and sandbox executables are invoked by
+absolute path so a fragment-controlled `PATH` cannot replace them.
+
+**Rejected: resolving fragments on the host.** The host would need to know
+container paths and duplicate image behavior for normal run, attach, and
+Zellij. Keeping the resolver in the image gives all entry paths one contract.
+
+**Accepted cost:** this parser is a small image-side counterpart to the Go
+project-env parser. They share documented behavior rather than code because the
+resolver must also work when the Go launcher is no longer present during
+attach.
+
 ## Failure is hard, and absence must be earned
 
 A failed layer build is a hard error carrying the builder's own exit status, and

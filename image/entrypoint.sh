@@ -2,10 +2,6 @@
 # Prepare host parity, networking, and sandboxing before starting the tool as the dev user.
 set -e
 
-# JBR as primary Java (with HotswapAgent support)
-export JAVA_HOME=/opt/jbr
-export PATH="/opt/claude:/home/dev/.sdkman/candidates/maven/current/bin:/home/dev/.sdkman/candidates/jbang/current/bin:$JAVA_HOME/bin:$PATH"
-
 # Add host.local pointing to host machine
 # Docker Desktop (macOS/Windows): use host.docker.internal
 # Apple Containers / Docker on Linux: use gateway IP
@@ -133,7 +129,7 @@ fi
 # entrypoint entirely, so attach paths route through srt-run instead.
 if [ "${SRT_DISABLE:-}" != "1" ]; then
   if /usr/local/bin/srt-settings.sh; then
-    set -- srt --settings "${SRT_SETTINGS_PATH:-/run/srt-settings.json}" -- "$@"
+    set -- /usr/local/bin/srt --settings "${SRT_SETTINGS_PATH:-/run/srt-settings.json}" -- "$@"
   else
     echo "entrypoint: failed to generate sandbox policy; refusing to run unsandboxed." >&2
     echo "            re-run with --no-sandbox to bypass deliberately." >&2
@@ -145,13 +141,14 @@ fi
 if [ "$(id -u)" = "0" ] && [ "${STAY_ROOT:-}" != "1" ]; then
   USER_HOME="${HOME:-/home/dev}"
   exec gosu dev env \
-    JAVA_HOME="$JAVA_HOME" \
-    PATH="${USER_HOME}/.local/bin:$PATH" \
     HOME="$USER_HOME" \
     DISPLAY="$DISPLAY" \
-    "$@"
+    /usr/local/bin/tool-env "$@"
 else
-  # Also update PATH for root/non-gosu case
-  export PATH="${HOME}/.local/bin:$PATH"
-  exec "$@"
+  # STAY_ROOT is an image-maintenance escape hatch. Layer fragments are never
+  # loaded as root; ordinary non-root entrypoints still resolve them here.
+  if [ "$(id -u)" = "0" ]; then
+    exec "$@"
+  fi
+  exec /usr/local/bin/tool-env "$@"
 fi

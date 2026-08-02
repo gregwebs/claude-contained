@@ -204,6 +204,38 @@ The launcher overrides `BASE_IMAGE` with the base image's resolved ID, so the im
 
 Nothing validates the layer's contents. It can break the base image's invariants, and the container belongs to the project, so examples and this documentation carry that weight rather than a checker.
 
+### Runtime environment
+
+Image content can set ordinary variables with Dockerfile `ENV`, but it cannot
+name the contained user's home directory: that path is copied from the host at
+runtime. A tooling layer can install literal `KEY=VALUE` fragments under
+`/etc/claude-contained/env.d/` for values that need it:
+
+```dockerfile
+RUN mkdir -p /etc/claude-contained/env.d && \
+    printf '%s\n' \
+      'GOCACHE=${HOME}/.claude-contained/cache/go-build' \
+      'GOMODCACHE=${HOME}/.claude-contained/cache/go-mod' \
+      'PATH=/opt/go/bin:$PATH' \
+      > /etc/claude-contained/env.d/10-go
+```
+
+Fragments are read in filename order. Each nonblank, non-comment line is
+parsed literally; it is never sourced or evaluated by a shell. Only `$HOME`,
+`${HOME}`, `$PATH`, and `${PATH}` references expand, using the environment
+resolved so far. One matching pair of outer single or double quotes is removed,
+matching project-env parsing. This makes fragments composable while strings
+such as `$(command)` and references to every other variable remain text.
+
+The same in-container resolver applies fragments to fresh runs, ordinary
+attach, Zellij startup, and Zellij attach. It runs as the unprivileged user,
+after the entrypoint has completed root setup and generated the sandbox policy.
+Fragments cannot set `HOME`, `HOST_*`, `SRT_*`, `CLAUDE_CONTAINED_*`,
+`STAY_ROOT`, `SSH_AUTH_SOCK`, `GIT_PROTECT_DIRS`, `LD_*`, `BASH_ENV`, `ENV`,
+or `NODE_OPTIONS`, because those values could interfere with
+the privilege drop or sandbox. A refusal is a hard error naming the fragment
+and line.
+
 ### Identity and staleness
 
 The derived image is tagged `claude-contained-layer:<project>-<hash>`, where the hash covers the base image's resolved ID, the layer Dockerfile, and every file in the layer directory. The tag *is* the staleness check: if that image exists the launcher runs it, and if it does not the launcher offers to build it. There is no state file and no explicit build step.

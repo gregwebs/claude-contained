@@ -179,7 +179,7 @@ func TestResolveAttachSingleGoesStraightIn(t *testing.T) {
 	if !dec.Spec.TTY {
 		t.Error("TTY = false, want true")
 	}
-	wantCmd := []string{"srt-run", "/usr/local/bin/zellij-attach", "alpha"}
+	wantCmd := []string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "/usr/local/bin/zellij-attach", "alpha"}
 	if !reflect.DeepEqual(dec.Spec.Command, wantCmd) {
 		t.Errorf("Command = %v, want %v", dec.Spec.Command, wantCmd)
 	}
@@ -420,8 +420,8 @@ func TestAttachCommand(t *testing.T) {
 		srtDisable bool
 		want       []string
 	}{
-		{"sandbox on", false, []string{"srt-run", "/usr/local/bin/zellij-attach", "alpha"}},
-		{"sandbox off", true, []string{"/usr/local/bin/zellij-attach", "alpha"}},
+		{"sandbox on", false, []string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "/usr/local/bin/zellij-attach", "alpha"}},
+		{"sandbox off", true, []string{"/usr/local/bin/tool-env", "/usr/local/bin/zellij-attach", "alpha"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
