@@ -53,7 +53,7 @@ func TestResolveByNameBuildsExec(t *testing.T) {
 	if !dec.Spec.TTY {
 		t.Error("TTY = false, want true")
 	}
-	want := []string{"srt-run", "/opt/claude/claude"}
+	want := []string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "/opt/claude/claude"}
 	if !reflect.DeepEqual(dec.Spec.Command, want) {
 		t.Errorf("Command = %#v, want %#v", dec.Spec.Command, want)
 	}
@@ -291,7 +291,7 @@ func TestCommandDebugShell(t *testing.T) {
 	req.Yolo = true
 
 	got := Command(req)
-	want := []string{"srt-run", "/usr/local/bin/shell-run"}
+	want := []string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "/usr/local/bin/shell-run"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("Command = %#v, want %#v", got, want)
 	}
@@ -309,10 +309,10 @@ func TestCommandSandboxWrapper(t *testing.T) {
 		srtDisable bool
 		want       []string
 	}{
-		{"tool, sandboxed", false, false, []string{"srt-run", "/opt/claude/claude"}},
-		{"tool, no-sandbox", false, true, []string{"/opt/claude/claude"}},
-		{"shell, sandboxed", true, false, []string{"srt-run", "/usr/local/bin/shell-run"}},
-		{"shell, no-sandbox", true, true, []string{"/usr/local/bin/shell-run"}},
+		{"tool, sandboxed", false, false, []string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "/opt/claude/claude"}},
+		{"tool, no-sandbox", false, true, []string{"/usr/local/bin/tool-env", "/opt/claude/claude"}},
+		{"shell, sandboxed", true, false, []string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "/usr/local/bin/shell-run"}},
+		{"shell, no-sandbox", true, true, []string{"/usr/local/bin/tool-env", "/usr/local/bin/shell-run"}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -336,12 +336,12 @@ func TestCommandYoloPlacement(t *testing.T) {
 		wantCmd    []string
 		wantStderr string
 	}{
-		{"claude", []string{"srt-run", "/opt/claude/claude", "--dangerously-skip-permissions"}, ""},
-		{"codex", []string{"srt-run", "codex", "--yolo"}, ""},
-		{"copilot", []string{"srt-run", "copilot", "--yolo"}, ""},
-		{"gemini", []string{"srt-run", "gemini", "--yolo"}, ""},
-		{"vibe", []string{"srt-run", "vibe"}, "Warning: vibe does not support yolo mode\n"},
-		{"bogus", []string{"srt-run", "bogus"}, ""},
+		{"claude", []string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "/opt/claude/claude", "--dangerously-skip-permissions"}, ""},
+		{"codex", []string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "codex", "--yolo"}, ""},
+		{"copilot", []string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "copilot", "--yolo"}, ""},
+		{"gemini", []string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "gemini", "--yolo"}, ""},
+		{"vibe", []string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "vibe"}, "Warning: vibe does not support yolo mode\n"},
+		{"bogus", []string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "bogus"}, ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.tool, func(t *testing.T) {
@@ -375,13 +375,8 @@ func TestExecEnvOrder(t *testing.T) {
 		t.Fatal("Spec is nil")
 	}
 
-	wantPath := "/opt/claude:/home/dev/.sdkman/candidates/maven/current/bin:" +
-		"/home/dev/.sdkman/candidates/jbang/current/bin:/opt/jbr/bin:/h/.local/bin:" +
-		"/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 	want := []runtime.EnvArg{
 		{Key: "HOME", Value: "/h"},
-		{Key: "JAVA_HOME", Value: "/opt/jbr"},
-		{Key: "PATH", Value: wantPath},
 		{Key: "FOO", Value: "bar"},
 		{Key: "BAZ", Value: "qux"},
 	}

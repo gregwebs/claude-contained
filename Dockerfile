@@ -281,7 +281,8 @@ RUN chmod +x /usr/local/bin/srt-settings.sh /usr/local/bin/srt-run \
 
 # ---- Entrypoint (host.local setup + path parity) ---------------------------
 COPY image/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh
+COPY image/tool-env.sh /usr/local/bin/tool-env
+RUN chmod +x /usr/local/bin/entrypoint.sh /usr/local/bin/tool-env
 
 WORKDIR /work
 # HOME is set dynamically in entrypoint based on HOST_HOME

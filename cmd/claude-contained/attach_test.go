@@ -80,8 +80,8 @@ func TestAttachHoldsNoWorktreeLock(t *testing.T) {
 		t.Fatal("replaceProcess was never called")
 	}
 	got := strings.Join(argv, " ")
-	if !strings.HasSuffix(got, "aic-live srt-run /opt/claude/claude") {
-		t.Errorf("argv = %q, want it to end with %q", got, "aic-live srt-run /opt/claude/claude")
+	if !strings.HasSuffix(got, "aic-live /usr/local/bin/tool-env /usr/local/bin/srt-run /opt/claude/claude") {
+		t.Errorf("argv = %q, want it to end with %q", got, "aic-live /usr/local/bin/tool-env /usr/local/bin/srt-run /opt/claude/claude")
 	}
 }
 
@@ -121,8 +121,8 @@ func TestAttachPickerHoldsNoWorktreeLock(t *testing.T) {
 		t.Fatal("replaceProcess was never called")
 	}
 	got := strings.Join(argv, " ")
-	if !strings.HasSuffix(got, "aic-live srt-run /opt/claude/claude") {
-		t.Errorf("argv = %q, want it to end with %q", got, "aic-live srt-run /opt/claude/claude")
+	if !strings.HasSuffix(got, "aic-live /usr/local/bin/tool-env /usr/local/bin/srt-run /opt/claude/claude") {
+		t.Errorf("argv = %q, want it to end with %q", got, "aic-live /usr/local/bin/tool-env /usr/local/bin/srt-run /opt/claude/claude")
 	}
 }
 

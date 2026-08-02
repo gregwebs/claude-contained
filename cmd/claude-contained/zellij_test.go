@@ -67,8 +67,8 @@ func TestZellijAttachHoldsNoWorktreeLock(t *testing.T) {
 		t.Fatal("replaceProcess was never called")
 	}
 	got := strings.Join(argv, " ")
-	if !strings.HasSuffix(got, "aic-z1 srt-run /usr/local/bin/zellij-attach alpha") {
-		t.Errorf("argv = %q, want it to end with %q", got, "aic-z1 srt-run /usr/local/bin/zellij-attach alpha")
+	if !strings.HasSuffix(got, "aic-z1 /usr/local/bin/tool-env /usr/local/bin/srt-run /usr/local/bin/zellij-attach alpha") {
+		t.Errorf("argv = %q, want it to end with %q", got, "aic-z1 /usr/local/bin/tool-env /usr/local/bin/srt-run /usr/local/bin/zellij-attach alpha")
 	}
 }
 

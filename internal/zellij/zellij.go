@@ -48,7 +48,7 @@ const (
 	attachHelper = "/usr/local/bin/zellij-attach"
 	// sandboxWrapper is srt-run; `exec` bypasses the entrypoint, so the attach
 	// path re-applies it (claude-contained:171).
-	sandboxWrapper = "srt-run"
+	sandboxWrapper = "/usr/local/bin/srt-run"
 	// ShellCommand is what --shell runs *under Zellij*: plain bash, not
 	// shell-run (claude-contained:1957-1961).
 	ShellCommand = "bash"
@@ -194,7 +194,7 @@ func resolveAttachByName(req AttachRequest) attach.Decision {
 
 // buildAttachSpec assembles the ExecSpec for a resolved live record. The
 // Zellij attach exec carries no user --env pairs (§3.5), unlike the plain
-// attach execs, which is why ExecEnv is called with a nil pairs slice.
+// attach execs. Layer fragments still reach it through tool-env.
 func buildAttachSpec(req AttachRequest, rec Record) *runtime.ExecSpec {
 	return &runtime.ExecSpec{
 		Container: rec.Container,
@@ -207,7 +207,7 @@ func buildAttachSpec(req AttachRequest, rec Record) *runtime.ExecSpec {
 
 // AttachCommand mirrors build_zellij_attach_cmd (claude-contained:167-173).
 func AttachCommand(session string, srtDisable bool) []string {
-	var cmd []string
+	cmd := []string{attach.ToolEnvPath}
 	if !srtDisable {
 		cmd = append(cmd, sandboxWrapper)
 	}

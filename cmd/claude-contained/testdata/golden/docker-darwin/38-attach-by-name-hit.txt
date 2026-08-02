@@ -10,12 +10,9 @@
 dev
 -e
 HOME=<HOME>
--e
-JAVA_HOME=/opt/jbr
--e
-PATH=/opt/claude:/home/dev/.sdkman/candidates/maven/current/bin:/home/dev/.sdkman/candidates/jbang/current/bin:/opt/jbr/bin:<HOME>/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 aic-myproject
-srt-run
+/usr/local/bin/tool-env
+/usr/local/bin/srt-run
 /opt/claude/claude
 
 --- stdout ---

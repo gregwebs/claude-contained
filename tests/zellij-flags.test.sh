@@ -234,7 +234,7 @@ suite() {
 
   ZELLIJ_STUB_MODE=one launcher_run "$target" "$out" "$err" --zellij --attach --session alpha
   rc=$?
-  [[ $rc -eq 0 ]] && line_has "$out" "exec" && line_has "$out" "aic-z1" && line_has "$out" "srt-run" && line_has "$out" "/usr/local/bin/zellij-attach" && line_has "$out" "alpha"
+  [[ $rc -eq 0 ]] && line_has "$out" "exec" && line_has "$out" "aic-z1" && line_has "$out" "/usr/local/bin/tool-env" && line_has "$out" "/usr/local/bin/srt-run" && line_has "$out" "/usr/local/bin/zellij-attach" && line_has "$out" "alpha"
   _check "--zellij --attach --session NAME execs zellij-attach through srt-run" $?
 
   ZELLIJ_STUB_MODE=one launcher_run "$target" "$out" "$err" --zellij --attach --no-sandbox --session alpha
