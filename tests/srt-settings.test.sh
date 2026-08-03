@@ -59,6 +59,14 @@ jq -e --arg h "$home" '
 ' "$out" >/dev/null
 _check "tool config dirs, contained Claude profile, and /tmp are writable" $?
 
+jq -e --arg h "$home" '
+  .filesystem.allowWrite as $w
+  | ($w | index($h + "/.claude-contained"))
+    and (($w | index($h + "/.m2")) | not)
+    and (($w | index($h + "/.vaadin")) | not)
+' "$out" >/dev/null
+_check "shared state covers layer caches without Maven or Vaadin paths" $?
+
 # 3. Required inside a container: bwrap cannot create privileged namespaces there.
 jq -e '.enableWeakerNestedSandbox == true' "$out" >/dev/null
 _check "enableWeakerNestedSandbox is set" $?

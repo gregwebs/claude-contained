@@ -126,10 +126,11 @@ not encode Java or toolchain paths.
 
 The parser follows the project-env file's literal line and quote rules, but
 expands only complete `$HOME`/`${HOME}` and `$PATH`/`${PATH}` references. An
-explicit process environment value wins over a fragment, while `PATH` and
-`JAVA_HOME` remain fragment-owned because the launcher refuses users from
-setting them. Files are applied in lexical order so later fragments can extend
-the environment resolved by earlier ones.
+explicit process environment value wins over a fragment, while `PATH` alone
+remains fragment-owned so tooling layers can extend it compositionally.
+Ordinary keys, including `JAVA_HOME`, stay user-settable. Files are applied in
+lexical order so later fragments can extend the environment resolved by earlier
+ones.
 
 **Rejected: sourcing fragments.** It would turn a data file into code executed
 before the sandbox. Keys that affect privilege setup, dynamic loading, shell
@@ -187,10 +188,10 @@ story on both runtimes, which is what they were anyway.
 ## The Java built-in is retired
 
 `INCLUDE_JAVA_LAYER` and the unconditional Maven and Vaadin mounts go away. Java
-becomes one shipped example layer and Go another, and the launcher stops knowing
-any toolchain's name. **This decision is recorded here and implemented
-separately** — nothing about Java changes in the change that introduced this
-document.
+becomes a shipped example tooling layer, and the launcher stops knowing any
+toolchain's name. The Java retirement is now implemented; its fragment serves
+launcher runs and attach, while matching image environment serves direct
+devcontainer execution that bypasses the entrypoint.
 
 **Accepted cost:** the contained Maven cache splits from the host's, which
 `-m ~/.m2` restores for anyone who wants it back.
@@ -214,8 +215,9 @@ document.
   overwrites; nothing is lost. There is no lock, because the worktree mutex
   exists to guard mutable *user* state and a duplicated idempotent build wastes
   only time.
-- A project with no layer is byte-identical to before: no hash, no probe, no
-  prompt, no new argument. That holds because the layer directory is resolved
+- A project with no tooling layer takes the plain base-image path: no hash,
+  probe, prompt, or new argument. That holds because the layer directory is
+  resolved
   *before* the base image is probed — an ordering worth preserving deliberately,
   and one the golden suite pins.
 - `--rebuild` never builds a layer. It returns before the layer step, so a

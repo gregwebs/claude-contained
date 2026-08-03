@@ -78,8 +78,6 @@ write_paths=(
   "${_home}/.copilot"
   "${_home}/.gemini"
   "${_home}/.vibe"
-  "${_home}/.m2"
-  "${_home}/.vaadin"
   "${_home}/.agents"
   "${_home}/.local"
   "${_home}/.cache"

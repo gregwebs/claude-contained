@@ -53,9 +53,7 @@ suite() {
     "$home_dir/.codex" \
     "$home_dir/.copilot" \
     "$home_dir/.gemini" \
-    "$home_dir/.vibe" \
-    "$home_dir/.m2" \
-    "$home_dir/.vaadin"
+    "$home_dir/.vibe"
   : > "$home_dir/.claude-contained/.claude.json"
   ln -s "$home_dir/.claude-contained/.claude.json" "$home_dir/.claude.json"
 

@@ -1,5 +1,5 @@
 {
-  "name": "Claude Contained (Java/Spring)",
+  "name": "Claude Contained",
   "image": "claude-contained:latest",
 
   // Path parity: disable default mount, use original paths
@@ -14,20 +14,16 @@
     "source=${localEnv:HOME}/.claude/agents,target=${localEnv:HOME}/.claude/agents,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.claude/commands,target=${localEnv:HOME}/.claude/commands,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.claude/plugins,target=${localEnv:HOME}/.claude/plugins,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/.m2,target=${localEnv:HOME}/.m2,type=bind,consistency=cached",
-    "source=${localEnv:HOME}/.vaadin,target=${localEnv:HOME}/.vaadin,type=bind,consistency=cached",
     "source=${localEnv:HOME}/.gitconfig,target=${localEnv:HOME}/.gitconfig,type=bind,readonly"
   ],
 
   "containerEnv": {
     "DEVCONTAINER": "true",
-    "HOME": "${localEnv:HOME}",
-    "JAVA_HOME": "/opt/jbr",
-    "JAVA_TOOL_OPTIONS": ""
+    "HOME": "${localEnv:HOME}"
   },
 
   "remoteEnv": {
-    "PATH": "/opt/claude:/opt/jbr/bin:${containerEnv:PATH}"
+    "PATH": "/opt/claude:${containerEnv:PATH}"
   },
 
   "remoteUser": "dev",
@@ -35,23 +31,7 @@
 
   "customizations": {
     "vscode": {
-      "extensions": [
-        "vscjava.vscode-java-pack",
-        "vmware.vscode-boot-dev-pack",
-        "vaadin.vaadin-vscode",
-        "gabrielbb.vscode-lombok",
-        "eamodio.gitlens"
-      ],
-      "settings": {
-        "java.jdt.ls.java.home": "/opt/jbr",
-        "java.jdt.ls.vmargs": "-XX:+UseG1GC -XX:HotswapAgent=disabled -XX:GCTimeRatio=4 -XX:AdaptiveSizePolicyWeight=90 -Dsun.zip.disableMemoryMapping=true -Xmx2G -Xms100m -Xlog:disable",
-        "java.configuration.runtimes": [
-          { "name": "JavaSE-25", "path": "/opt/jbr", "default": true }
-        ],
-        "spring-boot.ls.java.home": "/opt/jbr"
-      }
+      "extensions": ["eamodio.gitlens"]
     }
   },
-
-  "forwardPorts": [8080, 5005]
 }

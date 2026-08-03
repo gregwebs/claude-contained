@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	"claude-contained/internal/cli"
+	"claude-contained/internal/env"
 	"claude-contained/internal/host"
 	"claude-contained/internal/runtime"
 	"claude-contained/internal/zellij"
@@ -100,8 +101,6 @@ func Build(cfg cli.Config, h host.State, f Facts, prof runtime.Profile, ans Answ
 		MkdirAll{paths.CopilotDir},
 		MkdirAll{paths.GeminiDir},
 		MkdirAll{paths.VibeDir},
-		MkdirAll{paths.M2Dir},
-		MkdirAll{paths.VaadinDir},
 	)
 
 	// The Zellij session store persists across container lifetimes; the runtime
@@ -192,8 +191,6 @@ func Build(cfg cli.Config, h host.State, f Facts, prof runtime.Profile, ans Answ
 		runtime.MountArg{Src: paths.CopilotDir, Dst: paths.CopilotDir},
 		runtime.MountArg{Src: paths.GeminiDir, Dst: paths.GeminiDir},
 		runtime.MountArg{Src: paths.VibeDir, Dst: paths.VibeDir},
-		runtime.MountArg{Src: paths.M2Dir, Dst: paths.M2Dir},
-		runtime.MountArg{Src: paths.VaadinDir, Dst: paths.VaadinDir},
 		runtime.MountArg{Src: f.ProjectDir, Dst: f.ProjectDir},
 	)
 
@@ -202,6 +199,7 @@ func Build(cfg cli.Config, h host.State, f Facts, prof runtime.Profile, ans Answ
 	for _, e := range f.Env {
 		add(runtime.EnvArg{Key: e.Key, Value: e.Value})
 	}
+	add(runtime.EnvArg{Key: env.ExplicitKeysMarker, Value: env.ExplicitKeysValue(f.Env)})
 
 	// Claude extension resources are mounted individually so the contained
 	// profile can share them with the host profile.

@@ -234,5 +234,6 @@ func ExecEnv(home string, pairs []env.Pair) []runtime.EnvArg {
 	for _, p := range pairs {
 		out = append(out, runtime.EnvArg{Key: p.Key, Value: p.Value})
 	}
+	out = append(out, runtime.EnvArg{Key: env.ExplicitKeysMarker, Value: env.ExplicitKeysValue(pairs)})
 	return out
 }

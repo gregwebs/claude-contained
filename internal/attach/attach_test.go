@@ -379,6 +379,7 @@ func TestExecEnvOrder(t *testing.T) {
 		{Key: "HOME", Value: "/h"},
 		{Key: "FOO", Value: "bar"},
 		{Key: "BAZ", Value: "qux"},
+		{Key: env.ExplicitKeysMarker, Value: "FOO,BAZ"},
 	}
 	if !reflect.DeepEqual(dec.Spec.Env, want) {
 		t.Errorf("Env = %#v, want %#v", dec.Spec.Env, want)
