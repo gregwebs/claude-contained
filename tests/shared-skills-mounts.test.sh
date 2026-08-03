@@ -57,7 +57,14 @@ suite() {
   file_parent="${targets}/file parent"
   nested_target="${targets}/nested target"
   system_target="${targets}/system target"
-  mkdir -p "$dir_target" "$file_parent" "$nested_target" "$system_target" "${home}/.codex/skills/.system"
+  # The shared dir carries its own `.system` mount point so the Codex
+  # system-skills remount below can land on runtimes that cannot create a mount
+  # point under the read-only shared mount (the Apple target on macOS; see
+  # issue #25). Its absence is the refusal path, covered by the deterministic
+  # unit tests in internal/plan/sharedskills_test.go rather than here, since this
+  # suite selects Docker for both targets on Linux CI.
+  mkdir -p "$dir_target" "$file_parent" "$nested_target" "$system_target" \
+    "${home}/.codex/skills/.system" "${share}/.system"
   printf 'name: linked-file\n' > "${file_parent}/skill file.md"
   ln -s "$dir_target" "${share}/dir-link"
   ln -s "$dir_target" "${share}/dir-link-duplicate"

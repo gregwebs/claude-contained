@@ -14,7 +14,27 @@ type sharedSkillsSpec struct{ dst, dstParent string }
 // matters because bash's `exit 2` happens mid-function, after several
 // `mkdir -p` calls and possibly some `--mount` registrations have already
 // run -- those mutations survive the abort, and so does this replay's prefix.
-func sharedSkillsMounts(reg *mountRegistry, paths hostPaths, ss SharedSkills) ([]Step, []runtime.Arg, error) {
+func sharedSkillsMounts(reg *mountRegistry, paths hostPaths, ss SharedSkills, remountNeedsMountpoint bool) ([]Step, []runtime.Arg, error) {
+	// Fail fast, before any mkdir or mount is emitted: on a runtime that cannot
+	// create a bind destination under an already-applied read-only mount, the
+	// Codex system-skills remount below (dst <codex>/skills/.system, nested
+	// under the read-only shared mount at <codex>/skills) has nowhere to land
+	// unless the shared dir itself carries a `.system` mountpoint. Left to the
+	// runtime this surfaces as a cryptic "mount failed ... failed to create
+	// directory '.system'" (EROFS) at container start; caught here it is an
+	// actionable usage error with the one-line fix. See
+	// github.com/gregwebs/claude-contained/issues/25 for the root-cause
+	// analysis and the repair options this deliberately leaves open.
+	if ss.CodexSystemDir && remountNeedsMountpoint && !ss.DirHasSystem {
+		return nil, nil, &ShareSkillsError{Lines: []string{
+			"error: --share-skills cannot expose Codex's built-in system skills here",
+			"       This container runtime cannot create a mount point beneath a read-only mount,",
+			"       and " + ss.Dir + " has no '.system' entry to hold " + paths.CodexDir + "/skills/.system.",
+			"       Create the mount point in the shared skills directory, then re-run:",
+			"           mkdir -p " + ss.Dir + "/.system",
+		}}
+	}
+
 	var steps []Step
 	var args []runtime.Arg
 

@@ -150,6 +150,17 @@ type Profile struct {
 	// entire DNS paragraph, a Docker-only "Build the image" block, and even
 	// example column alignment -- so it is two literal texts, not a template.
 	Help string
+	// ReadonlyRemountNeedsExistingMountpoint reports that this runtime cannot
+	// create a bind-mount destination underneath an already-applied read-only
+	// mount. The Apple container runtime materializes binds sequentially into
+	// the guest and fails with EROFS ("failed to create directory") when a
+	// nested mount's destination does not already exist in the read-only
+	// parent; Docker/runc creates every destination before the read-only pass,
+	// so it does not. --share-skills' Codex system-skills remount is the one
+	// place plan.Build emits such a nested mount, so it consults this flag to
+	// fail with an actionable message instead of letting the runtime surface a
+	// cryptic errno at container start (see internal/plan/sharedskills.go).
+	ReadonlyRemountNeedsExistingMountpoint bool
 }
 
 // Runtime is the seam. Profile is available without touching the system; the

@@ -155,6 +155,13 @@ func scanSharedSkills(home, dir string) plan.SharedSkills {
 		ss.CodexSystemDir = true
 	}
 
+	// A `.system` mountpoint inside the shared dir is what lets the Codex
+	// system-skills remount land on a runtime that cannot create it under the
+	// read-only shared mount -- see plan.SharedSkills.DirHasSystem.
+	if info, err := os.Stat(filepath.Join(dir, ".system")); err == nil && info.IsDir() {
+		ss.DirHasSystem = true
+	}
+
 	// One seen-set shared across both scans, matching bash's single global
 	// shared_skill_seen_scan_dirs array.
 	seen := map[string]bool{}

@@ -309,7 +309,7 @@ func Build(cfg cli.Config, h host.State, f Facts, prof runtime.Profile, ans Answ
 	// claude-contained:1889-1891, run immediately after the extra-mount loop
 	// and before the node_modules block below.
 	if f.SharedSkills.Dir != "" {
-		steps, sharedArgs, err := sharedSkillsMounts(reg, paths, f.SharedSkills)
+		steps, sharedArgs, err := sharedSkillsMounts(reg, paths, f.SharedSkills, prof.ReadonlyRemountNeedsExistingMountpoint)
 		p.Steps = append(p.Steps, steps...)
 		add(sharedArgs...)
 		if err != nil {
