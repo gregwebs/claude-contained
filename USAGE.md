@@ -200,7 +200,16 @@ The launcher overrides `BASE_IMAGE` with the base image's resolved ID, so the im
 
 Nothing validates the layer's contents. It can break the base image's invariants, and the container belongs to the project, so examples and this documentation carry that weight rather than a checker.
 
-Copy a starting point from the [shipped tooling-layer examples](examples/tooling-layers/README.md), including the [Java example](examples/tooling-layers/java/README.md), rather than adding a toolchain to the base image.
+Complete starting points live under [`examples/tooling-layers/`](examples/tooling-layers/).
+For example, copy the Go build context into a project:
+
+```bash
+mkdir -p .claude-contained/layer
+cp -R /path/to/claude-contained/examples/tooling-layers/go/. .claude-contained/layer/
+```
+
+This repository uses its own `.claude-contained/layer/` to provide the exact Go,
+ShellCheck, and golangci-lint versions required by `make quality`.
 
 ### Runtime environment
 

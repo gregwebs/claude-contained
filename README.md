@@ -8,6 +8,7 @@ The goal is a normal local workflow with a smaller host footprint: alias a tool 
 
 - [Usage](USAGE.md) — flags, examples, runtime behavior, networking, sandboxing, and troubleshooting
 - [Contributing](CONTRIBUTING.md) — development setup, quality checks, architecture, and contributor guardrails
+- [Tooling-layer examples](examples/tooling-layers/) — project-owned toolchains, including a checksum-verified Go layer
 - [Devcontainer template](devcontainer/README.md) — VS Code devcontainer setup and customization
 - [Tooling layer examples](examples/tooling-layers/README.md) — project-owned toolchains built on the base image
 

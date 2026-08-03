@@ -29,7 +29,8 @@ suite() {
   local captured_rc=0
   local fails=0
 
-  harness_root="$(mktemp -d /private/tmp/claude-contained-cli-front-end.XXXXXX)"
+  harness_root="$(mktemp -d /private/tmp/claude-contained-cli-front-end.XXXXXX 2>/dev/null \
+    || mktemp -d "${TMPDIR:-/tmp}/claude-contained-cli-front-end.XXXXXX")"
   active_harness="$harness_root"
   stub_dir="$harness_root/stubs"
   home_dir="$harness_root/home"

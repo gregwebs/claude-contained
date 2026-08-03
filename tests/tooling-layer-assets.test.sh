@@ -104,3 +104,34 @@ check "devcontainer guide documents a project tooling-layer build" $?
 
 printf '%d passed, %d failed\n' "$passes" "$failures"
 [[ "$failures" -eq 0 ]]
+
+# Verify shipped tooling layers stay pinned to the repository's quality gate.
+ROOT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+REPO_LAYER="$ROOT_DIR/.claude-contained/layer"
+EXAMPLE_LAYER="$ROOT_DIR/examples/tooling-layers/go"
+
+assert_contains() {
+  local file="$1" text="$2"
+  if ! grep -Fq "$text" "$file"; then
+    echo "missing from ${file#$ROOT_DIR/}: $text" >&2
+    exit 1
+  fi
+}
+
+assert_contains "$EXAMPLE_LAYER/Dockerfile" 'ARG GO_VERSION=1.24.3'
+assert_contains "$REPO_LAYER/Dockerfile" 'ARG GO_VERSION=1.24.3'
+assert_contains "$REPO_LAYER/Dockerfile" 'ARG SHELLCHECK_VERSION=0.11.0'
+assert_contains "$REPO_LAYER/Dockerfile" 'ARG GOLANGCI_LINT_VERSION=2.12.2'
+assert_contains "$REPO_LAYER/Dockerfile" 'sha256sum --check -'
+assert_contains "$EXAMPLE_LAYER/Dockerfile" 'sha256sum --check -'
+
+assert_contains "$ROOT_DIR/go.mod" 'go 1.24'
+assert_contains "$ROOT_DIR/Makefile" 'SHELLCHECK_REQUIRED_VERSION := 0.11.0'
+assert_contains "$ROOT_DIR/Makefile" 'GOLANGCI_LINT_REQUIRED_VERSION := 2.12.2'
+
+cmp "$EXAMPLE_LAYER/10-go" "$REPO_LAYER/10-go"
+assert_contains "$EXAMPLE_LAYER/10-go" 'GOTOOLCHAIN=local'
+assert_contains "$EXAMPLE_LAYER/10-go" 'GOCACHE=${HOME}/.claude-contained/cache/go-build'
+assert_contains "$EXAMPLE_LAYER/10-go" 'GOMODCACHE=${HOME}/.claude-contained/cache/go-mod'
+
+echo "tooling layer assets: ok"
