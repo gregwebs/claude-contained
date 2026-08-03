@@ -18,6 +18,7 @@ set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(dirname "$here")"
+host_kernel="$(uname -s)"
 
 # A developer's exported build-context or tooling-layer override must not change
 # any result here, the same way an ambient CLAUDE_CONTAINED_RUNTIME must not.
@@ -203,8 +204,13 @@ suite() {
 
   run "$target" -N -s -S -C "$proj" --container-runtime=apple
   rc=$?
-  [[ $rc -eq 0 ]] && line_has "$out" "--ssh"
-  _check "--container-runtime=apple selects Apple Containers" $?
+  if [[ "$host_kernel" == Darwin ]]; then
+    [[ $rc -eq 0 ]] && line_has "$out" "--ssh"
+    _check "--container-runtime=apple selects Apple Containers" $?
+  else
+    [[ $rc -eq 2 ]] && file_has "$err" "available only on macOS"
+    _check "--container-runtime=apple is rejected off macOS" $?
+  fi
 
   CLAUDE_CONTAINED_RUNTIME=docker run "$target" -N -s -S -C "$proj"
   rc=$?
@@ -213,8 +219,13 @@ suite() {
 
   CLAUDE_CONTAINED_RUNTIME=docker run "$target" -N -s -S -C "$proj" --container-runtime=apple
   rc=$?
-  [[ $rc -eq 0 ]] && line_has "$out" "--ssh"
-  _check "the flag beats CLAUDE_CONTAINED_RUNTIME" $?
+  if [[ "$host_kernel" == Darwin ]]; then
+    [[ $rc -eq 0 ]] && line_has "$out" "--ssh"
+    _check "the flag beats CLAUDE_CONTAINED_RUNTIME" $?
+  else
+    [[ $rc -eq 2 ]] && file_has "$err" "available only on macOS"
+    _check "the apple flag beats the environment before host validation" $?
+  fi
 
   # --- the build-context flag ---------------------------------------------
   run "$target" --build-context

@@ -1,0 +1,6 @@
+# Keep downloaded modules and build artifacts in the host-backed shared state.
+GOCACHE=${HOME}/.claude-contained/cache/go-build
+GOMODCACHE=${HOME}/.claude-contained/cache/go-mod
+# Refuse Go's automatic toolchain download so version drift fails clearly.
+GOTOOLCHAIN=local
+PATH=/usr/local/go/bin:$PATH

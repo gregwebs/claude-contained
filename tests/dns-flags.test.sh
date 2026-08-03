@@ -9,6 +9,7 @@ set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(dirname "$here")"
+host_kernel="$(uname -s)"
 unset CLAUDE_CONTAINED_LOG_LEVEL
 
 fails=0
@@ -48,33 +49,37 @@ docker_target="${targets[1]:-}"
 
 echo "== ${apple_target} DNS =="
 
-out="$(
-  unset CLAUDE_DNS
-  launcher_argv "$apple_target"
-)"
-line_has "$out" "--dns" && line_has "$out" "1.1.1.1"
-_check "Apple Containers defaults to a stable resolver" $?
+if [[ "$host_kernel" == Darwin ]]; then
+  out="$(
+    unset CLAUDE_DNS
+    launcher_argv "$apple_target"
+  )"
+  line_has "$out" "--dns" && line_has "$out" "1.1.1.1"
+  _check "Apple Containers defaults to a stable resolver" $?
 
-out="$(
-  export CLAUDE_DNS=system
-  launcher_argv "$apple_target"
-)"
-if [[ "$(line_count "$out" "--dns")" -eq 0 ]]; then check_rc=0; else check_rc=1; fi
-_check "CLAUDE_DNS=system opts ${apple_target} back into runtime DNS" "$check_rc"
+  out="$(
+    export CLAUDE_DNS=system
+    launcher_argv "$apple_target"
+  )"
+  if [[ "$(line_count "$out" "--dns")" -eq 0 ]]; then check_rc=0; else check_rc=1; fi
+  _check "CLAUDE_DNS=system opts ${apple_target} back into runtime DNS" "$check_rc"
 
-out="$(
-  export CLAUDE_DNS=9.9.9.9,8.8.8.8
-  launcher_argv "$apple_target"
-)"
-[[ "$(line_count "$out" "--dns")" -eq 2 ]] && line_has "$out" "9.9.9.9" && line_has "$out" "8.8.8.8"
-_check "CLAUDE_DNS list is expanded for ${apple_target}" $?
+  out="$(
+    export CLAUDE_DNS=9.9.9.9,8.8.8.8
+    launcher_argv "$apple_target"
+  )"
+  [[ "$(line_count "$out" "--dns")" -eq 2 ]] && line_has "$out" "9.9.9.9" && line_has "$out" "8.8.8.8"
+  _check "CLAUDE_DNS list is expanded for ${apple_target}" $?
 
-out="$(
-  unset CLAUDE_DNS
-  launcher_argv "$apple_target" --dns 4.4.4.4
-)"
-[[ "$(line_count "$out" "--dns")" -eq 1 ]] && line_has "$out" "4.4.4.4" && ! line_has "$out" "1.1.1.1"
-_check "explicit --dns overrides ${apple_target} default" $?
+  out="$(
+    unset CLAUDE_DNS
+    launcher_argv "$apple_target" --dns 4.4.4.4
+  )"
+  [[ "$(line_count "$out" "--dns")" -eq 1 ]] && line_has "$out" "4.4.4.4" && ! line_has "$out" "1.1.1.1"
+  _check "explicit --dns overrides ${apple_target} default" $?
+else
+  echo "  SKIP: Apple Containers is unavailable off macOS"
+fi
 
 if [[ -z "$docker_target" ]]; then
   echo "== Docker DNS: SKIP (no second target given) =="
