@@ -9,6 +9,7 @@ The goal is a normal local workflow with a smaller host footprint: alias a tool 
 - [Usage](USAGE.md) — flags, examples, runtime behavior, networking, sandboxing, and troubleshooting
 - [Contributing](CONTRIBUTING.md) — development setup, quality checks, architecture, and contributor guardrails
 - [Devcontainer template](devcontainer/README.md) — VS Code devcontainer setup and customization
+- [Tooling layer examples](examples/tooling-layers/README.md) — project-owned toolchains built on the base image
 
 ## Important Caveats
 
@@ -16,7 +17,7 @@ The goal is a normal local workflow with a smaller host footprint: alias a tool 
 - **`~/.claude.json` is relocated**: On first run, your `~/.claude.json` is moved to `~/.claude-contained/.claude.json` and replaced with a symlink. This allows containers to share the file. **If you delete `~/.claude-contained/`, you will lose your Claude account state and some settings.** You will have to log in again.
 - **Contained Claude settings are separate**: Contained runs use `~/.claude-contained/claude` as their Claude profile by default and do not mount host `~/.claude/settings.json`. Host Claude extension resources (`skills`, `agents`, `commands`, and `plugins`) and `~/.claude-contained/.claude.json` are still shared.
 - **Concurrent contained and uncontained sessions share some state**: Regular and contained Claude use separate settings by default, but they share account state and extension resources. Concurrent writes to those shared files may conflict.
-- **Codex and PATH**: Codex runs commands through `bash -lc`, which sources `/etc/profile` and resets PATH to the Debian default. Tools installed outside standard locations must be symlinked into `/usr/local/bin/`. The optional Java layer already provides links for `java`, `javac`, `jar`, `mvn`, and `jbang`.
+- **Codex and PATH**: Codex runs commands through `bash -lc`, which sources `/etc/profile` and resets PATH to the Debian default. Tooling layers should link commands installed outside standard locations into `/usr/local/bin/`.
 - **Devcontainer and standalone sessions share a profile**: Do not run the VS Code devcontainer and standalone launchers simultaneously against the same contained Claude profile.
 
 ## Quick Start
@@ -38,12 +39,6 @@ make install                        # symlinks it to ~/.local/bin/claude-contain
 
    ```bash
    container build --platform linux/arm64 -t claude-contained .
-   ```
-
-   Java/IntelliJ tooling is included by default. For a smaller image without it:
-
-   ```bash
-   container build --platform linux/arm64 --build-arg INCLUDE_JAVA_LAYER=false -t claude-contained .
    ```
 
 2. Optionally set up aliases:
@@ -72,8 +67,6 @@ make install                        # symlinks it to ~/.local/bin/claude-contain
    ```bash
    docker build --platform linux/arm64 -t claude-contained .
    ```
-
-   Add `--build-arg INCLUDE_JAVA_LAYER=false` for the smaller image.
 
 2. Select the Docker runtime:
 
@@ -107,6 +100,6 @@ The contained Claude profile and the other tools' config directories are bind-mo
 - **Defense in depth**: The container or VM is the isolation boundary. The included sandbox runtime adds a deny-by-default network guardrail around the tool process.
 - **Host services**: Containers use `host.local` for reachable host services; Docker can additionally forward localhost-bound services with `-H`.
 - **Image files**: Files under `image/` are copied into the image and kept out of the Dockerfile so the Dockerfile stays below Apple Containers' 16k file limit.
-- **Project toolchains**: a project can check in a tooling layer Dockerfile that the launcher builds on top of the base image and runs in its place. See [Tooling Layers](USAGE.md#tooling-layers).
+- **Project toolchains**: a project can check in a tooling layer Dockerfile that the launcher builds on top of the base image and runs in its place. See [Tooling Layers](USAGE.md#tooling-layers) and the [shipped examples](examples/tooling-layers/README.md).
 
 For implementation details and architectural constraints, see [CONTRIBUTING.md](CONTRIBUTING.md) and the decisions under [`docs/adr/`](docs/adr/).

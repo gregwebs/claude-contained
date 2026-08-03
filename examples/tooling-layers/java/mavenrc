@@ -1,0 +1,8 @@
+# Devcontainers replace HOME after image ENV has already been expanded. Resolve
+# the image's literal template when Maven starts; launcher and attach values have
+# already been expanded by tool-env and must remain authoritative.
+claude_contained_maven_repo_template='-Dmaven.repo.local=$HOME/.claude-contained/cache/maven'
+if [ "${MAVEN_OPTS-}" = "$claude_contained_maven_repo_template" ]; then
+  MAVEN_OPTS="-Dmaven.repo.local=${HOME:?HOME must be set}/.claude-contained/cache/maven"
+fi
+unset claude_contained_maven_repo_template

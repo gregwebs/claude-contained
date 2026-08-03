@@ -1,19 +1,8 @@
-# Claude Code + JetBrains Runtime (JBR) + HotswapAgent (optional layer) + Python
-
-# ---- Java layer toggle -------------------------------------------------------
-# Set to "true" (--build-arg INCLUDE_JAVA_LAYER=true) to build the "java-true"
-# stage instead of "java-false" below, skipping JBR, HotswapAgent, jdtls, Maven,
-# and JBang for a smaller image when Java isn't needed.
-ARG INCLUDE_JAVA_LAYER=false
-
-# ---- Base stage: everything except the optional Java/IntelliJ layer ---------
+# Claude Code and companion coding agents in a toolchain-neutral base image.
 FROM node:24-bookworm-slim AS base
 
-# ---- System packages + custom packages (single apt-get update) -------------
-# Use glob trick: Dockerfile always exists, custom-packages.txt is optional
-COPY Dockerfile custom-packages.tx[t] /tmp/
+# ---- System packages --------------------------------------------------------
 RUN set -eux; \
-    # Base packages
     BASE_PACKAGES=" \
       git make openssh-client ca-certificates ripgrep jq \
       curl bash xz-utils unzip tzdata \
@@ -23,19 +12,8 @@ RUN set -eux; \
       libcups2 libdbus-1-3 libdrm2 libgbm1 libgtk-3-0 \
       libnspr4 libnss3 libpango-1.0-0 libxcomposite1 libxdamage1 \
       libxfixes3 libxkbcommon0 libxrandr2 libxtst6 xvfb zip unzip bubblewrap"; \
-    \
-    # Extract custom packages (non-comment, non-empty lines)
-    CUSTOM_PACKAGES=""; \
-    if [ -f /tmp/custom-packages.txt ]; then \
-      CUSTOM_PACKAGES=$(grep -v '^#' /tmp/custom-packages.txt | grep -v '^[[:space:]]*$' | tr '\n' ' ' || true); \
-      echo "Custom packages: [$CUSTOM_PACKAGES]"; \
-      rm -f /tmp/custom-packages.txt; \
-    fi; \
-    \
-    # Single apt-get update for all packages
     apt-get update && apt-get install -y --no-install-recommends \
       $BASE_PACKAGES \
-      $CUSTOM_PACKAGES \
     && rm -rf /var/lib/apt/lists/*
 
 # ---- Install git-secrets ----------------------------------------------------
@@ -141,108 +119,6 @@ RUN chmod +x /opt/google/chrome/chrome
 RUN useradd -m -s /bin/bash dev \
   && mkdir -p /work \
   && chown -R dev:dev /work /home/dev /ms-playwright
-
-# ---- Java layer: included -----------------------------------------------------
-FROM base AS java-true
-
-# Use the jbrsdk flavor (full JDK) so developer tools like javac/javap/jar are
-# available; the plain "jbr" flavor is runtime-only and omits them.
-ARG JBR_VERSION=25.0.1
-ARG JBR_BUILD=b268.52
-ARG JBR_FLAVOR=jbrsdk
-ARG JBR_BASE_URL=https://cache-redirector.jetbrains.com/intellij-jbr
-ARG HOTSWAP_AGENT_VERSION=2.0.3
-ARG JDTLS_VERSION=1.40.0
-ARG JDTLS_TIMESTAMP=202409261450
-
-# ---- Install JetBrains Runtime -----------------------------------------------
-RUN set -eux; \
-    ARCH="$(dpkg --print-architecture)"; \
-    case "$ARCH" in \
-      arm64)  JBR_ARCH="aarch64" ;; \
-      amd64)  JBR_ARCH="x64" ;; \
-      *)      echo "Unsupported architecture: $ARCH"; exit 1 ;; \
-    esac; \
-    FILE="${JBR_FLAVOR}-${JBR_VERSION}-linux-${JBR_ARCH}-${JBR_BUILD}.tar.gz"; \
-    URL="${JBR_BASE_URL}/${FILE}"; \
-    echo "Downloading: $URL"; \
-    mkdir -p /opt/jbr; \
-    curl -fL "$URL" -o /tmp/jbr.tar.gz; \
-    tar -xzf /tmp/jbr.tar.gz -C /opt/jbr --strip-components=1; \
-    rm -f /tmp/jbr.tar.gz; \
-    /opt/jbr/bin/java -version
-
-ENV JAVA_HOME=/opt/jbr
-ENV PATH="$JAVA_HOME/bin:$PATH"
-
-# ---- Install HotswapAgent ---------------------------------------------------
-RUN set -eux; \
-    mkdir -p /opt/jbr/lib/hotswap; \
-    curl -fL \
-      "https://repo1.maven.org/maven2/org/hotswapagent/hotswap-agent/${HOTSWAP_AGENT_VERSION}/hotswap-agent-${HOTSWAP_AGENT_VERSION}.jar" \
-      -o /opt/jbr/lib/hotswap/hotswap-agent.jar
-
-# ---- HotswapAgent global configuration --------------------------------------
-COPY image/hotswap-agent.properties /opt/jbr/lib/hotswap/hotswap-agent.properties
-
-# HotSwap always on (JBR 17/21/25) - requires G1 or Serial GC
-# --add-opens flags enable deep reflection for HotswapAgent class redefinition
-ENV JAVA_TOOL_OPTIONS="\
-  -XX:+UseG1GC \
-  -XX:+AllowEnhancedClassRedefinition \
-  -XX:+ClassUnloading \
-  -XX:HotswapAgent=fatjar \
-  --add-opens=java.base/java.lang=ALL-UNNAMED \
-  --add-opens=java.base/java.lang.reflect=ALL-UNNAMED \
-  --add-opens=java.base/java.io=ALL-UNNAMED \
-  --add-opens=java.base/sun.nio.ch=ALL-UNNAMED \
-  --add-opens=java.base/sun.security.action=ALL-UNNAMED \
-  --add-opens=java.base/jdk.internal.loader=ALL-UNNAMED \
-  --add-opens=java.desktop/java.beans=ALL-UNNAMED \
-  --add-opens=java.desktop/com.sun.beans=ALL-UNNAMED \
-  --add-opens=java.desktop/com.sun.beans.introspect=ALL-UNNAMED \
-  --add-opens=java.desktop/com.sun.beans.util=ALL-UNNAMED \
-  -Dvaadin.productionMode=false \
-  -Dspring.devtools.restart.enabled=false"
-
-# ---- Eclipse JDT Language Server (jdtls) ------------------------------------
-RUN set -eux; \
-    mkdir -p /opt/jdtls; \
-    curl -fL \
-      "https://download.eclipse.org/jdtls/milestones/${JDTLS_VERSION}/jdt-language-server-${JDTLS_VERSION}-${JDTLS_TIMESTAMP}.tar.gz" \
-      -o /tmp/jdtls.tar.gz; \
-    tar -xzf /tmp/jdtls.tar.gz -C /opt/jdtls; \
-    rm -f /tmp/jdtls.tar.gz; \
-    ln -s /opt/jdtls/bin/jdtls /usr/local/bin/jdtls
-
-# ---- Install SDKMAN! with Maven + JBang (as dev user) ----------------------
-USER dev
-RUN set -eux; \
-    curl -s "https://get.sdkman.io?rcupdate=false" | bash; \
-    echo 'source "/home/dev/.sdkman/bin/sdkman-init.sh"' >> /home/dev/.bashrc; \
-    bash -c 'source "/home/dev/.sdkman/bin/sdkman-init.sh" && sdk install maven'; \
-    bash -c 'source "/home/dev/.sdkman/bin/sdkman-init.sh" && sdk install jbang'; \
-    bash -c 'source "/home/dev/.sdkman/bin/sdkman-init.sh" && mvn --version'; \
-    bash -c 'source "/home/dev/.sdkman/bin/sdkman-init.sh" && jbang version'; \
-    echo "SDKMAN! setup complete - Maven and JBang installed"
-USER root
-
-# ---- Symlink key binaries to /usr/local/bin ---------------------------------
-# Codex runs `bash -lc` which sources /etc/profile, clobbering inherited PATH.
-# Symlinks ensure JBR/Maven/JBang binaries are found via the default Debian PATH.
-RUN set -eux; \
-    for bin in /opt/jbr/bin/*; do \
-      ln -sf "$bin" "/usr/local/bin/$(basename "$bin")"; \
-    done; \
-    ln -sf /home/dev/.sdkman/candidates/maven/current/bin/mvn /usr/local/bin/mvn; \
-    ln -sf /home/dev/.sdkman/candidates/jbang/current/bin/jbang /usr/local/bin/jbang
-
-# ---- Java layer: excluded ----------------------------------------------------
-# No JBR, HotswapAgent, jdtls, Maven, or JBang (INCLUDE_JAVA_LAYER=false)
-FROM base AS java-false
-
-# ---- Select the Java layer ---------------------------------------------------
-FROM java-${INCLUDE_JAVA_LAYER} AS final
 
 # ---- Claude Code clipboard workaround --------------------------------------
 # Force the classic inline TUI renderer ("tui": "default") inside the container.

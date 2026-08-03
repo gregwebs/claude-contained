@@ -20,6 +20,12 @@ check() {
 }
 
 mkdir -p "$tmp/fragments"
+
+out="$(HOME=/host/home PATH=/bin:/usr/bin "$resolver" --directory "$tmp/missing" \
+  sh -c 'printf "%s\n%s\n%s\n%s" "${JAVA_HOME-unset}" "${JAVA_TOOL_OPTIONS-unset}" "${MAVEN_OPTS-unset}" "$PATH"')"
+if [[ "$out" == $'unset\nunset\nunset\n/host/home/.local/bin:/opt/claude:/bin:/usr/bin' ]]; then status=0; else status=1; fi
+check "base resolution adds only generic paths and no Java environment" "$status"
+
 printf 'CACHE=${HOME}/.cache/tool\nPATH=${HOME}/bin:$PATH\nLITERAL=$(touch /tmp/must-not-run)\n' >"$tmp/fragments/10-tool"
 printf 'PATH=/opt/tool/bin:$PATH\n' >"$tmp/fragments/20-path"
 
@@ -40,12 +46,53 @@ for key in STAY_ROOT SRT_SETTINGS_PATH HOST_UID HOME LD_PRELOAD LD_AUDIT BASH_EN
   check "fragment refuses $key" $?
 done
 
-printf 'JAVA_HOME=/opt/custom-java\nPATH=$JAVA_HOME/bin:$PATH\n' >"$tmp/fragments/10-tool"
+printf '%s\n' \
+  'JAVA_HOME=/opt/custom-java' \
+  'JAVA_TOOL_OPTIONS=-XX:+UseG1GC -XX:+AllowEnhancedClassRedefinition -Dvaadin.productionMode=false' \
+  'MAVEN_OPTS=-Dmaven.repo.local=$HOME/.claude-contained/cache/maven' \
+  'PATH=/opt/custom-java/bin:/opt/maven/bin:/opt/jbang/bin:$PATH' \
+  >"$tmp/fragments/10-tool"
 rm -f "$tmp/fragments/20-path"
 out="$(HOME=/host/home PATH=/bin:/usr/bin "$resolver" --directory "$tmp/fragments" \
-  sh -c 'printf "%s\n%s\n" "$JAVA_HOME" "$PATH"')"
-grep -Fqx '/opt/custom-java' <<<"$out" && grep -Fq '$JAVA_HOME/bin:/host/home/.local/bin:/opt/claude:' <<<"$out"
-check "JAVA_HOME is allowed while non-HOME/PATH references stay literal" $?
+  sh -c 'printf "%s\n%s\n%s\n%s\n" "$JAVA_HOME" "$JAVA_TOOL_OPTIONS" "$MAVEN_OPTS" "$PATH"')"
+grep -Fqx '/opt/custom-java' <<<"$out" \
+  && grep -Fqx -- '-XX:+UseG1GC -XX:+AllowEnhancedClassRedefinition -Dvaadin.productionMode=false' <<<"$out" \
+  && grep -Fqx -- '-Dmaven.repo.local=/host/home/.claude-contained/cache/maven' <<<"$out" \
+  && grep -Fqx '/opt/custom-java/bin:/opt/maven/bin:/opt/jbang/bin:/host/home/.local/bin:/opt/claude:/bin:/usr/bin' <<<"$out"
+check "a layer fragment supplies the complete Java environment" $?
+
+out="$(JAVA_HOME=/explicit HOME=/host/home PATH=/bin:/usr/bin "$resolver" --directory "$tmp/fragments" \
+  sh -c 'printf "%s" "$JAVA_HOME"')"
+if [[ "$out" == /explicit ]]; then status=0; else status=1; fi
+check "an explicit JAVA_HOME wins over a layer default" "$status"
+
+out="$(
+  JAVA_HOME=/opt/jbr \
+    JAVA_TOOL_OPTIONS='from-image' \
+    MAVEN_OPTS='-Dmaven.repo.local=/home/dev/.claude-contained/cache/maven' \
+    HOME=/home/dev \
+    PATH=/bin:/usr/bin \
+    "$resolver" --directory "$tmp/fragments" \
+    sh -c 'printf "%s\n%s\n%s" "$JAVA_HOME" "$JAVA_TOOL_OPTIONS" "$MAVEN_OPTS"'
+)"
+if [[ "$out" == $'/opt/jbr\nfrom-image\n-Dmaven.repo.local=/home/dev/.claude-contained/cache/maven' ]]; then status=0; else status=1; fi
+check "direct-image execution preserves its image-level Java defaults" "$status"
+
+out="$(
+  CLAUDE_CONTAINED_EXPLICIT_ENV_KEYS=JAVA_HOME \
+    JAVA_HOME=/explicit \
+    JAVA_TOOL_OPTIONS='from-image' \
+    MAVEN_OPTS='-Dmaven.repo.local=/home/dev/.claude-contained/cache/maven' \
+    HOME=/host/home \
+    PATH=/bin:/usr/bin \
+    "$resolver" --directory "$tmp/fragments" \
+    sh -c 'printf "%s\n%s\n%s\n%s" "$JAVA_HOME" "$JAVA_TOOL_OPTIONS" "$MAVEN_OPTS" "${CLAUDE_CONTAINED_EXPLICIT_ENV_KEYS-unset}"'
+)"
+grep -Fqx '/explicit' <<<"$out" \
+  && grep -Fqx -- '-XX:+UseG1GC -XX:+AllowEnhancedClassRedefinition -Dvaadin.productionMode=false' <<<"$out" \
+  && grep -Fqx -- '-Dmaven.repo.local=/host/home/.claude-contained/cache/maven' <<<"$out" \
+  && grep -Fqx 'unset' <<<"$out"
+check "launcher and attach defaults resolve Maven beneath effective HOME without overriding explicit keys" $?
 
 printf 'CHOICE=from-layer\n' >"$tmp/fragments/10-tool"
 out="$(CHOICE=from-user HOME=/host/home PATH=/bin:/usr/bin "$resolver" --directory "$tmp/fragments" \

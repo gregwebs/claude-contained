@@ -16,6 +16,11 @@ import (
 	"strings"
 )
 
+// ExplicitKeysMarker distinguishes environment values supplied by the launcher
+// from defaults inherited from a derived image. Layer fragments may replace
+// image defaults, but never values the user or launcher deliberately supplied.
+const ExplicitKeysMarker = "CLAUDE_CONTAINED_EXPLICIT_ENV_KEYS"
+
 // Origin records where an assignment came from. It decides two things: which
 // keys are refused, and how the summary attributes each name.
 type Origin int
@@ -45,6 +50,16 @@ func (o Origin) String() string {
 
 // Pair is one environment variable bound for the container.
 type Pair struct{ Key, Value string }
+
+// ExplicitKeysValue serializes launcher-supplied keys for tool-env. Keys have
+// already passed validate, so comma is an unambiguous separator.
+func ExplicitKeysValue(pairs []Pair) string {
+	keys := make([]string, 0, len(pairs))
+	for _, pair := range pairs {
+		keys = append(keys, pair.Key)
+	}
+	return strings.Join(keys, ",")
+}
 
 // ResolvedPair is the diagnostic-only view of a final assignment. It carries
 // provenance and deliberately has no value field, so callers cannot leak one.
@@ -175,11 +190,11 @@ var reservedAlwaysPrefixes = []string{"HOST_", "SRT_", "CLAUDE_CONTAINED_"}
 // reservedAlwaysExact are individually load-bearing. STAY_ROOT makes the
 // entrypoint skip the `gosu dev` drop, which would leave the sandbox running as
 // root; SSH_AUTH_SOCK is copied straight into the sandbox policy's socket
-// allowlist. HOME and JAVA_HOME are overwritten by the entrypoint and PATH is
-// prepended to, so accepting any of those three would be a lie.
+// allowlist. HOME is overwritten by the entrypoint and PATH is prepended to,
+// so accepting either would be a lie.
 var reservedAlwaysExact = map[string]bool{
 	"STAY_ROOT": true, "SSH_AUTH_SOCK": true, "GIT_PROTECT_DIRS": true,
-	"HOME": true, "PATH": true, "JAVA_HOME": true,
+	"HOME": true, "PATH": true,
 }
 
 // reservedInFile are fine to pass by hand but are code injection into the

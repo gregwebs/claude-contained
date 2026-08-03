@@ -10,6 +10,8 @@
 dev
 -e
 HOME=<HOME>
+-e
+CLAUDE_CONTAINED_EXPLICIT_ENV_KEYS=
 aic-live1
 /usr/local/bin/tool-env
 /usr/local/bin/srt-run

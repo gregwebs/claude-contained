@@ -53,8 +53,8 @@ Behavior:
     host ~/.claude skills, agents, commands, and plugins are mounted into the
     contained profile. Use --share-host-claude or
     CLAUDE_CONTAINED_SHARE_HOST_CLAUDE=1 to mount host ~/.claude directly.
-  - Other tool configs (~/.codex, ~/.copilot, ~/.gemini, ~/.vibe), Maven cache
-    (~/.m2), and Vaadin state (~/.vaadin) are bind-mounted.
+  - Other tool configs (~/.codex, ~/.copilot, ~/.gemini, ~/.vibe) and shared
+    launcher state (~/.claude-contained) are bind-mounted.
   - --share-skills DIR mounts DIR read-only as each tool's skills directory.
     DIR itself and symlink targets under it are also mounted read-only at
     path-parity locations so absolute symlinks keep resolving. For Codex,

@@ -115,6 +115,11 @@ suite() {
   [[ $rc -eq 0 ]] && line_has "$out" "DISPLAY=host.local:0"
   _check "DISPLAY is passable (the entrypoint honors a pre-set value)" $?
 
+  launcher_run "$target" "$out" "$err" -e JAVA_HOME=/from-flag -N -s -C "$proj"
+  rc=$?
+  [[ $rc -eq 0 ]] && line_has "$out" "JAVA_HOME=/from-flag"
+  _check "JAVA_HOME from --env reaches the tool and can override a layer default" $?
+
   launcher_run "$target" "$out" "$err" -e FOO=first -e FOO=second -N -s -C "$proj"
   rc=$?
   [[ $rc -eq 0 ]] && line_has "$out" "FOO=second" && [[ "$(line_count "$out" "FOO=first")" -eq 0 ]] \
@@ -152,7 +157,7 @@ suite() {
   _check "invalid key names are rejected" $?
 
   for reserved in STAY_ROOT=1 SSH_AUTH_SOCK=/tmp/evil.sock HOME=/tmp PATH=/tmp \
-                  JAVA_HOME=/tmp GIT_PROTECT_DIRS=/tmp HOST_HOME=/tmp \
+                  GIT_PROTECT_DIRS=/tmp HOST_HOME=/tmp \
                   SRT_DISABLE=1 CLAUDE_CONTAINED_ZELLIJ=1; do
     launcher_run "$target" "$out" "$err" -e "$reserved" -N -s -C "$proj"
     rc=$?
@@ -179,6 +184,19 @@ SPACED=a b c
   [[ $rc -eq 0 ]] && line_has "$out" "BAZ=from file" && line_has "$out" "QUX=plain" \
     && line_has "$out" "SPACED=a b c" && file_has "$err" "(.claude-contained/env)"
   _check "project env file is loaded, quotes stripped, comments skipped" $?
+
+  write_project_env 'JAVA_HOME=/from-project
+'
+  launcher_run "$target" "$out" "$err" -N -s -C "$proj"
+  rc=$?
+  [[ $rc -eq 0 ]] && line_has "$out" "JAVA_HOME=/from-project"
+  _check "JAVA_HOME from the project env file reaches the tool" $?
+
+  launcher_run "$target" "$out" "$err" -e JAVA_HOME=/from-flag -N -s -C "$proj"
+  rc=$?
+  [[ $rc -eq 0 ]] && line_has "$out" "JAVA_HOME=/from-flag" \
+    && [[ "$(line_count "$out" "JAVA_HOME=/from-project")" -eq 0 ]]
+  _check "--env JAVA_HOME overrides the project env file" $?
 
   launcher_run "$target" "$out" "$err" --no-project-env -N -s -C "$proj"
   rc=$?

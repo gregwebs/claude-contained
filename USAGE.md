@@ -60,7 +60,7 @@ The launcher's `--help` output is authoritative for the installed version.
 - Claude account state remains shared through `~/.claude-contained/.claude.json`.
 - Host Claude extension resources are shared from `~/.claude/{skills,agents,commands,plugins}` into the contained profile.
 - `--share-host-claude` or `CLAUDE_CONTAINED_SHARE_HOST_CLAUDE=1` restores the legacy behavior of mounting host `~/.claude` directly.
-- Other tool configs (`~/.codex`, `~/.copilot`, `~/.gemini`, and `~/.vibe`), the Maven cache, and Vaadin state are bind-mounted for persistence.
+- Other tool configs (`~/.codex`, `~/.copilot`, `~/.gemini`, and `~/.vibe`) and shared launcher state under `~/.claude-contained` are bind-mounted for persistence.
 - SSH agent forwarding is disabled by default. Enable it with `-S` or `--ssh`.
 - Git worktrees are detected and the main repository's Git metadata is included for full Git access.
 
@@ -180,13 +180,9 @@ The default `tools` rebuild refreshes the AI CLI portion of the image and the la
 
 Rebuilding needs to find the checkout that holds the Dockerfile. It resolves in this order: `--build-context DIR`, then `CLAUDE_CONTAINED_BUILD_CONTEXT=DIR`, then this executable's own directory if that holds a `Dockerfile`, then the Git repository enclosing it if *that* root holds one — which is what makes a repo-adjacent install or a symlink into the checkout keep working with no flag at all. A symlinked `make install` (the default) keeps this working with no flag; a *copy* of the binary outside the checkout has no enclosing checkout and needs `--build-context` or `CLAUDE_CONTAINED_BUILD_CONTEXT` on every rebuild.
 
-### Optional Java Layer
-
-JBR, HotswapAgent, jdtls, Maven, and JBang are included with `--build arg INCLUDE_JAVA_LAYER=true`.
-
 ## Tooling Layers
 
-A project can add its own toolchain to the container by checking in a **tooling layer**: a complete Dockerfile built on top of the base image. The launcher builds it into a **derived image** and runs that instead of `claude-contained:latest`. A project with no layer behaves exactly as it always has.
+A project can add its own toolchain to the container by checking in a **tooling layer**: a complete Dockerfile built on top of the base image. The launcher builds it into a **derived image** and runs that instead of `claude-contained:latest`. A project with no tooling layer runs the plain base image.
 
 The layer lives in `.claude-contained/layer/` inside the project directory. That directory is both the layer's home and its build context. Override it with `--layer DIR`, else `CLAUDE_CONTAINED_LAYER=DIR`; the default applies when neither is set.
 
@@ -203,6 +199,8 @@ RUN ...
 The launcher overrides `BASE_IMAGE` with the base image's resolved ID, so the image built is the image that was hashed. The default in the file is what keeps the layer buildable by hand — `cd .claude-contained/layer && docker build -t my-layer .` — and inside a devcontainer that never runs the launcher. A layer that omits the `ARG` still builds, but draws an unconsumed-build-argument warning from the builder.
 
 Nothing validates the layer's contents. It can break the base image's invariants, and the container belongs to the project, so examples and this documentation carry that weight rather than a checker.
+
+Copy a starting point from the [shipped tooling-layer examples](examples/tooling-layers/README.md), including the [Java example](examples/tooling-layers/java/README.md), rather than adding a toolchain to the base image.
 
 ### Runtime environment
 
@@ -403,7 +401,7 @@ Environment changes do not apply when attaching to an existing container. `--env
 
 The launchers reject variables that could subvert container setup:
 
-- `HOME`, `PATH`, `JAVA_HOME`, `GIT_PROTECT_DIRS`, `STAY_ROOT`, and `SSH_AUTH_SOCK`
+- `HOME`, `PATH`, `GIT_PROTECT_DIRS`, `STAY_ROOT`, and `SSH_AUTH_SOCK`
 - Names starting with `HOST_`, `SRT_`, or `CLAUDE_CONTAINED_`
 
 Use `--ssh` instead of setting `SSH_AUTH_SOCK`. `LD_PRELOAD`, `LD_LIBRARY_PATH`, and `NODE_OPTIONS` are accepted as command-line flags but refused from the project env file.
@@ -529,7 +527,7 @@ For a service listening on all host interfaces, configure its client to use `hos
 
 ## VS Code Devcontainer
 
-The included template uses the same image for Java, Spring, and Vaadin development with Claude available in the integrated terminal.
+The included template uses the plain base image with Claude available in the integrated terminal. A project can instead point it at a copied tooling layer.
 
 1. Build the Docker image:
 
@@ -540,6 +538,6 @@ The included template uses the same image for Java, Spring, and Vaadin developme
 2. Copy `devcontainer/` into the target project as `.devcontainer/`.
 3. Open the project in VS Code and choose **Reopen in Container**.
 
-The template preserves host path parity and shares the Maven cache and Git configuration. The image must be built first. Do not run the devcontainer and standalone launchers simultaneously against the same contained Claude profile. VS Code manages networking separately, so use its explicit port forwarding when `host.local` is unavailable.
+The template preserves host path parity and shared Claude state. The base image must be built first. Do not run the devcontainer and standalone launchers simultaneously against the same contained Claude profile. VS Code manages networking separately, so use its explicit port forwarding when `host.local` is unavailable.
 
 See [devcontainer/README.md](devcontainer/README.md) for the full template guide.

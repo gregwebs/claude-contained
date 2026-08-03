@@ -62,8 +62,6 @@ func TestBuildProducesCompleteProgramInOneCall(t *testing.T) {
 		MkdirAll{"/home/dev/.copilot"},
 		MkdirAll{"/home/dev/.gemini"},
 		MkdirAll{"/home/dev/.vibe"},
-		MkdirAll{"/home/dev/.m2"},
-		MkdirAll{"/home/dev/.vaadin"},
 		MkdirAll{"/home/dev/.claude/skills"},
 		MkdirAll{"/home/dev/.claude-contained/claude/skills"},
 		MkdirAll{"/home/dev/.claude/agents"},
@@ -89,10 +87,9 @@ func TestBuildProducesCompleteProgramInOneCall(t *testing.T) {
 		runtime.MountArg{Src: "/home/dev/.copilot", Dst: "/home/dev/.copilot"},
 		runtime.MountArg{Src: "/home/dev/.gemini", Dst: "/home/dev/.gemini"},
 		runtime.MountArg{Src: "/home/dev/.vibe", Dst: "/home/dev/.vibe"},
-		runtime.MountArg{Src: "/home/dev/.m2", Dst: "/home/dev/.m2"},
-		runtime.MountArg{Src: "/home/dev/.vaadin", Dst: "/home/dev/.vaadin"},
 		runtime.MountArg{Src: "/home/dev/work/app", Dst: "/home/dev/work/app"},
 		runtime.EnvArg{Key: "TZ", Value: "Europe/Helsinki"},
+		runtime.EnvArg{Key: env.ExplicitKeysMarker, Value: "TZ"},
 		runtime.MountArg{Src: "/home/dev/.claude/skills", Dst: "/home/dev/.claude/skills"},
 		runtime.MountArg{Src: "/home/dev/.claude/agents", Dst: "/home/dev/.claude/agents"},
 		runtime.MountArg{Src: "/home/dev/.claude/commands", Dst: "/home/dev/.claude/commands"},
@@ -582,17 +579,17 @@ func TestZellijProgram(t *testing.T) {
 		t.Fatal("Run is nil")
 	}
 
-	// (a) the mkdirs, positioned after VaadinDir and before the
-	// extension-resource mkdirs.
-	vaadinIdx := stepIndex(program.Steps, MkdirAll{"/home/dev/.vaadin"})
+	// (a) the mkdirs, positioned after the generic shared-state directory and
+	// before the extension-resource mkdirs.
+	stateIdx := stepIndex(program.Steps, MkdirAll{"/home/dev/.claude-contained"})
 	dataIdx := stepIndex(program.Steps, MkdirAll{"/home/dev/.claude-contained/zellij/data"})
 	cacheIdx := stepIndex(program.Steps, MkdirAll{"/home/dev/.claude-contained/zellij/cache"})
 	extIdx := stepIndex(program.Steps, MkdirAll{"/home/dev/.claude/skills"})
-	if vaadinIdx < 0 || dataIdx < 0 || cacheIdx < 0 || extIdx < 0 {
-		t.Fatalf("missing steps: vaadin=%d data=%d cache=%d ext=%d", vaadinIdx, dataIdx, cacheIdx, extIdx)
+	if stateIdx < 0 || dataIdx < 0 || cacheIdx < 0 || extIdx < 0 {
+		t.Fatalf("missing steps: state=%d data=%d cache=%d ext=%d", stateIdx, dataIdx, cacheIdx, extIdx)
 	}
-	if vaadinIdx >= dataIdx || dataIdx >= cacheIdx || cacheIdx >= extIdx {
-		t.Errorf("mkdir order wrong: vaadin=%d data=%d cache=%d ext=%d", vaadinIdx, dataIdx, cacheIdx, extIdx)
+	if stateIdx >= dataIdx || dataIdx >= cacheIdx || cacheIdx >= extIdx {
+		t.Errorf("mkdir order wrong: state=%d data=%d cache=%d ext=%d", stateIdx, dataIdx, cacheIdx, extIdx)
 	}
 
 	// (b) the env markers, in order, after SRT_ALLOW_HOSTS (there is none in

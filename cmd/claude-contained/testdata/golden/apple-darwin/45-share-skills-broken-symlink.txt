@@ -33,8 +33,6 @@ HOME/.claude/skills dir 755
 HOME/.codex dir 755
 HOME/.copilot dir 755
 HOME/.gemini dir 755
-HOME/.m2 dir 755
-HOME/.vaadin dir 755
 HOME/.vibe dir 755
 PROJ dir 755
 PROJ/skills-src dir 755

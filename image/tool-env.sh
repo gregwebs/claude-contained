@@ -9,7 +9,22 @@ if [[ "${1:-}" == "--directory" ]]; then
   shift 2
 fi
 
-initial_keys=$'\n'"$(compgen -e)"$'\n'
+if [[ "${CLAUDE_CONTAINED_EXPLICIT_ENV_KEYS+set}" == set ]]; then
+  initial_keys=$'\n'
+  IFS=',' read -r -a explicit_keys <<<"$CLAUDE_CONTAINED_EXPLICIT_ENV_KEYS"
+  for key in "${explicit_keys[@]}"; do
+    if [[ ! "$key" =~ ^[A-Za-z_][A-Za-z0-9_]*$ ]]; then
+      echo "tool-env: invalid explicit environment key: ${key}" >&2
+      exit 2
+    fi
+    initial_keys+="${key}"$'\n'
+  done
+  unset CLAUDE_CONTAINED_EXPLICIT_ENV_KEYS
+else
+  # Direct derived-image consumers have no launcher marker, so their image ENV
+  # is the explicit startup contract and remains authoritative over fragments.
+  initial_keys=$'\n'"$(compgen -e)"$'\n'
+fi
 initially_set() {
   [[ "$initial_keys" == *$'\n'"$1"$'\n'* ]]
 }
@@ -26,11 +41,7 @@ prepend_path() {
   esac
 }
 
-export JAVA_HOME="${JAVA_HOME:-/opt/jbr}"
 PATH="${PATH:-/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin}"
-prepend_path "${JAVA_HOME}/bin"
-prepend_path /home/dev/.sdkman/candidates/jbang/current/bin
-prepend_path /home/dev/.sdkman/candidates/maven/current/bin
 prepend_path /opt/claude
 prepend_path "${HOME:-/home/dev}/.local/bin"
 export PATH
@@ -92,7 +103,7 @@ load_fragment() {
       echo "tool-env: ${fragment}:${lineno}: ${key} is reserved" >&2
       return 2
     fi
-    if [[ "$key" != "PATH" && "$key" != "JAVA_HOME" ]] && initially_set "$key"; then
+    if [[ "$key" != "PATH" ]] && initially_set "$key"; then
       continue
     fi
     if [[ ${#value} -ge 2 && ( ( "$value" == \"*\" ) || ( "$value" == \'*\' ) ) ]]; then
