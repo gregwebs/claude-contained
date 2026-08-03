@@ -30,10 +30,6 @@ type=bind,src=<HOME>/.gemini,dst=<HOME>/.gemini
 --mount
 type=bind,src=<HOME>/.vibe,dst=<HOME>/.vibe
 --mount
-type=bind,src=<HOME>/.m2,dst=<HOME>/.m2
---mount
-type=bind,src=<HOME>/.vaadin,dst=<HOME>/.vaadin
---mount
 type=bind,src=<PROJ>,dst=<PROJ>
 -e
 API_URL=http://host.local:8080
@@ -41,6 +37,8 @@ API_URL=http://host.local:8080
 FOO=bar
 -e
 TZ=UTC
+-e
+CLAUDE_CONTAINED_EXPLICIT_ENV_KEYS=API_URL,FOO,TZ
 --mount
 type=bind,src=<HOME>/.claude/skills,dst=<HOME>/.claude/skills
 --mount
@@ -78,7 +76,5 @@ HOME/.claude/skills dir 755
 HOME/.codex dir 755
 HOME/.copilot dir 755
 HOME/.gemini dir 755
-HOME/.m2 dir 755
-HOME/.vaadin dir 755
 HOME/.vibe dir 755
 PROJ dir 755

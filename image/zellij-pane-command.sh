@@ -35,9 +35,6 @@ restore_pre_zellij_var SHELL
 if [[ -z "${PATH:-}" ]]; then
   PATH="/usr/local/bin:/usr/bin:/bin"
 fi
-prepend_path_entry "${JAVA_HOME:-/opt/jbr}/bin"
-prepend_path_entry "/home/dev/.sdkman/candidates/jbang/current/bin"
-prepend_path_entry "/home/dev/.sdkman/candidates/maven/current/bin"
 prepend_path_entry "/opt/claude"
 prepend_path_entry "${HOME:-/home/dev}/.local/bin"
 export PATH

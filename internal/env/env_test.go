@@ -158,7 +158,7 @@ func TestValidationMessages(t *testing.T) {
 // spot-checked.
 func TestReservedAlways(t *testing.T) {
 	keys := []string{
-		"STAY_ROOT", "SSH_AUTH_SOCK", "GIT_PROTECT_DIRS", "HOME", "PATH", "JAVA_HOME",
+		"STAY_ROOT", "SSH_AUTH_SOCK", "GIT_PROTECT_DIRS", "HOME", "PATH",
 		"HOST_HOME", "HOST_", "SRT_DISABLE", "SRT_", "CLAUDE_CONTAINED_ZELLIJ", "CLAUDE_CONTAINED_",
 	}
 	for _, key := range keys {
@@ -185,10 +185,31 @@ func TestReservedInFileOnly(t *testing.T) {
 
 func TestOrdinaryKeysAreNotReserved(t *testing.T) {
 	// DISPLAY is deliberately allowed: the entrypoint only defaults it when empty.
-	for _, key := range []string{"FOO", "DISPLAY", "HOSTNAME", "SRTP", "CLAUDE_CODE"} {
+	for _, key := range []string{"FOO", "DISPLAY", "HOSTNAME", "SRTP", "CLAUDE_CODE", "JAVA_HOME"} {
 		if err := New().Set(key+"=x", "--env", Flag); err != nil {
 			t.Errorf("%s was rejected (%v), want acceptance", key, err)
 		}
+	}
+}
+
+func TestJavaHomeAcceptsProjectAndFlagValuesWithFlagPrecedence(t *testing.T) {
+	s := New()
+	mustSet(t, s, "JAVA_HOME=/from-project", ".claude-contained/env:1", File)
+	mustSet(t, s, "JAVA_HOME=/from-flag", "--env", Flag)
+
+	want := []Pair{{"JAVA_HOME", "/from-flag"}}
+	if got := pairs(s); !reflect.DeepEqual(got, want) {
+		t.Errorf("Pairs() = %#v, want %#v", got, want)
+	}
+}
+
+func TestExplicitKeysValuePreservesPairOrder(t *testing.T) {
+	pairs := []Pair{{Key: "JAVA_HOME", Value: "/jdk"}, {Key: "MAVEN_OPTS", Value: "secret"}}
+	if got, want := ExplicitKeysValue(pairs), "JAVA_HOME,MAVEN_OPTS"; got != want {
+		t.Errorf("ExplicitKeysValue() = %q, want %q", got, want)
+	}
+	if got := ExplicitKeysValue(nil); got != "" {
+		t.Errorf("ExplicitKeysValue(nil) = %q, want empty", got)
 	}
 }
 

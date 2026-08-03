@@ -1,0 +1,4 @@
+JAVA_HOME=/opt/jbr
+JAVA_TOOL_OPTIONS=-XX:+UseG1GC -XX:+AllowEnhancedClassRedefinition -XX:+ClassUnloading -XX:HotswapAgent=fatjar --add-opens=java.base/java.lang=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.io=ALL-UNNAMED --add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/sun.security.action=ALL-UNNAMED --add-opens=java.base/jdk.internal.loader=ALL-UNNAMED --add-opens=java.desktop/java.beans=ALL-UNNAMED --add-opens=java.desktop/com.sun.beans=ALL-UNNAMED --add-opens=java.desktop/com.sun.beans.introspect=ALL-UNNAMED --add-opens=java.desktop/com.sun.beans.util=ALL-UNNAMED -Dvaadin.productionMode=false -Dspring.devtools.restart.enabled=false
+MAVEN_OPTS=-Dmaven.repo.local=$HOME/.claude-contained/cache/maven
+PATH=/opt/jbr/bin:/opt/maven/bin:/opt/jbang/bin:$PATH

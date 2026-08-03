@@ -27,7 +27,6 @@ _Avoid_: build dir, source dir, Docker context
 **Tooling layer**:
 A complete Dockerfile a project checks in, built `FROM` the base image to add that project's toolchain. It lives in `.claude-contained/layer/` inside the project, which is both its home and its build context.
 _Avoid_: layer, custom image, overlay, Dockerfile snippet
-_Note_: "Java layer" and `INCLUDE_JAVA_LAYER` still appear in `USAGE.md` and the `Dockerfile`. They name the retired built-in, not a tooling layer, and go away with it (ADR-0006).
 
 **Derived image**:
 The image built from a project's tooling layer and run in place of the base image, tagged under `claude-contained-layer` with a content hash of the base image's identity and the layer's build context.

@@ -26,8 +26,6 @@ type hostPaths struct {
 	GeminiDir          string
 	CopilotDir         string
 	VibeDir            string
-	M2Dir              string
-	VaadinDir          string
 	// AgentsDir is ~/.agents. Unlike the other tool directories it is created
 	// only as a side effect of --share-skills (claude-contained:1748) -- there
 	// is no other reason to mount or persist it.
@@ -59,8 +57,6 @@ func newHostPaths(h host.State, shareHostClaude bool) hostPaths {
 		GeminiDir:          filepath.Join(home, ".gemini"),
 		CopilotDir:         filepath.Join(home, ".copilot"),
 		VibeDir:            filepath.Join(home, ".vibe"),
-		M2Dir:              filepath.Join(home, ".m2"),
-		VaadinDir:          filepath.Join(home, ".vaadin"),
 		AgentsDir:          filepath.Join(home, ".agents"),
 		GitConfig:          filepath.Join(home, ".gitconfig"),
 		ClaudeJSON:         filepath.Join(home, ".claude.json"),

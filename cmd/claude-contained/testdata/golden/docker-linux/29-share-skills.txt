@@ -30,13 +30,11 @@ type=bind,src=<HOME>/.gemini,dst=<HOME>/.gemini
 --mount
 type=bind,src=<HOME>/.vibe,dst=<HOME>/.vibe
 --mount
-type=bind,src=<HOME>/.m2,dst=<HOME>/.m2
---mount
-type=bind,src=<HOME>/.vaadin,dst=<HOME>/.vaadin
---mount
 type=bind,src=<PROJ>,dst=<PROJ>
 -e
 TZ=UTC
+-e
+CLAUDE_CONTAINED_EXPLICIT_ENV_KEYS=TZ
 --mount
 type=bind,src=<HOME>/.claude/agents,dst=<HOME>/.claude/agents
 --mount
@@ -93,8 +91,6 @@ HOME/.claude/skills dir 755
 HOME/.codex dir 755
 HOME/.copilot dir 755
 HOME/.gemini dir 755
-HOME/.m2 dir 755
-HOME/.vaadin dir 755
 HOME/.vibe dir 755
 PROJ dir 755
 PROJ/skills-src dir 755

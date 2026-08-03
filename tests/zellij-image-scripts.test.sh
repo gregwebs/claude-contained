@@ -31,7 +31,7 @@ xdg_suite() {
     fi
   }
 
-  restored_path="${home}/.local/bin:/opt/claude:/home/dev/.sdkman/candidates/maven/current/bin:/home/dev/.sdkman/candidates/jbang/current/bin:/opt/jbr/bin:/usr/local/bin:/usr/bin:/bin"
+  restored_path="/opt/java/bin:/opt/maven/bin:${home}/.local/bin:/opt/claude:/usr/local/bin:/usr/bin:/bin"
   out="$(
     env \
       HOME="$home" \
@@ -79,8 +79,9 @@ xdg_suite() {
     env HOME="$home" PATH=/usr/bin:/bin \
       "${repo_root}/image/zellij-pane-command.sh" /usr/bin/env
   )"
-  grep -E "^PATH=" <<<"$path_out" >/dev/null && grep -F "/opt/claude" <<<"$path_out" >/dev/null
-  _check "pane command includes contained tool paths when PATH was not stashed" $?
+  grep -Fqx "PATH=${home}/.local/bin:/opt/claude:/usr/local/bin:/usr/bin:/bin" <<<"$path_out" \
+    && ! grep -Eq '/opt/jbr|/\.sdkman/' <<<"$path_out"
+  _check "pane command adds only generic paths when PATH was not stashed" $?
 
   return "$fails"
 }
