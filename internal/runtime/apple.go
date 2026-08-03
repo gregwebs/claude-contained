@@ -46,6 +46,11 @@ func (a *Apple) Profile() Profile {
 			"Warning: Apple Containers cannot reach host services bound only to 127.0.0.1.",
 			"         -H reaches host services listening on 0.0.0.0; use Docker for the rest.",
 		},
+		// Apple Containers applies binds sequentially into the guest and cannot
+		// create a nested mount's destination under a read-only parent, so the
+		// --share-skills Codex system-skills remount needs a preexisting
+		// mountpoint. See the Profile field's own comment.
+		ReadonlyRemountNeedsExistingMountpoint: true,
 	}
 }
 

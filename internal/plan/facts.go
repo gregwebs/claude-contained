@@ -149,6 +149,12 @@ type SharedSkills struct {
 	// directory -- the one case where a tool's built-in skills stay visible
 	// underneath the shared mount (claude-contained:1754-1757).
 	CodexSystemDir bool
+	// DirHasSystem reports whether Dir itself contains a `.system` directory.
+	// When it does, the read-only shared view of <codex dir>/skills already
+	// offers a mountpoint for the Codex system-skills remount; when it does
+	// not, that remount has nowhere to land on a runtime that cannot create a
+	// mountpoint under a read-only parent (Profile.ReadonlyRemountNeedsExistingMountpoint).
+	DirHasSystem bool
 	// Links is the flattened, ordered result of scanning .system (if present)
 	// and then Dir, sharing one seen-directories set across both -- matching
 	// bash's single global array.
