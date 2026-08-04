@@ -16,16 +16,6 @@ RUN set -eux; \
       $BASE_PACKAGES \
     && rm -rf /var/lib/apt/lists/*
 
-# ---- Install git-secrets ----------------------------------------------------
-ARG GIT_SECRETS_VERSION=1.3.0
-RUN set -eux; \
-    curl -fL "https://github.com/awslabs/git-secrets/archive/refs/tags/${GIT_SECRETS_VERSION}.tar.gz" -o /tmp/git-secrets.tar.gz; \
-    mkdir -p /tmp/git-secrets; \
-    tar -xzf /tmp/git-secrets.tar.gz -C /tmp/git-secrets --strip-components=1; \
-    make -C /tmp/git-secrets install PREFIX=/usr/local; \
-    rm -rf /tmp/git-secrets /tmp/git-secrets.tar.gz; \
-    git secrets --scan /dev/null
-
 # ---- Install Bun ------------------------------------------------------------
 ARG BUN_VERSION=latest
 RUN set -eux; \
@@ -46,22 +36,6 @@ RUN set -eux; \
     chmod +x /usr/local/bin/bun; \
     rm -rf /tmp/bun.zip /tmp/bun-linux-${BUN_ARCH}; \
     bun --version
-
-# ---- Zellij terminal workspace ---------------------------------------------
-ARG ZELLIJ_VERSION=0.44.3
-RUN set -eux; \
-    ARCH="$(dpkg --print-architecture)"; \
-    case "$ARCH" in \
-      arm64)  ZELLIJ_TARGET="aarch64-unknown-linux-musl" ;; \
-      amd64)  ZELLIJ_TARGET="x86_64-unknown-linux-musl" ;; \
-      *)      echo "Unsupported architecture: $ARCH"; exit 1 ;; \
-    esac; \
-    URL="https://github.com/zellij-org/zellij/releases/download/v${ZELLIJ_VERSION}/zellij-${ZELLIJ_TARGET}.tar.gz"; \
-    curl -fL "$URL" -o /tmp/zellij.tar.gz; \
-    tar -xzf /tmp/zellij.tar.gz -C /usr/local/bin zellij; \
-    chmod +x /usr/local/bin/zellij; \
-    rm -f /tmp/zellij.tar.gz; \
-    zellij --version
 
 # ---- Language Servers + AI CLIs --------------------------------------------
 ARG AI_TOOLS_CACHE_BUST=stable
@@ -103,6 +77,46 @@ ENV UV_PYTHON_INSTALL_DIR=/opt/uv-python
 RUN curl -LsSf https://astral.sh/uv/install.sh | sh \
   && /root/.local/bin/uv tool install mistral-vibe --python 3.12 \
   && chmod -R a+rX /opt/uv-tools /opt/uv-python
+
+# ---- Zellij terminal workspace ---------------------------------------------
+ARG ZELLIJ_VERSION=0.44.3
+RUN set -eux; \
+    ARCH="$(dpkg --print-architecture)"; \
+    case "$ARCH" in \
+      arm64)  ZELLIJ_TARGET="aarch64-unknown-linux-musl" ;; \
+      amd64)  ZELLIJ_TARGET="x86_64-unknown-linux-musl" ;; \
+      *)      echo "Unsupported architecture: $ARCH"; exit 1 ;; \
+    esac; \
+    URL="https://github.com/zellij-org/zellij/releases/download/v${ZELLIJ_VERSION}/zellij-${ZELLIJ_TARGET}.tar.gz"; \
+    curl -fL "$URL" -o /tmp/zellij.tar.gz; \
+    tar -xzf /tmp/zellij.tar.gz -C /usr/local/bin zellij; \
+    chmod +x /usr/local/bin/zellij; \
+    rm -f /tmp/zellij.tar.gz; \
+    zellij --version
+
+# ---- Shellcheck for verifying shell scripts  ---
+ENV SHELLCHECK_VERSION="0.11.0"
+ENV SHELLCHECK_SHA256="8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198"
+RUN set -eux; \
+	shellcheck_dir="/tmp/shellcheck" ; \
+	mkdir -p "${shellcheck_dir}" ; \
+	shellcheck_archive="${shellcheck_dir}/shellcheck.tar.xz" ; \
+	curl --fail --location --silent --show-error --output "${shellcheck_archive}" \
+		"https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" ; \
+	echo "${SHELLCHECK_SHA256}  ${shellcheck_archive}" | sha256sum --check - ; \
+	tar -xJf "${shellcheck_archive}" -C "${shellcheck_dir}" ; \
+	install -m 0755 "${shellcheck_dir}/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" "${shellcheck_dir}/shellcheck" ; \
+	rm -r "${shellcheck_dir}"
+
+# ---- Install git-secrets ----------------------------------------------------
+ARG GIT_SECRETS_VERSION=1.3.0
+RUN set -eux; \
+    curl -fL "https://github.com/awslabs/git-secrets/archive/refs/tags/${GIT_SECRETS_VERSION}.tar.gz" -o /tmp/git-secrets.tar.gz; \
+    mkdir -p /tmp/git-secrets; \
+    tar -xzf /tmp/git-secrets.tar.gz -C /tmp/git-secrets --strip-components=1; \
+    make -C /tmp/git-secrets install PREFIX=/usr/local; \
+    rm -rf /tmp/git-secrets /tmp/git-secrets.tar.gz; \
+    git secrets --scan /dev/null
 
 # ---- Playwright browser (build-time install for reliability) ----------------
 # Install Chromium to a fixed location instead of user cache for container use
