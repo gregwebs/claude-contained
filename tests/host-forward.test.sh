@@ -21,6 +21,8 @@ set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(dirname "$here")"
+# shellcheck source=tests/lib/tmp.sh
+. "${here}/lib/tmp.sh"
 fwd="${repo_root}/image/host-forward.sh"
 
 fails=0
@@ -33,7 +35,7 @@ _check() { # _check "description" <rc-that-should-be-0>
   fi
 }
 
-work="$(mktemp -d)"
+work="$(mk_tmpdir)"
 stub="${work}/bin"
 log="${work}/socat.log"
 mkdir -p "$stub"
@@ -124,7 +126,7 @@ PATH="${stub}:${PATH}" SOCAT_LOG="$log" HOST_FORWARD_PORTS="" bash "$fwd"
 [[ ! -s "$log" ]]
 _check "an empty HOST_FORWARD_PORTS starts no relays" $?
 
-rm -rf "$work"
+safe_rm_rf "$work"
 
 if [[ "$fails" -gt 0 ]]; then
   echo

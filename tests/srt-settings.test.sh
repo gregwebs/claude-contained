@@ -19,6 +19,8 @@ set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(dirname "$here")"
+# shellcheck source=tests/lib/tmp.sh
+. "${here}/lib/tmp.sh"
 gen="${repo_root}/image/srt-settings.sh"
 
 fails=0
@@ -31,7 +33,7 @@ _check() { # _check "description" <rc-that-should-be-0>
   fi
 }
 
-work="$(mktemp -d)"
+work="$(mk_tmpdir)"
 home="${work}/home"
 out="${work}/settings.json"
 mkdir -p "${home}/.claude-contained"
@@ -186,7 +188,7 @@ echo "== tamper resistance =="
 [[ "$(stat -c '%a' "$out" 2>/dev/null || stat -f '%Lp' "$out")" == "444" ]]
 _check "generated policy is mode 444" $?
 
-rm -rf "$work"
+safe_rm_rf "$work"
 
 if [[ "$fails" -gt 0 ]]; then
   echo

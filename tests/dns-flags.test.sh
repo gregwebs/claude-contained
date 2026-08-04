@@ -9,6 +9,8 @@ set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(dirname "$here")"
+# shellcheck source=tests/lib/tmp.sh
+. "${here}/lib/tmp.sh"
 host_kernel="$(uname -s)"
 unset CLAUDE_CONTAINED_LOG_LEVEL
 
@@ -30,9 +32,9 @@ launcher_argv() { # launcher_argv <target> [flags...]
   HOME="$home" PATH="${stub_dir}:$PATH" "${repo_root}/${target}" "$@" -N -s -C "$proj" 2>/dev/null
 }
 
-stub_dir="$(mktemp -d)"
-proj="$(mktemp -d)"
-home="$(mktemp -d)"
+stub_dir="$(mk_tmpdir)"
+proj="$(mk_tmpdir)"
+home="$(mk_tmpdir)"
 for rt in container docker; do
   printf '#!/bin/bash\nprintf "%%s\\n" "$@"\n' > "${stub_dir}/${rt}"
   chmod +x "${stub_dir}/${rt}"
@@ -83,7 +85,7 @@ fi
 
 if [[ -z "$docker_target" ]]; then
   echo "== Docker DNS: SKIP (no second target given) =="
-  rm -rf "$stub_dir" "$proj" "$home"
+  safe_rm_rf "$stub_dir" "$proj" "$home"
   if [[ "$fails" -gt 0 ]]; then
     echo
     echo "${fails} DNS flag test(s) failed."
@@ -124,7 +126,7 @@ out="$(
 [[ "$(line_count "$out" "--dns")" -eq 1 ]] && line_has "$out" "4.4.4.4" && ! line_has "$out" "9.9.9.9"
 _check "explicit --dns overrides CLAUDE_DNS" $?
 
-rm -rf "$stub_dir" "$proj" "$home"
+safe_rm_rf "$stub_dir" "$proj" "$home"
 
 if [[ "$fails" -gt 0 ]]; then
   echo

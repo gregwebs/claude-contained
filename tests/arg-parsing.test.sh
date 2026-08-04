@@ -19,6 +19,8 @@ set -uo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(dirname "$here")"
 host_kernel="$(uname -s)"
+# shellcheck source=tests/lib/tmp.sh
+. "${here}/lib/tmp.sh"
 
 # A developer's exported build-context or tooling-layer override must not change
 # any result here, the same way an ambient CLAUDE_CONTAINED_RUNTIME must not.
@@ -26,21 +28,21 @@ unset CLAUDE_CONTAINED_BUILD_CONTEXT
 unset CLAUDE_CONTAINED_LAYER
 unset CLAUDE_CONTAINED_LOG_LEVEL
 
-stub_dir="$(mktemp -d)"
+stub_dir="$(mk_tmpdir)"
 # The launcher resolves paths through realpath, and on macOS /var is a symlink to
 # /private/var, so mktemp paths must be resolved here too or the emitted mount
 # arguments will never match what we assert.
-proj="$(cd "$(mktemp -d)" && pwd -P)"
-extra="$(cd "$(mktemp -d)" && pwd -P)"
-home="$(cd "$(mktemp -d)" && pwd -P)"
+proj="$(mk_tmpdir_resolved)"
+extra="$(mk_tmpdir_resolved)"
+home="$(mk_tmpdir_resolved)"
 for rt in container docker; do
   printf '#!/bin/bash\n[[ "${1:-}" == system || "${1:-}" == info || "${1:-}" == list || "${1:-}" == ps || "${1:-}" == inspect ]] && exit 0\nprintf "%%s\\n" "$@"\n' \
     > "${stub_dir}/${rt}"
   chmod +x "${stub_dir}/${rt}"
 done
 
-out="$(mktemp)"
-err="$(mktemp)"
+out="$(mk_tmpfile)"
+err="$(mk_tmpfile)"
 
 # run <target> <flags...>; captures argv on stdout and diagnostics on stderr.
 run() {
@@ -249,7 +251,7 @@ for target in "${targets[@]}"; do
   total=$((total + $?))
 done
 
-rm -rf "$stub_dir" "$proj" "$extra" "$home"
+safe_rm_rf "$stub_dir" "$proj" "$extra" "$home"
 rm -f "$out" "$err"
 
 if [[ "$total" -gt 0 ]]; then

@@ -10,10 +10,12 @@ set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(dirname "$here")"
+# shellcheck source=tests/lib/tmp.sh
+. "${here}/lib/tmp.sh"
 unset CLAUDE_CONTAINED_LOG_LEVEL
 
-stub_dir="$(mktemp -d)"
-proj="$(mktemp -d)"
+stub_dir="$(mk_tmpdir)"
+proj="$(mk_tmpdir)"
 for rt in container docker; do
   printf '#!/usr/bin/env bash\nprintf "%%s\\n" "$@"\n' > "${stub_dir}/${rt}"
   chmod +x "${stub_dir}/${rt}"
@@ -59,7 +61,7 @@ suite() {
     fi
   }
 
-  home="$(mktemp -d)"
+  home="$(mk_tmpdir)"
   mkdir -p "${home}/.claude"
   printf '{}\n' > "${home}/.claude/settings.json"
 
@@ -97,7 +99,7 @@ suite() {
   line_has "$out" "type=bind,src=${home}/.claude,dst=${home}/.claude"
   _check "CLAUDE_CONTAINED_SHARE_HOST_CLAUDE=1 restores direct host ~/.claude mount" $?
 
-  rm -rf "$home"
+  safe_rm_rf "$home"
   return "$fails"
 }
 
@@ -109,7 +111,7 @@ for target in "${targets[@]}"; do
   total=$((total + $?))
 done
 
-rm -rf "$stub_dir" "$proj"
+safe_rm_rf "$stub_dir" "$proj"
 
 if [[ "$total" -gt 0 ]]; then
   echo

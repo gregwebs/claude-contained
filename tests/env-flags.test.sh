@@ -18,12 +18,14 @@ set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(dirname "$here")"
+# shellcheck source=tests/lib/tmp.sh
+. "${here}/lib/tmp.sh"
 unset CLAUDE_CONTAINED_LOG_LEVEL
 
-stub_dir="$(mktemp -d)"
-proj="$(mktemp -d)"
-home="$(mktemp -d)"
-canary="$(mktemp -d)/canary"
+stub_dir="$(mk_tmpdir)"
+proj="$(mk_tmpdir)"
+home="$(mk_tmpdir)"
+canary="$(mk_tmpdir)/canary"
 
 # Stub runtime: prints one argv element per line, and reports a running
 # container so the attach paths can be exercised.
@@ -96,8 +98,8 @@ suite() {
     fi
   }
 
-  out="$(mktemp)"
-  err="$(mktemp)"
+  out="$(mk_tmpfile)"
+  err="$(mk_tmpfile)"
   clear_project_env
 
   launcher_run "$target" "$out" "$err" -e FOO=bar --env BAZ=qux --env=QUUX=1 -N -s -C "$proj"
@@ -286,7 +288,7 @@ for target in "${targets[@]}"; do
   total=$((total + $?))
 done
 
-rm -rf "$stub_dir" "$proj" "$home" "$(dirname "$canary")"
+safe_rm_rf "$stub_dir" "$proj" "$home" "$(dirname "$canary")"
 
 if [[ "$total" -gt 0 ]]; then
   echo

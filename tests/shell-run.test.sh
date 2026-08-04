@@ -6,6 +6,8 @@ set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(dirname "$here")"
+# shellcheck source=tests/lib/tmp.sh
+. "${here}/lib/tmp.sh"
 
 fails=0
 _check() { # _check "description" <rc-that-should-be-0>
@@ -17,7 +19,7 @@ _check() { # _check "description" <rc-that-should-be-0>
   fi
 }
 
-work="$(mktemp -d)"
+work="$(mk_tmpdir)"
 stub_dir="${work}/bin"
 log="${work}/script.log"
 mkdir -p "$stub_dir"
@@ -44,7 +46,7 @@ rc=$?
 [[ $rc -eq 0 && "$out" == "fallback" ]]
 _check "falls back to bash when stdin/stdout are not TTYs" $?
 
-rm -rf "$work"
+safe_rm_rf "$work"
 
 if [[ "$fails" -gt 0 ]]; then
   echo
