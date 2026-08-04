@@ -196,7 +196,7 @@ FROM ${BASE_IMAGE}
 RUN ...
 ```
 
-The launcher overrides `BASE_IMAGE` with the base image's resolved ID, so the image built is the image that was hashed. The default in the file is what keeps the layer buildable by hand — `cd .claude-contained/layer && docker build -t my-layer .` — and inside a devcontainer that never runs the launcher. A layer that omits the `ARG` still builds, but draws an unconsumed-build-argument warning from the builder.
+The launcher hashes the base image's resolved identity, but supplies a runtime-selected builder reference as `BASE_IMAGE`. Docker uses its immutable resolved identity. Apple Containers currently uses the original local tag because its manifest digest is not a valid local `FROM` reference; the launcher rechecks the base identity before and after a staged build, then promotes the stage only when it remained stable. A mutation, probe fault, build failure, or promotion failure stops the run; it never falls back to the base image. A leftover staging image is reported as a warning after a successful promotion. The default in the file keeps it buildable by hand — `cd .claude-contained/layer && docker build -t my-layer .` — and inside a devcontainer that never runs the launcher.
 
 Nothing validates the layer's contents. It can break the base image's invariants, and the container belongs to the project, so examples and this documentation carry that weight rather than a checker.
 

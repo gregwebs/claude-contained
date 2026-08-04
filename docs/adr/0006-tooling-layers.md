@@ -24,8 +24,10 @@ rejected and the cost it accepted.
 ## The layer is a whole Dockerfile, not a snippet
 
 A layer declares `ARG BASE_IMAGE=claude-contained:latest` and builds `FROM
-${BASE_IMAGE}`. That is the entire contract. The launcher overrides the argument
-with the base image's resolved ID; the default in the file is what keeps the
+${BASE_IMAGE}`. That is the entire contract. The launcher hashes the base
+image's resolved identity, while its runtime selects a builder-resolvable
+reference for the argument; see [ADR-0007](0007-tooling-layer-builder-reference.md).
+The default in the file is what keeps the
 layer buildable by hand, `docker build -t my-layer .`, and by a devcontainer
 that has never heard of this launcher.
 
@@ -155,7 +157,7 @@ layer rather than a recoverable cache problem. A missing base image is reported
 rather than built, because building it implicitly would turn a first run into a
 long surprise.
 
-The corollary is easy to miss and is the reason `Runtime.ImageID` has the shape
+The corollary is easy to miss and is the reason `Runtime.DescribeImage` has the shape
 it does. Because "the base image is absent" sends the user somewhere expensive
 and possibly wrong, the image probe never infers absence from a bare nonzero
 exit: it confirms the probe subcommand exists first, so a runtime CLI that spells

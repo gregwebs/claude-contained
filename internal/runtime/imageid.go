@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-// probeImageID is Runtime.ImageID for both runtimes: run `<bin> image inspect
+// probeImageID is Runtime.DescribeImage's shared identity probe: run `<bin> image inspect
 // [format args] <ref>`, and classify the result into present, absent, or
 // fault.
 //

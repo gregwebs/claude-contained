@@ -24,6 +24,12 @@ var ErrAborted = errors.New("aborted")
 // Apple drives Apple Containers via the `container` CLI.
 type Apple struct{ platform Platform }
 
+// appleDigestBuildRefSupported is deliberately false until a version-specific
+// live probe proves that a local name@digest is resolved without registry I/O.
+// It is injectable for the synthetic capability test; unverified versions use
+// the mutable local tag guarded by the launcher.
+var appleDigestBuildRefSupported = func(context.Context, string, string) bool { return false }
+
 // NewApple takes the platform explicitly; there is no zero-argument form,
 // because it would silently construct the unnamed-platform behavior in a caller
 // that meant to say Darwin.
@@ -111,8 +117,24 @@ func (a *Apple) RenderBuild(spec BuildSpec) []string {
 // subcommand spelling nor the JSON shape has been run against a real install;
 // probeImageID's capability probe is what turns a wrong noun into a named
 // fault instead of a false "the base image is not built".
-func (a *Apple) ImageID(ctx context.Context, ref string) (string, bool, error) {
-	return probeImageID(ctx, a.Bin(), ref, nil, parseAppleImageID)
+func (a *Apple) DescribeImage(ctx context.Context, ref string) (ImageDescriptor, bool, error) {
+	id, ok, err := probeImageID(ctx, a.Bin(), ref, nil, parseAppleImageID)
+	if err != nil || !ok {
+		return ImageDescriptor{}, ok, err
+	}
+	if appleDigestBuildRefSupported(ctx, ref, id) {
+		return ImageDescriptor{Identity: id, BuildRef: ref + "@" + id, BuildRefImmutable: true}, true, nil
+	}
+	return ImageDescriptor{Identity: id, BuildRef: ref, BuildRefImmutable: false}, true, nil
+}
+
+func (a *Apple) RenderTag(source, target string) []string {
+	return []string{a.Bin(), "image", "tag", source, target}
+}
+func (a *Apple) RenderRemove(ref string) []string {
+	// Apple calls the operation "delete" (not rm); --force makes an already
+	// absent stage a successful cleanup.
+	return []string{a.Bin(), "image", "delete", "--force", ref}
 }
 
 func (a *Apple) List(ctx context.Context) ([]string, error) {

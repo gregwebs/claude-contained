@@ -133,10 +133,23 @@ func (d *Docker) RenderBuild(spec BuildSpec) []string {
 // capability probe in imageid.go still runs, because the cost is one process on
 // a path that already failed and the alternative is inferring absence from an
 // exit status we have not earned.
-func (d *Docker) ImageID(ctx context.Context, ref string) (string, bool, error) {
-	return probeImageID(ctx, d.Bin(), ref,
+func (d *Docker) DescribeImage(ctx context.Context, ref string) (ImageDescriptor, bool, error) {
+	id, ok, err := probeImageID(ctx, d.Bin(), ref,
 		[]string{"--format", "{{.Id}}"},
 		func(raw []byte) string { return strings.TrimSpace(string(raw)) })
+	if err != nil || !ok {
+		return ImageDescriptor{}, ok, err
+	}
+	return ImageDescriptor{Identity: id, BuildRef: id, BuildRefImmutable: true}, true, nil
+}
+
+func (d *Docker) RenderTag(source, target string) []string {
+	return []string{d.Bin(), "tag", source, target}
+}
+func (d *Docker) RenderRemove(ref string) []string {
+	// Docker still reports a missing reference despite --force; the launcher
+	// normalizes that known absence with DescribeImage after a failed removal.
+	return []string{d.Bin(), "image", "rm", "--force", ref}
 }
 
 func (d *Docker) List(ctx context.Context) ([]string, error) {

@@ -111,6 +111,15 @@ type BuildSpec struct {
 	Labels []LabelArg
 }
 
+// ImageDescriptor separates the stable identity used to name a derived image
+// from the reference a runtime's builder can resolve. Apple Containers' local
+// manifest digest is an identity, but is not itself a valid FROM reference.
+type ImageDescriptor struct {
+	Identity          string
+	BuildRef          string
+	BuildRefImmutable bool
+}
+
 // Profile is the pure, data-only half of a runtime: everything plan building
 // needs to know about which runtime it targets, with no I/O attached.
 //
@@ -176,7 +185,7 @@ type Runtime interface {
 	RenderExec(ExecSpec) []string
 	// RenderBuild returns the complete argv for an image build (ticket 10).
 	RenderBuild(BuildSpec) []string
-	// ImageID reports a stable, runtime-assigned identifier for a locally
+	// DescribeImage reports a stable, runtime-assigned identifier for a locally
 	// present image reference. Three outcomes, and the difference between the
 	// last two is the whole point of the method's shape:
 	//
@@ -195,7 +204,13 @@ type Runtime interface {
 	// it, never parse it. Docker reports a config digest and Apple Containers a
 	// manifest digest, which is why nothing above here may assume a shape --
 	// and why switching runtimes legitimately rebuilds every derived image.
-	ImageID(ctx context.Context, ref string) (id string, ok bool, err error)
+	DescribeImage(ctx context.Context, ref string) (ImageDescriptor, bool, error)
+	// RenderTag promotes source to target without rebuilding it.
+	RenderTag(source, target string) []string
+	// RenderRemove removes exactly ref. CLI removal itself can report an absent
+	// image as an error, so callers that need idempotence must normalize that
+	// result through DescribeImage rather than infer it from an exit status.
+	RenderRemove(ref string) []string
 	// List reports the names of running containers.
 	List(ctx context.Context) ([]string, error)
 	// InspectEnv reports a container's environment as KEY=VALUE lines -- the

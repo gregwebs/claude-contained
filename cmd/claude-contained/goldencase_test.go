@@ -707,7 +707,7 @@ var goldenCases = []goldenCase{
 	// existing slug moves and no existing golden file is renamed.
 	{
 		Slug: "60-layer-build-confirmed",
-		Desc: "a checked-in tooling layer that has not been built is confirmed, built with the base image's resolved ID as BASE_IMAGE, and run in place of the base image",
+		Desc: "a checked-in tooling layer that has not been built is confirmed, built from the runtime-selected base reference, and run in place of the base image",
 		Setup: func(t *testing.T, proj, home string) goldenExtras {
 			writeGoldenLayer(t, proj)
 			// Only the base image exists; the derived tag is absent, which is

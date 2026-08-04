@@ -1,15 +1,22 @@
 # case: 60-layer-build-confirmed
-# desc: a checked-in tooling layer that has not been built is confirmed, built with the base image's resolved ID as BASE_IMAGE, and run in place of the base image
+# desc: a checked-in tooling layer that has not been built is confirmed, built from the runtime-selected base reference, and run in place of the base image
 # config: apple-darwin
 --- exit ---
 0
 --- runtime-args ---
 == container build ==
 --build-arg
-BASE_IMAGE=sha256:base00
+BASE_IMAGE=claude-contained:latest
 -t
-claude-contained-layer:project-<LHASH>
+claude-contained-layer:project-<LHASH>-stage-<STAGE>
 <PROJ>/.claude-contained/layer
+
+== container image tag ==
+claude-contained-layer:project-<LHASH>-stage-<STAGE>
+claude-contained-layer:project-<LHASH>
+
+== container image delete --force ==
+claude-contained-layer:project-<LHASH>-stage-<STAGE>
 
 == container run ==
 --rm
