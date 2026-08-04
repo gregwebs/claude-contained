@@ -30,9 +30,9 @@ const Repo = "claude-contained-layer"
 
 // BaseImageArg is the build argument a layer declares as
 // `ARG BASE_IMAGE=claude-contained:latest` and consumes as `FROM ${BASE_IMAGE}`.
-// The launcher overrides it with the base image's resolved ID so the image
-// built is the image that was hashed; the default in the Dockerfile is what
-// keeps the layer buildable by hand and by a devcontainer.
+// The launcher overrides it with a runtime-selected builder reference while
+// separately hashing the base image's stable identity; the default in the
+// Dockerfile is what keeps the layer buildable by hand and by a devcontainer.
 const BaseImageArg = "BASE_IMAGE"
 
 // Build labels, namespaced like the Zellij labels (internal/zellij). They are

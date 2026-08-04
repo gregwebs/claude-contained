@@ -264,6 +264,26 @@ func TestRenderBuildIsSharedApartFromTheBinary(t *testing.T) {
 	}
 }
 
+func TestStagePromotionAndRemovalTargetOnlyTheSpecifiedReference(t *testing.T) {
+	const stage = "derived:stage"
+	const final = "derived:final"
+	for name, rt := range map[string]Runtime{"apple": NewApple(Darwin), "docker": NewDocker(Linux)} {
+		t.Run(name, func(t *testing.T) {
+			tag := rt.RenderTag(stage, final)
+			if tag[len(tag)-2] != stage || tag[len(tag)-1] != final {
+				t.Fatalf("promotion = %v, want %s -> %s", tag, stage, final)
+			}
+			remove := rt.RenderRemove(stage)
+			if remove[len(remove)-1] != stage || contains(remove, final) {
+				t.Fatalf("removal = %v, must target only %s", remove, stage)
+			}
+			if !contains(remove, "--force") {
+				t.Errorf("removal must request idempotent cleanup: %v", remove)
+			}
+		})
+	}
+}
+
 // The help fixtures also carry the build-context additions, alongside the
 // runtime-selection ones TestHelpDocumentsRuntimeSelection already pins.
 // Regenerate with the same diff command documented there.

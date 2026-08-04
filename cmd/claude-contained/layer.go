@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -32,6 +34,13 @@ import (
 var (
 	largeLayerFileCount   = 10_000
 	largeLayerHashedBytes = int64(64 << 20)
+	stageSuffix           = func() (string, error) {
+		var raw [16]byte
+		if _, err := rand.Read(raw[:]); err != nil {
+			return "", err
+		}
+		return hex.EncodeToString(raw[:]), nil
+	}
 )
 
 // resolveLayerImage is the whole tooling-layer decision for one run: which
@@ -84,7 +93,7 @@ func resolveLayerImage(
 	// The base image is probed before the context is hashed: a hash taken
 	// against an ID that does not exist names an image nobody can build, and
 	// "run --rebuild=full first" is the message the user actually needs.
-	baseID, present, err := rt.ImageID(ctx, baseRef)
+	base, present, err := rt.DescribeImage(ctx, baseRef)
 	if err != nil {
 		logger.Error("base image probe failed", diagnostic.ErrorAttr(err))
 		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
@@ -100,7 +109,7 @@ func resolveLayerImage(
 	logger.Debug("base image resolved",
 		diagnostic.String("image", baseRef), diagnostic.Bool("present", present))
 
-	id, err := layer.Resolve(dir, src.ProjectDir, baseID)
+	id, err := layer.Resolve(dir, src.ProjectDir, base.Identity)
 	if err != nil {
 		logger.Error("tooling layer identity failed", diagnostic.ErrorAttr(err))
 		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
@@ -118,7 +127,7 @@ func resolveLayerImage(
 	// method serves as the existence probe because both jobs need the same
 	// command and the same absence semantics, and a separate existence probe
 	// would be a second call that can disagree with the first.
-	_, present, err = rt.ImageID(ctx, id.Tag)
+	_, present, err = rt.DescribeImage(ctx, id.Tag)
 	if err != nil {
 		logger.Error("derived image probe failed", diagnostic.ErrorAttr(err))
 		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
@@ -171,59 +180,94 @@ func resolveLayerImage(
 		}
 	}
 
-	spec := runtime.BuildSpec{
-		Tag:     id.Tag,
-		Context: id.Dir,
-		// The base image's resolved ID, not its tag: the image built has to be
-		// the image that was hashed, or the tag would name a build nobody can
-		// reproduce. The layer's own `ARG BASE_IMAGE=claude-contained:latest`
-		// default is what keeps it buildable by hand without this.
-		BuildArgs: []string{layer.BaseImageArg + "=" + baseID},
-		// Set unconditionally. Whether they are rendered is the runtime's
-		// decision, not this function's -- which is what keeps knowledge that
-		// Docker and Apple differ inside internal/runtime.
-		Labels: []runtime.LabelArg{
-			{Key: layer.LabelLayer, Value: "1"},
-			{Key: layer.LabelProject, Value: src.ProjectDir},
-			{Key: layer.LabelDockerfile, Value: id.Dockerfile},
-			{Key: layer.LabelBase, Value: baseID},
-		},
+	build := func(tag string) int {
+		// Identity names the derived image; BuildRef is the builder input. They
+		// differ on Apple Containers, whose local manifest digest cannot always
+		// be resolved by FROM.
+		spec := runtime.BuildSpec{
+			Tag:       tag,
+			Context:   id.Dir,
+			BuildArgs: []string{layer.BaseImageArg + "=" + base.BuildRef},
+			Labels: []runtime.LabelArg{
+				{Key: layer.LabelLayer, Value: "1"},
+				{Key: layer.LabelProject, Value: src.ProjectDir},
+				{Key: layer.LabelDockerfile, Value: id.Dockerfile},
+				{Key: layer.LabelBase, Value: base.Identity},
+			},
+		}
+		argv := rt.RenderBuild(spec)
+		started := time.Now()
+		logger.Info("derived image build started", diagnostic.String("tag", tag), diagnostic.Value("argv", runtime.DiagnosticArgv(argv)))
+		if code := exec(ctx, argv, stdin, stdout, stderr); code != 0 {
+			logger.Warn("derived image build failed", diagnostic.String("tag", tag), diagnostic.Duration("duration", time.Since(started)), diagnostic.Int("exit_status", code))
+			_, _ = fmt.Fprintf(stderr, "error: the tooling layer build failed (exit %d).\n", code)
+			_, _ = fmt.Fprintf(stderr, "       Fix %s and retry; the base image was not used as a fallback.\n", id.Dockerfile)
+			return cli.ExitFailure
+		}
+		return cli.ExitOK
 	}
 
-	argv := rt.RenderBuild(spec)
-	started := time.Now()
-	logger.Info("derived image build started",
-		diagnostic.String("tag", id.Tag), diagnostic.Value("argv", runtime.DiagnosticArgv(argv)))
-	if code := exec(ctx, argv, stdin, stdout, stderr); code != 0 {
-		logger.Warn("derived image build failed",
-			diagnostic.String("tag", id.Tag),
-			diagnostic.Duration("duration", time.Since(started)),
-			diagnostic.Int("exit_status", code))
-		_, _ = fmt.Fprintf(stderr, "error: the tooling layer build failed (exit %d).\n", code)
-		_, _ = fmt.Fprintf(stderr, "       Fix %s and retry; the base image was not used as a fallback.\n",
-			id.Dockerfile)
-		// The builder's own status is the launcher's, matching runRebuild. A
-		// builder exiting 2 therefore makes the launcher exit 2, which
-		// elsewhere means a usage error -- accepted, because inventing a status
-		// would hide the builder's.
-		return "", code
+	if base.BuildRefImmutable {
+		if code := build(id.Tag); code != cli.ExitOK {
+			return "", code
+		}
+		return id.Tag, cli.ExitOK
 	}
-	logger.Info("derived image build completed",
-		diagnostic.String("tag", id.Tag),
-		diagnostic.Duration("duration", time.Since(started)),
-		diagnostic.Int("exit_status", 0))
 
-	// The self-check turns the one failure this design cannot otherwise
-	// diagnose -- a probe that reads the wrong field, so a freshly built image
-	// is never seen and every run rebuilds it -- from a mystery into one line.
-	// It never fails the run: the build reported success, and refusing to start
-	// a container over a disagreement about a digest would be worse than the
-	// bug it reports.
-	if _, ok, probeErr := rt.ImageID(ctx, id.Tag); !ok || probeErr != nil {
-		logger.Warn("derived image not visible after a successful build",
-			diagnostic.String("tag", id.Tag),
-			diagnostic.String("runtime", rt.Bin()))
+	suffix, err := stageSuffix()
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "error: could not generate a tooling-layer staging tag: %v\n", err)
+		return "", cli.ExitFailure
 	}
+	stage := id.Tag + "-stage-" + suffix
+	pre, ok, probeErr := rt.DescribeImage(ctx, baseRef)
+	if probeErr != nil {
+		_, _ = fmt.Fprintf(stderr, "error: could not verify the base image before building the tooling layer: %v\n", probeErr)
+		return "", cli.ExitFailure
+	}
+	if !ok || pre.Identity != base.Identity {
+		_, _ = fmt.Fprintln(stderr, "error: the base image changed before the tooling layer could be built; retry.")
+		return "", cli.ExitFailure
+	}
+
+	buildCode := build(stage)
+	cleanup := func(primary bool) {
+		if code := exec(ctx, rt.RenderRemove(stage), stdin, stdout, stderr); code != 0 {
+			// Docker can still reject an absent reference despite --force. A failed
+			// removal is harmless only when a fresh runtime probe establishes that
+			// this exact stage is already absent (for example after concurrent cleanup).
+			_, present, probeErr := rt.DescribeImage(ctx, stage)
+			if probeErr == nil && !present {
+				return
+			}
+			if primary {
+				_, _ = fmt.Fprintf(stderr, "warning: could not remove tooling-layer staging image %s (exit %d).\n", stage, code)
+			} else {
+				_, _ = fmt.Fprintf(stderr, "warning: tooling-layer staging image %s remains (exit %d).\n", stage, code)
+			}
+		}
+	}
+	if buildCode != cli.ExitOK {
+		cleanup(true)
+		return "", buildCode
+	}
+	post, ok, probeErr := rt.DescribeImage(ctx, baseRef)
+	if probeErr != nil {
+		_, _ = fmt.Fprintf(stderr, "error: could not verify the base image after building the tooling layer: %v\n", probeErr)
+		cleanup(true)
+		return "", cli.ExitFailure
+	}
+	if !ok || post.Identity != base.Identity {
+		_, _ = fmt.Fprintln(stderr, "error: the base image changed while the tooling layer was building; retry.")
+		cleanup(true)
+		return "", cli.ExitFailure
+	}
+	if code := exec(ctx, rt.RenderTag(stage, id.Tag), stdin, stdout, stderr); code != 0 {
+		_, _ = fmt.Fprintf(stderr, "error: could not promote the tooling-layer staging image (exit %d).\n", code)
+		cleanup(true)
+		return "", cli.ExitFailure
+	}
+	cleanup(false)
 	return id.Tag, cli.ExitOK
 }
 

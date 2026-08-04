@@ -6,10 +6,18 @@
 --- runtime-args ---
 == container build ==
 --build-arg
-BASE_IMAGE=sha256:base00
+BASE_IMAGE=claude-contained:latest
 -t
-claude-contained-layer:project-<LHASH>
+claude-contained-layer:project-<LHASH>-stage-<STAGE>
 <PROJ>/.claude-contained/layer
+
+== container image tag ==
+claude-contained-layer:project-<LHASH>-stage-<STAGE>
+claude-contained-layer:project-<LHASH>
+
+== container image delete ==
+--force
+claude-contained-layer:project-<LHASH>-stage-<STAGE>
 
 == container run ==
 --rm

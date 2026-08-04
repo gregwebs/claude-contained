@@ -103,7 +103,7 @@ func newGoldenFixture(t *testing.T) goldenFixture {
 }
 
 // goldenImageIDArm is the `image inspect` arm shared by both stubs, minus the
-// one line that renders the answer. It must implement Runtime.ImageID's
+// one line that renders the answer. It must implement Runtime.DescribeImage's
 // contract rather than falling through to the scripts' `*) exit 0 ;;` default,
 // because that default means "exit 0 with no output", which probeImageID
 // classifies as a fault -- the stub would turn every layer probe into a
@@ -428,7 +428,8 @@ var (
 	// The slug bound matches host.SanitizeFolderName's: 1..20 characters of
 	// [a-z0-9-] after an alphanumeric first character. It may end in a dash, so
 	// the rendered form can legitimately read slug--<LHASH>.
-	reLayerHash = regexp.MustCompile(`(claude-contained-layer:[a-z0-9][a-z0-9-]{0,19})-[0-9a-f]{32}`)
+	reLayerHash   = regexp.MustCompile(`(claude-contained-layer:[a-z0-9][a-z0-9-]{0,19})-[0-9a-f]{32}`)
+	reStageSuffix = regexp.MustCompile(`-stage-[0-9a-f]{32}`)
 )
 
 // normalizeText applies every named substitution. Order is load-bearing: the
@@ -445,6 +446,7 @@ func normalizeText(s string, n normContext) string {
 	s = reCacheBust.ReplaceAllString(s, "AI_TOOLS_CACHE_BUST=<TOKEN>")
 	s = rePIDEpoch.ReplaceAllString(s, "<PID> <EPOCH>")
 	s = reLayerHash.ReplaceAllString(s, "${1}-<LHASH>")
+	s = reStageSuffix.ReplaceAllString(s, "-stage-<STAGE>")
 	if n.uid != "" {
 		s = strings.ReplaceAll(s, "HOST_UID="+n.uid, "HOST_UID=<UID>")
 	}

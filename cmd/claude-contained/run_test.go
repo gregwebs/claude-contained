@@ -35,7 +35,7 @@ import (
 // runtime.Apple.InspectEnv parses -- letting Zellij driver tests present a
 // marked container. Unset, it stays silent, same as `list`.
 //
-// `image` answers Runtime.ImageID; see stubImageArm.
+// `image` answers Runtime.DescribeImage; see stubImageArm.
 func writeStubContainer(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -56,7 +56,7 @@ func writeStubContainer(t *testing.T) string {
 // stubImageArm is the `image inspect` arm both stubs share, parameterized only
 // by the line that renders a present image's identifier.
 //
-// It implements Runtime.ImageID's contract rather than relying on the scripts'
+// It implements Runtime.DescribeImage's contract rather than relying on the scripts'
 // `*) exit 0 ;;` default: that default means "exit 0 with no output", which
 // probeImageID classifies as a *fault*, so a stub without this arm would turn
 // every layer probe into a runtime error rather than the absence it means.

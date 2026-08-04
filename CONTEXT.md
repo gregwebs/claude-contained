@@ -32,6 +32,15 @@ _Avoid_: layer, custom image, overlay, Dockerfile snippet
 The image built from a project's tooling layer and run in place of the base image, tagged under `claude-contained-layer` with a content hash of the base image's identity and the layer's build context.
 _Avoid_: layered image, project image, child image
 
+**Image identity**:
+The stable runtime-assigned identity of a local base image. It is used only for derived-image hashing, invalidation, provenance, and mutation comparisons.
+
+**Builder reference**:
+The runtime-selected reference supplied as `BASE_IMAGE` to a tooling-layer build. It can differ from image identity; see [ADR-0007](docs/adr/0007-tooling-layer-builder-reference.md).
+
+**Staging image**:
+An isolated, randomly suffixed derived-image tag used when a builder reference is mutable. It is promoted to the final derived image only after the base identity is rechecked.
+
 **Layer env fragment**:
 A `KEY=VALUE` file a tooling layer installs into a directory the entrypoint reads, contributing runtime environment the image alone cannot express — such as a cache path under the host home directory, which is unknown at build time.
 _Avoid_: layer env file, dotenv, ENV

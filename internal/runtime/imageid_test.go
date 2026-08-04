@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -62,41 +63,80 @@ func imageIDRuntimes() map[string]Runtime {
 	}
 }
 
-func TestImageIDReportsAPresentImage(t *testing.T) {
+func TestDescribeImageReportsAPresentImage(t *testing.T) {
 	for name, rt := range imageIDRuntimes() {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv("PATH", writeImageIDStubs(t)+string(os.PathListSeparator)+os.Getenv("PATH"))
 			t.Setenv("STUB_MODE", "present")
 
-			id, ok, err := rt.ImageID(t.Context(), "claude-contained:latest")
+			desc, ok, err := rt.DescribeImage(t.Context(), "claude-contained:latest")
 			if err != nil {
-				t.Fatalf("ImageID: %v", err)
+				t.Fatalf("DescribeImage: %v", err)
 			}
 			if !ok {
 				t.Fatal("ok = false, want true: the stub reported an image")
 			}
-			if id != "sha256:stub" {
-				t.Errorf("id = %q, want %q", id, "sha256:stub")
+			if desc.Identity != "sha256:stub" {
+				t.Errorf("identity = %q, want %q", desc.Identity, "sha256:stub")
 			}
 		})
+	}
+}
+
+func TestImageDescriptorsSeparateIdentityFromAppleBuildReference(t *testing.T) {
+	t.Setenv("PATH", writeImageIDStubs(t)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("STUB_MODE", "present")
+
+	apple, ok, err := NewApple(Darwin).DescribeImage(t.Context(), "claude-contained:latest")
+	if err != nil || !ok {
+		t.Fatalf("apple DescribeImage = (%+v, %v, %v)", apple, ok, err)
+	}
+	if apple.Identity != "sha256:stub" || apple.BuildRef != "claude-contained:latest" || apple.BuildRefImmutable {
+		t.Errorf("unverified Apple descriptor = %+v, want digest identity and mutable local tag", apple)
+	}
+	if strings.HasPrefix(apple.BuildRef, "sha256:") {
+		t.Errorf("Apple build reference must never be a standalone digest: %q", apple.BuildRef)
+	}
+
+	docker, ok, err := NewDocker(Linux).DescribeImage(t.Context(), "claude-contained:latest")
+	if err != nil || !ok {
+		t.Fatalf("docker DescribeImage = (%+v, %v, %v)", docker, ok, err)
+	}
+	if docker.Identity != "sha256:stub" || docker.BuildRef != "sha256:stub" || !docker.BuildRefImmutable {
+		t.Errorf("Docker descriptor = %+v, want immutable digest for both fields", docker)
+	}
+}
+
+func TestAppleVerifiedCapabilityUsesNamedDigestReference(t *testing.T) {
+	t.Setenv("PATH", writeImageIDStubs(t)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	orig := appleDigestBuildRefSupported
+	appleDigestBuildRefSupported = func(context.Context, string, string) bool { return true }
+	t.Cleanup(func() { appleDigestBuildRefSupported = orig })
+
+	desc, ok, err := NewApple(Darwin).DescribeImage(t.Context(), "claude-contained:latest")
+	if err != nil || !ok {
+		t.Fatalf("DescribeImage = (%+v, %v, %v)", desc, ok, err)
+	}
+	if desc.BuildRef != "claude-contained:latest@sha256:stub" || !desc.BuildRefImmutable {
+		t.Errorf("descriptor = %+v, want immutable named digest", desc)
 	}
 }
 
 // The case that used to be silently miscalled "absent". A probe that succeeds
 // and yields nothing readable is a defect in *our* parsing, and reporting
 // absence would send the caller to rebuild an image that is already there.
-func TestImageIDTreatsAnUnreadableSuccessAsAFault(t *testing.T) {
+func TestDescribeImageTreatsAnUnreadableSuccessAsAFault(t *testing.T) {
 	for name, rt := range imageIDRuntimes() {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv("PATH", writeImageIDStubs(t)+string(os.PathListSeparator)+os.Getenv("PATH"))
 			t.Setenv("STUB_MODE", "empty")
 
-			id, ok, err := rt.ImageID(t.Context(), "claude-contained:latest")
+			desc, ok, err := rt.DescribeImage(t.Context(), "claude-contained:latest")
 			if err == nil {
 				t.Fatal("err = nil, want a fault: a successful probe we cannot read is not an absence")
 			}
-			if ok || id != "" {
-				t.Errorf("got (%q, %v), want (\"\", false)", id, ok)
+			if ok || desc.Identity != "" {
+				t.Errorf("got (%q, %v), want (\"\", false)", desc.Identity, ok)
 			}
 			if !strings.Contains(err.Error(), rt.Bin()) {
 				t.Errorf("err = %q, want it to name the binary %q", err, rt.Bin())
@@ -105,19 +145,19 @@ func TestImageIDTreatsAnUnreadableSuccessAsAFault(t *testing.T) {
 	}
 }
 
-func TestImageIDReportsARealAbsence(t *testing.T) {
+func TestDescribeImageReportsARealAbsence(t *testing.T) {
 	for name, rt := range imageIDRuntimes() {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv("PATH", writeImageIDStubs(t)+string(os.PathListSeparator)+os.Getenv("PATH"))
 			t.Setenv("STUB_MODE", "missing")
 			t.Setenv("STUB_HELP_EXIT", "0")
 
-			id, ok, err := rt.ImageID(t.Context(), "claude-contained:latest")
+			desc, ok, err := rt.DescribeImage(t.Context(), "claude-contained:latest")
 			if err != nil {
 				t.Fatalf("err = %v, want nil: the subcommand exists, so this is a genuine absence", err)
 			}
-			if ok || id != "" {
-				t.Errorf("got (%q, %v), want (\"\", false)", id, ok)
+			if ok || desc.Identity != "" {
+				t.Errorf("got (%q, %v), want (\"\", false)", desc.Identity, ok)
 			}
 		})
 	}
@@ -126,19 +166,19 @@ func TestImageIDReportsARealAbsence(t *testing.T) {
 // The whole reason the capability probe exists: a CLI that spells the
 // subcommand differently must produce a named fault, never "the base image is
 // not built" on a machine where it is right there.
-func TestImageIDTreatsAnUnknownSubcommandAsAFault(t *testing.T) {
+func TestDescribeImageTreatsAnUnknownSubcommandAsAFault(t *testing.T) {
 	for name, rt := range imageIDRuntimes() {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv("PATH", writeImageIDStubs(t)+string(os.PathListSeparator)+os.Getenv("PATH"))
 			t.Setenv("STUB_MODE", "missing")
 			t.Setenv("STUB_HELP_EXIT", "64")
 
-			id, ok, err := rt.ImageID(t.Context(), "claude-contained:latest")
+			desc, ok, err := rt.DescribeImage(t.Context(), "claude-contained:latest")
 			if err == nil {
 				t.Fatal("err = nil, want a fault naming the subcommand")
 			}
-			if ok || id != "" {
-				t.Errorf("got (%q, %v), want (\"\", false)", id, ok)
+			if ok || desc.Identity != "" {
+				t.Errorf("got (%q, %v), want (\"\", false)", desc.Identity, ok)
 			}
 			for _, want := range []string{rt.Bin(), "image inspect"} {
 				if !strings.Contains(err.Error(), want) {
@@ -153,17 +193,17 @@ func TestImageIDTreatsAnUnknownSubcommandAsAFault(t *testing.T) {
 	}
 }
 
-func TestImageIDWithNoBinaryOnPathIsAFault(t *testing.T) {
+func TestDescribeImageWithNoBinaryOnPathIsAFault(t *testing.T) {
 	for name, rt := range imageIDRuntimes() {
 		t.Run(name, func(t *testing.T) {
 			t.Setenv("PATH", t.TempDir())
 
-			id, ok, err := rt.ImageID(t.Context(), "claude-contained:latest")
+			desc, ok, err := rt.DescribeImage(t.Context(), "claude-contained:latest")
 			if err == nil {
 				t.Fatal("err = nil, want a fault: an unrunnable probe answered nothing")
 			}
-			if ok || id != "" {
-				t.Errorf("got (%q, %v), want (\"\", false)", id, ok)
+			if ok || desc.Identity != "" {
+				t.Errorf("got (%q, %v), want (\"\", false)", desc.Identity, ok)
 			}
 		})
 	}
