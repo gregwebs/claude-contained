@@ -231,21 +231,28 @@ func extractDashC(args []string) string {
 
 // renderInvocation is the retired stub's log line shape (lib/isolate.sh:88-92),
 // kept because it is compact and reviewable -- not because anything now
-// compares against it. argv[0] and argv[1] are the injected runner's or
-// replaceProcess's own bin and subcommand.
+// compares against it. argv[0] and argv[1] are normally the injected runner's
+// or replaceProcess's own bin and subcommand. Apple image operations add a
+// second verb, which belongs in the invocation header so tag/delete actions
+// remain distinguishable from the arguments they operate on.
 func renderInvocation(argv []string) string {
 	var b strings.Builder
 	self, sub := "", ""
+	headerArgs := 2
 	if len(argv) > 0 {
 		self = argv[0]
 	}
 	if len(argv) > 1 {
 		sub = argv[1]
 	}
+	if len(argv) > 2 && argv[1] == "image" && (argv[2] == "tag" || argv[2] == "delete") {
+		sub += " " + argv[2]
+		headerArgs = 3
+	}
 	fmt.Fprintf(&b, "== %s %s ==\n", self, sub)
 	var rest []string
-	if len(argv) > 2 {
-		rest = argv[2:]
+	if len(argv) > headerArgs {
+		rest = argv[headerArgs:]
 	}
 	for _, a := range rest {
 		b.WriteString(a)

@@ -789,7 +789,7 @@ func TestChangingTheBaseImageIDForcesARebuild(t *testing.T) {
 	if len(*calls2) != 4 {
 		t.Fatalf("the second run must rebuild: %#v", *calls2)
 	}
-	if !contains(t, (*calls2)[0], secondTag) {
-		t.Errorf("the rebuild must target the new tag %q: %v", secondTag, (*calls2)[0])
+	if !strings.Contains((*calls2)[0][len((*calls2)[0])-2], secondTag+"-stage-") {
+		t.Errorf("the rebuild must stage from the new tag %q: %v", secondTag, (*calls2)[0])
 	}
 }
