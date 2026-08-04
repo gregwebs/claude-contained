@@ -8,6 +8,8 @@ set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(dirname "$here")"
+# shellcheck source=tests/lib/tmp.sh
+. "${here}/lib/tmp.sh"
 unset CLAUDE_CONTAINED_LOG_LEVEL
 
 fails=0
@@ -21,7 +23,7 @@ _check() { # _check "description" <rc-that-should-be-0>
 }
 
 setup_runtime_stubs() {
-  stub_dir="$(mktemp -d)"
+  stub_dir="$(mk_tmpdir)"
   cat > "${stub_dir}/container" <<'EOF'
 #!/usr/bin/env bash
 set -uo pipefail
@@ -71,8 +73,8 @@ echo "== srt placeholder cleanup =="
 read -ra targets <<< "${CLAUDE_CONTAINED_TEST_TARGETS:-bin/claude-contained bin/claude-contained-docked}"
 for target in "${targets[@]}"; do
   setup_runtime_stubs
-  home="$(mktemp -d)"
-  project="$(mktemp -d)"
+  home="$(mk_tmpdir)"
+  project="$(mk_tmpdir)"
 
   : > "${project}/.mcp.json"
   : > "${project}/.bashrc"
@@ -85,12 +87,12 @@ for target in "${targets[@]}"; do
   if [[ ! -e "${project}/.mcp.json" ]]; then check_rc=0; else check_rc=1; fi
   _check "${target}: removes zero-byte srt placeholders created during run" "$check_rc"
 
-  rm -rf "$stub_dir" "$home" "$project"
+  safe_rm_rf "$stub_dir" "$home" "$project"
 done
 
 echo "== Claude native link =="
-link_home="$(mktemp -d)"
-fake_bin_dir="$(mktemp -d)"
+link_home="$(mk_tmpdir)"
+fake_bin_dir="$(mk_tmpdir)"
 fake_claude="${fake_bin_dir}/claude"
 cat > "$fake_claude" <<'EOF'
 #!/usr/bin/env bash
@@ -104,7 +106,7 @@ version_target="$(readlink "${link_home}/.local/share/claude/versions/1.2.3")"
 if [[ "$bin_target" == "${link_home}/.local/share/claude/versions/1.2.3" && "$version_target" == "$fake_claude" ]]; then check_rc=0; else check_rc=1; fi
 _check "creates a native-shaped Claude versions symlink" "$check_rc"
 
-preserve_home="$(mktemp -d)"
+preserve_home="$(mk_tmpdir)"
 mkdir -p "${preserve_home}/.local/bin"
 existing_target="${fake_bin_dir}/existing-claude"
 : > "$existing_target"
@@ -113,7 +115,7 @@ CLAUDE_CONTAINED_CLAUDE_BIN="$fake_claude" "${repo_root}/image/claude-native-lin
 [[ "$(readlink "${preserve_home}/.local/bin/claude")" == "$existing_target" ]]
 _check "preserves an existing Claude launcher link" $?
 
-rm -rf "$link_home" "$preserve_home" "$fake_bin_dir"
+safe_rm_rf "$link_home" "$preserve_home" "$fake_bin_dir"
 
 if [[ "$fails" -gt 0 ]]; then
   echo

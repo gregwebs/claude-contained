@@ -25,6 +25,8 @@ set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(dirname "$here")"
+# shellcheck source=tests/lib/tmp.sh
+. "${here}/lib/tmp.sh"
 unset CLAUDE_CONTAINED_LOG_LEVEL
 
 fails=0
@@ -40,7 +42,7 @@ _check() { # _check "description" <rc-that-should-be-0>
 resolve_dir() { (cd "$1" && pwd -P); }
 
 setup_runtime_stubs() { # sets stub_dir
-  stub_dir="$(mktemp -d)"
+  stub_dir="$(mk_tmpdir)"
   cat > "${stub_dir}/container" <<'EOF'
 #!/usr/bin/env bash
 set -uo pipefail
@@ -97,8 +99,8 @@ make_repo_with_worktree() { # echoes "<main> <wt>"
 launcher_run() { # launcher_run <target> <home> <project> <stdin-text> [args...]
   local target="$1" home="$2" project="$3" stdin_text="$4"
   shift 4
-  lr_stdout="$(mktemp)"
-  lr_stderr="$(mktemp)"
+  lr_stdout="$(mk_tmpfile)"
+  lr_stderr="$(mk_tmpfile)"
   printf '%s' "$stdin_text" | env HOME="$home" PATH="${stub_dir}:$PATH" \
     "${repo_root}/${target}" -N -s -C "$project" "$@" \
     >"$lr_stdout" 2>"$lr_stderr"
@@ -117,7 +119,7 @@ for target in "${targets[@]}"; do
 
   # --- Scenario A: a dead-PID mutex is reclaimed promptly, not timed out ---
   setup_runtime_stubs
-  home="$(mktemp -d)"; root="$(mktemp -d)"
+  home="$(mk_tmpdir)"; root="$(mk_tmpdir)"
   read -r main wt <<< "$(make_repo_with_worktree "$root" hidden-wt)"
   lock_file="$(git -C "$wt" rev-parse --absolute-git-dir)/locked"
   mutex_dir="${main}/.git/claude-contained-worktree-locks.lock"
@@ -140,12 +142,12 @@ for target in "${targets[@]}"; do
   worktree_is_locked "$main" "$wt"; rc=$?
   if [[ $rc -ne 0 ]]; then check_rc=0; else check_rc=1; fi
   _check "${target}: worktree is unlocked once the run completes" "$check_rc"
-  rm -rf "$stub_dir" "$home" "$root" "$lr_stdout" "$lr_stderr"
+  safe_rm_rf "$stub_dir" "$home" "$root" "$lr_stdout" "$lr_stderr"
 
   # --- Scenario B: an aged live-PID mutex is likewise reclaimed (guards PID
   #     reuse: a resolvable PID must not by itself block reclaiming) ---
   setup_runtime_stubs
-  home="$(mktemp -d)"; root="$(mktemp -d)"
+  home="$(mk_tmpdir)"; root="$(mk_tmpdir)"
   read -r main wt <<< "$(make_repo_with_worktree "$root" hidden-wt)"
   lock_file="$(git -C "$wt" rev-parse --absolute-git-dir)/locked"
   mutex_dir="${main}/.git/claude-contained-worktree-locks.lock"
@@ -167,13 +169,13 @@ for target in "${targets[@]}"; do
   worktree_is_locked "$main" "$wt"; rc=$?
   if [[ $rc -ne 0 ]]; then check_rc=0; else check_rc=1; fi
   _check "${target}: worktree is unlocked once the run completes (aged case)" "$check_rc"
-  rm -rf "$stub_dir" "$home" "$root" "$lr_stdout" "$lr_stderr"
+  safe_rm_rf "$stub_dir" "$home" "$root" "$lr_stdout" "$lr_stderr"
 
   # --- Scenario C: a live, fresh holder is not reclaimed -- the launcher
   #     times out (twice: once locking, fail-safe; once at cleanup,
   #     fail-open) but applies the lock anyway and leaves it in place. ---
   setup_runtime_stubs
-  home="$(mktemp -d)"; root="$(mktemp -d)"
+  home="$(mk_tmpdir)"; root="$(mk_tmpdir)"
   read -r main wt <<< "$(make_repo_with_worktree "$root" hidden-wt)"
   lock_file="$(git -C "$wt" rev-parse --absolute-git-dir)/locked"
   mutex_dir="${main}/.git/claude-contained-worktree-locks.lock"
@@ -203,8 +205,8 @@ for target in "${targets[@]}"; do
 
   # Manual teardown: the launcher could not release this one, so we must.
   git -C "$main" worktree unlock "$wt" >/dev/null 2>&1
-  rm -rf "$mutex_dir"
-  rm -rf "$stub_dir" "$home" "$root" "$lr_stdout" "$lr_stderr"
+  safe_rm_rf "$mutex_dir"
+  safe_rm_rf "$stub_dir" "$home" "$root" "$lr_stdout" "$lr_stderr"
 
 done
 

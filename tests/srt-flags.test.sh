@@ -17,6 +17,8 @@ set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(dirname "$here")"
+# shellcheck source=tests/lib/tmp.sh
+. "${here}/lib/tmp.sh"
 unset CLAUDE_CONTAINED_LOG_LEVEL
 
 # Emitted container args for a given set of launcher flags, using a stub runtime
@@ -26,9 +28,9 @@ launcher_argv() { # launcher_argv <target> <flags...>
   HOME="$home" PATH="${stub_dir}:$PATH" "${repo_root}/${target}" "$@" -N -s -C "$proj" 2>/dev/null
 }
 
-stub_dir="$(mktemp -d)"
-proj="$(mktemp -d)"
-home="$(mktemp -d)"
+stub_dir="$(mk_tmpdir)"
+proj="$(mk_tmpdir)"
+home="$(mk_tmpdir)"
 
 # Stub runtime: reports the (optional) SRT_TEST_LIST fixture for `list`/`ps`
 # so the attach paths have something to reconnect to, and otherwise echoes its
@@ -146,7 +148,7 @@ for target in "${targets[@]}"; do
   total=$((total + $?))
 done
 
-rm -rf "$stub_dir" "$proj" "$home"
+safe_rm_rf "$stub_dir" "$proj" "$home"
 
 if [[ "$total" -gt 0 ]]; then
   echo

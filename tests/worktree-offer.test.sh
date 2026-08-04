@@ -16,6 +16,8 @@ set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(dirname "$here")"
+# shellcheck source=tests/lib/tmp.sh
+. "${here}/lib/tmp.sh"
 unset CLAUDE_CONTAINED_LOG_LEVEL
 
 fails=0
@@ -33,7 +35,7 @@ _check() { # _check "description" <rc-that-should-be-0>
 resolve_dir() { (cd "$1" && pwd -P); }
 
 setup_runtime_stubs() { # sets stub_dir
-  stub_dir="$(mktemp -d)"
+  stub_dir="$(mk_tmpdir)"
   cat > "${stub_dir}/container" <<'EOF'
 #!/usr/bin/env bash
 set -uo pipefail
@@ -101,8 +103,8 @@ make_repo_with_worktree() {
 launcher_run() {
   local target="$1" home="$2" project="$3" stdin_text="$4"
   shift 4
-  lr_stdout="$(mktemp)"
-  lr_stderr="$(mktemp)"
+  lr_stdout="$(mk_tmpfile)"
+  lr_stderr="$(mk_tmpfile)"
   printf '%s' "$stdin_text" | env HOME="$home" PATH="${stub_dir}:$PATH" \
     "${repo_root}/${target}" -N -s -C "$project" "$@" \
     >"$lr_stdout" 2>"$lr_stderr"
@@ -115,7 +117,7 @@ for target in "${targets[@]}"; do
 
   # --- Scenario A: -W skips the prompt and locks; released on exit ---
   setup_runtime_stubs
-  home="$(mktemp -d)"; root="$(mktemp -d)"
+  home="$(mk_tmpdir)"; root="$(mk_tmpdir)"
   read -r main wt <<< "$(make_repo_with_worktree "$root" hidden-wt)"
   lock_file="$(git -C "$wt" rev-parse --absolute-git-dir)/locked"
 
@@ -131,11 +133,11 @@ for target in "${targets[@]}"; do
   worktree_is_locked "$main" "$wt"; rc=$?
   if [[ $rc -ne 0 ]]; then check_rc=0; else check_rc=1; fi
   _check "${target}: -W releases the lock once the run completes" "$check_rc"
-  rm -rf "$stub_dir" "$home" "$root" "$lr_stdout" "$lr_stderr"
+  safe_rm_rf "$stub_dir" "$home" "$root" "$lr_stdout" "$lr_stderr"
 
   # --- Scenario B: interactive "Y" locks; released on exit ---
   setup_runtime_stubs
-  home="$(mktemp -d)"; root="$(mktemp -d)"
+  home="$(mk_tmpdir)"; root="$(mk_tmpdir)"
   read -r main wt <<< "$(make_repo_with_worktree "$root" hidden-wt)"
   lock_file="$(git -C "$wt" rev-parse --absolute-git-dir)/locked"
 
@@ -150,11 +152,11 @@ for target in "${targets[@]}"; do
   worktree_is_locked "$main" "$wt"; rc=$?
   if [[ $rc -ne 0 ]]; then check_rc=0; else check_rc=1; fi
   _check "${target}: interactive accept releases the lock on exit" "$check_rc"
-  rm -rf "$stub_dir" "$home" "$root" "$lr_stdout" "$lr_stderr"
+  safe_rm_rf "$stub_dir" "$home" "$root" "$lr_stdout" "$lr_stderr"
 
   # --- Scenario C: interactive "n" declines; no lock file is ever written ---
   setup_runtime_stubs
-  home="$(mktemp -d)"; root="$(mktemp -d)"
+  home="$(mk_tmpdir)"; root="$(mk_tmpdir)"
   read -r main wt <<< "$(make_repo_with_worktree "$root" hidden-wt)"
   lock_file="$(git -C "$wt" rev-parse --absolute-git-dir)/locked"
 
@@ -166,11 +168,11 @@ for target in "${targets[@]}"; do
   _check "${target}: prune-risk line still appears even when declined" $?
   ! grep -q "Auto-locked" "$lr_stdout"
   _check "${target}: no Auto-locked line when declined" $?
-  rm -rf "$stub_dir" "$home" "$root" "$lr_stdout" "$lr_stderr"
+  safe_rm_rf "$stub_dir" "$home" "$root" "$lr_stdout" "$lr_stderr"
 
   # --- Scenario D: a user lock is byte-identical afterwards ---
   setup_runtime_stubs
-  home="$(mktemp -d)"; root="$(mktemp -d)"
+  home="$(mk_tmpdir)"; root="$(mk_tmpdir)"
   read -r main wt <<< "$(make_repo_with_worktree "$root" user-wt)"
   git -C "$main" worktree lock --reason mine "$wt" >/dev/null 2>&1
   before="$(lock_reason "$main" "$wt")"
@@ -179,11 +181,11 @@ for target in "${targets[@]}"; do
   after="$(lock_reason "$main" "$wt")"
   if [[ "$before" == "mine" && "$after" == "mine" ]]; then check_rc=0; else check_rc=1; fi
   _check "${target}: a user lock is byte-identical after the run" "$check_rc"
-  rm -rf "$stub_dir" "$home" "$root" "$lr_stdout" "$lr_stderr"
+  safe_rm_rf "$stub_dir" "$home" "$root" "$lr_stdout" "$lr_stderr"
 
   # --- Scenario E: a pre-seeded second owner survives our release ---
   setup_runtime_stubs
-  home="$(mktemp -d)"; root="$(mktemp -d)"
+  home="$(mk_tmpdir)"; root="$(mk_tmpdir)"
   read -r main wt <<< "$(make_repo_with_worktree "$root" hidden-wt)"
   git -C "$main" worktree lock --reason "cc-autolocked-by: aic-other-1111" "$wt" >/dev/null 2>&1
   lock_file="$(git -C "$wt" rev-parse --absolute-git-dir)/locked"
@@ -200,7 +202,7 @@ for target in "${targets[@]}"; do
   _check "${target}: other owner survives our own release" $?
   worktree_is_locked "$main" "$wt"
   _check "${target}: worktree is still locked (another owner remains)" $?
-  rm -rf "$stub_dir" "$home" "$root" "$lr_stdout" "$lr_stderr"
+  safe_rm_rf "$stub_dir" "$home" "$root" "$lr_stdout" "$lr_stderr"
 
 done
 

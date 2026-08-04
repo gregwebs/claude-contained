@@ -28,6 +28,8 @@ set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(dirname "$here")"
+# shellcheck source=tests/lib/tmp.sh
+. "${here}/lib/tmp.sh"
 unset CLAUDE_CONTAINED_LOG_LEVEL
 
 fails=0
@@ -52,7 +54,7 @@ STUB_SLEEP="${STUB_SLEEP:-3}"
 # writes the marker the moment it starts, then sleeps for STUB_SLEEP seconds.
 setup_runtime_stubs() {
   local marker="$1"
-  stub_dir="$(mktemp -d)"
+  stub_dir="$(mk_tmpdir)"
   cat > "${stub_dir}/container" <<EOF
 #!/usr/bin/env bash
 set -uo pipefail
@@ -130,8 +132,8 @@ wait_for_file() { # wait_for_file <path> <timeout-secs>
 # to launcher_rc_file; the caller waits on harness_pid.
 start_launcher() {
   local target="$1" main="$2" marker="$3"
-  launcher_pid_file="$(mktemp)"; rm -f "$launcher_pid_file"
-  launcher_rc_file="$(mktemp)"; rm -f "$launcher_rc_file"
+  launcher_pid_file="$(mk_tmpfile)"; rm -f "$launcher_pid_file"
+  launcher_rc_file="$(mk_tmpfile)"; rm -f "$launcher_rc_file"
 
   (
     set -m
@@ -151,8 +153,8 @@ start_launcher() {
 
 start_log_only_attach() {
   local target="$1" marker="$2" kind="${3:-plain}"
-  launcher_pid_file="$(mktemp)"; rm -f "$launcher_pid_file"
-  launcher_rc_file="$(mktemp)"; rm -f "$launcher_rc_file"
+  launcher_pid_file="$(mk_tmpfile)"; rm -f "$launcher_pid_file"
+  launcher_rc_file="$(mk_tmpfile)"; rm -f "$launcher_rc_file"
 
   (
     set -m
@@ -194,9 +196,9 @@ for target in "${targets[@]}"; do
     #     that handed its child an ignored disposition would only exit after
     #     the full STUB_SLEEP; one that didn't exits near-instantly, because
     #     the child dies of the signal's own default disposition. ---
-    home="$(mktemp -d)"; root="$(mktemp -d)"
+    home="$(mk_tmpdir)"; root="$(mk_tmpdir)"
     read -r main wt <<< "$(make_repo_with_worktree "$root" hidden-wt)"
-    marker="$(mktemp -u)"
+    marker="$(mk_tmpname)"
     setup_runtime_stubs "$marker"
 
     start_launcher "$target" "$main" "$marker"
@@ -220,7 +222,7 @@ for target in "${targets[@]}"; do
     if [[ $rc2 -ne 0 ]]; then check_rc=0; else check_rc=1; fi
     _check "${target} ${sig} (group): worktree is unlocked once the launcher exits" "$check_rc"
 
-    rm -rf "$stub_dir" "$home" "$root" "$launcher_pid_file" "$launcher_rc_file"
+    safe_rm_rf "$stub_dir" "$home" "$root" "$launcher_pid_file" "$launcher_rc_file"
     rm -f "$marker"
 
     # --- Launcher only (not the group): the run must complete naturally
@@ -228,9 +230,9 @@ for target in "${targets[@]}"; do
     #     signal's status -- proving the signal is deferred, not acted on
     #     immediately, matching bash's "trapped signal waits for the
     #     foreground command to return". ---
-    home="$(mktemp -d)"; root="$(mktemp -d)"
+    home="$(mk_tmpdir)"; root="$(mk_tmpdir)"
     read -r main wt <<< "$(make_repo_with_worktree "$root" hidden-wt)"
-    marker="$(mktemp -u)"
+    marker="$(mk_tmpname)"
     setup_runtime_stubs "$marker"
 
     start_launcher "$target" "$main" "$marker"
@@ -251,7 +253,7 @@ for target in "${targets[@]}"; do
     if [[ $rc2 -ne 0 ]]; then check_rc=0; else check_rc=1; fi
     _check "${target} ${sig} (solo): worktree is unlocked once the launcher exits" "$check_rc"
 
-    rm -rf "$stub_dir" "$home" "$root" "$launcher_pid_file" "$launcher_rc_file"
+    safe_rm_rf "$stub_dir" "$home" "$root" "$launcher_pid_file" "$launcher_rc_file"
     rm -f "$marker"
   done
 
@@ -259,8 +261,8 @@ for target in "${targets[@]}"; do
   # behavior must therefore match the ordinary foreground run rather than
   # orphaning the attached runtime child.
   for delivery in group solo; do
-    home="$(mktemp -d)"; root="$(mktemp -d)"
-    marker="$(mktemp -u)"
+    home="$(mk_tmpdir)"; root="$(mk_tmpdir)"
+    marker="$(mk_tmpname)"
     setup_runtime_stubs "$marker"
     start_log_only_attach "$target" "$marker"
     _check "${target} TERM (${delivery}, log-only attach): stub exec started" $?
@@ -285,12 +287,12 @@ for target in "${targets[@]}"; do
       _check "${target} TERM (solo, log-only attach): child completed before exit (${elapsed}s)" "$check_rc"
     fi
 
-    rm -rf "$stub_dir" "$home" "$root" "$launcher_pid_file" "$launcher_rc_file"
+    safe_rm_rf "$stub_dir" "$home" "$root" "$launcher_pid_file" "$launcher_rc_file"
     rm -f "$marker"
   done
 
-  home="$(mktemp -d)"; root="$(mktemp -d)"
-  marker="$(mktemp -u)"
+  home="$(mk_tmpdir)"; root="$(mk_tmpdir)"
+  marker="$(mk_tmpname)"
   setup_runtime_stubs "$marker"
   start_log_only_attach "$target" "$marker" zellij
   _check "${target} TERM (solo, log-only Zellij attach): stub exec started" $?
@@ -303,7 +305,7 @@ for target in "${targets[@]}"; do
   _check "${target} TERM (solo, log-only Zellij attach): exit status is 143 (got ${rc})" $?
   [[ $elapsed -ge $((STUB_SLEEP - 1)) ]]
   _check "${target} TERM (solo, log-only Zellij attach): child completed before exit (${elapsed}s)" $?
-  rm -rf "$stub_dir" "$home" "$root" "$launcher_pid_file" "$launcher_rc_file"
+  safe_rm_rf "$stub_dir" "$home" "$root" "$launcher_pid_file" "$launcher_rc_file"
   rm -f "$marker"
 
 done

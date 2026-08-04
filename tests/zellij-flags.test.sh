@@ -19,11 +19,13 @@ set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(dirname "$here")"
+# shellcheck source=tests/lib/tmp.sh
+. "${here}/lib/tmp.sh"
 unset CLAUDE_CONTAINED_LOG_LEVEL
 
-stub_dir="$(mktemp -d)"
-proj="$(mktemp -d)"
-home="$(mktemp -d)"
+stub_dir="$(mk_tmpdir)"
+proj="$(mk_tmpdir)"
+home="$(mk_tmpdir)"
 
 cat > "${stub_dir}/container" <<'EOF'
 #!/usr/bin/env bash
@@ -144,8 +146,8 @@ suite() {
     fi
   }
 
-  out="$(mktemp)"
-  err="$(mktemp)"
+  out="$(mk_tmpfile)"
+  err="$(mk_tmpfile)"
 
   ZELLIJ_STUB_MODE=none launcher_run "$target" "$out" "$err" --zellij --session=Good_1.2-3 -N -s -C "$proj"
   rc=$?
@@ -264,7 +266,7 @@ for target in "${targets[@]}"; do
   total=$((total + $?))
 done
 
-rm -rf "$stub_dir" "$proj" "$home"
+safe_rm_rf "$stub_dir" "$proj" "$home"
 
 if [[ "$total" -gt 0 ]]; then
   echo

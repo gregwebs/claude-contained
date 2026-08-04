@@ -14,8 +14,10 @@ set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(dirname "$here")"
+# shellcheck source=tests/lib/tmp.sh
+. "${here}/lib/tmp.sh"
 
-home="$(mktemp -d)"
+home="$(mk_tmpdir)"
 
 xdg_suite() {
   set +e
@@ -100,9 +102,9 @@ wrapper_suite() {
     fi
   }
 
-  zbin="$(mktemp -d)"
-  zhome="$(mktemp -d)"
-  zlog="$(mktemp)"
+  zbin="$(mk_tmpdir)"
+  zhome="$(mk_tmpdir)"
+  zlog="$(mk_tmpfile)"
   session="test-$$"
 
   cat > "${zbin}/zellij" <<'EOF'
@@ -180,7 +182,7 @@ EOF
   [[ $rc -eq 1 ]]
   _check "zellij-attach refuses an exited saved session" $?
 
-  rm -rf "$zbin" "$zhome"
+  safe_rm_rf "$zbin" "$zhome"
   rm -f "$zlog" "$layout"
   return "$fails"
 }
@@ -195,7 +197,7 @@ echo "== zellij wrappers =="
 wrapper_suite
 total=$((total + $?))
 
-rm -rf "$home"
+safe_rm_rf "$home"
 
 if [[ "$total" -gt 0 ]]; then
   echo

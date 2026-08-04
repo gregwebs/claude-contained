@@ -9,17 +9,19 @@ set -uo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(dirname "$here")"
+# shellcheck source=tests/lib/tmp.sh
+. "${here}/lib/tmp.sh"
 unset CLAUDE_CONTAINED_LOG_LEVEL
 
-stub_dir="$(mktemp -d)"
+stub_dir="$(mk_tmpdir)"
 for rt in container docker; do
   printf '#!/usr/bin/env bash\n[[ "${1:-}" == system || "${1:-}" == info || "${1:-}" == list || "${1:-}" == ps || "${1:-}" == inspect ]] && exit 0\nprintf "%%s\\n" "$@"\n' \
     > "${stub_dir}/${rt}"
   chmod +x "${stub_dir}/${rt}"
 done
 
-out="$(mktemp)"
-err="$(mktemp)"
+out="$(mk_tmpfile)"
+err="$(mk_tmpfile)"
 
 run_launcher() { # run_launcher <target> <home> <proj> <share> [flags...]
   local target="$1" home="$2" proj="$3" share="$4"
@@ -49,9 +51,9 @@ suite() {
     fi
   }
 
-  home="$(cd "$(mktemp -d)" && pwd -P)"
-  proj="$(cd "$(mktemp -d)" && pwd -P)"
-  share="$(cd "$(mktemp -d)" && pwd -P)"
+  home="$(mk_tmpdir_resolved)"
+  proj="$(mk_tmpdir_resolved)"
+  share="$(mk_tmpdir_resolved)"
   targets="${home}/skill targets"
   dir_target="${targets}/dir target"
   file_parent="${targets}/file parent"
@@ -117,9 +119,12 @@ suite() {
   if [[ $rc -eq 0 ]]; then check_rc=0; else check_rc=1; fi
   _check "read-only exact extra mount can satisfy shared skills source" "$check_rc"
 
-  conflict_dir="$(cd "$(mktemp -d)" && pwd -P)"
-  rm -rf "$share"
-  share="$(cd "$(mktemp -d)" && pwd -P)"
+  conflict_dir="$(mk_tmpdir_resolved)"
+  safe_rm_rf "$share"
+  share="$(mk_tmpdir_resolved)"
+  # See the `.system` note below: the recreated share needs its own mount point
+  # so the Codex remount does not refuse before these conflict checks run.
+  mkdir -p "${share}/.system"
   ln -s "$conflict_dir" "${share}/conflict-link"
 
   run_launcher "$target" "$home" "$proj" "$share" -m "${conflict_dir}:rw"
@@ -132,15 +137,20 @@ suite() {
   if [[ $rc -eq 0 ]]; then check_rc=0; else check_rc=1; fi
   _check "read-only exact extra mount can satisfy symlink target" "$check_rc"
 
-  rm -rf "$share"
-  share="$(cd "$(mktemp -d)" && pwd -P)"
+  safe_rm_rf "$share"
+  share="$(mk_tmpdir_resolved)"
+  # Recreated share needs the same `.system` mount point as the initial one
+  # (line above), or the Codex system-skills remount refuses on runtimes that
+  # cannot create it under the read-only shared mount (the Apple target on
+  # macOS; see issue #25) before the broken-symlink check below is reached.
+  mkdir -p "${share}/.system"
   ln -s "${targets}/missing" "${share}/broken-link"
   run_launcher "$target" "$home" "$proj" "$share"
   rc=$?
   [[ $rc -eq 2 ]] && file_has "$err" "symlink target does not exist" && file_has "$err" "${share}/broken-link"
   _check "broken shared-skill symlink fails with a clear error" $?
 
-  rm -rf "$home" "$proj" "$share" "$conflict_dir"
+  safe_rm_rf "$home" "$proj" "$share" "$conflict_dir"
   return "$fails"
 }
 
@@ -152,7 +162,7 @@ for target in "${targets[@]}"; do
   total=$((total + $?))
 done
 
-rm -rf "$stub_dir"
+safe_rm_rf "$stub_dir"
 rm -f "$out" "$err"
 
 if [[ "$total" -gt 0 ]]; then
