@@ -82,6 +82,45 @@ func TestDiagnosticRunWithEmitsAnchorsWithoutEnvironmentValues(t *testing.T) {
 	}
 }
 
+// The diagnostic-stream shell suite proved env-driven enablement end-to-end:
+// CLAUDE_CONTAINED_LOG_LEVEL alone turns the stream on, and an explicit
+// --log-level=off on the same run beats the environment back to silence. The
+// other cmd diagnostic tests always blank that env and drive level via the flag,
+// so this exercises the environment entry point through runWith to stderr.
+func TestEnvironmentLogLevelEnablesAndFlagOverrides(t *testing.T) {
+	quiet := func(context.Context, []string, io.Reader, io.Writer, io.Writer) int { return 0 }
+
+	t.Run("environment level enables diagnostics", func(t *testing.T) {
+		project := diagnosticProject(t)
+		t.Setenv("CLAUDE_CONTAINED_LOG_LEVEL", "debug")
+		var stdout, stderr bytes.Buffer
+		code := runWith(quiet, runtime.Darwin,
+			[]string{"claude-contained", "-s", "-N", "-C", project},
+			strings.NewReader(""), &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("exit = %d, stderr: %s", code, stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "kind=diagnostic") {
+			t.Errorf("environment level did not enable diagnostics: %q", stderr.String())
+		}
+	})
+
+	t.Run("explicit off beats the environment", func(t *testing.T) {
+		project := diagnosticProject(t)
+		t.Setenv("CLAUDE_CONTAINED_LOG_LEVEL", "debug")
+		var stdout, stderr bytes.Buffer
+		code := runWith(quiet, runtime.Darwin,
+			[]string{"claude-contained", "--log-level=off", "-s", "-N", "-C", project},
+			strings.NewReader(""), &stdout, &stderr)
+		if code != 0 {
+			t.Fatalf("exit = %d, stderr: %s", code, stderr.String())
+		}
+		if strings.Contains(stderr.String(), "kind=diagnostic") {
+			t.Errorf("explicit off did not silence the environment: %q", stderr.String())
+		}
+	})
+}
+
 func TestLogOnlyErrorLevelKeepsRelocatedWarningAndFiltersDiagnostic(t *testing.T) {
 	diagnosticProject(t)
 	var stdout, stderr bytes.Buffer

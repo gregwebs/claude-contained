@@ -1,0 +1,57 @@
+# case: 65-share-host-claude-via-env
+# desc: CLAUDE_CONTAINED_SHARE_HOST_CLAUDE=1 mounts host ~/.claude directly, matching --share-host-claude
+# config: docker-darwin
+--- exit ---
+0
+--- runtime-args ---
+== docker run ==
+--rm
+-it
+--memory
+8g
+--name
+aic-project-<TIME>
+-e
+HOST_HOME=<HOME>
+-e
+HOST_UID=<UID>
+-e
+HOST_GID=<GID>
+-w
+<PROJ>
+--mount
+type=bind,src=<HOME>/.claude,dst=<HOME>/.claude
+--mount
+type=bind,src=<HOME>/.codex,dst=<HOME>/.codex
+--mount
+type=bind,src=<HOME>/.copilot,dst=<HOME>/.copilot
+--mount
+type=bind,src=<HOME>/.gemini,dst=<HOME>/.gemini
+--mount
+type=bind,src=<HOME>/.vibe,dst=<HOME>/.vibe
+--mount
+type=bind,src=<PROJ>,dst=<PROJ>
+-e
+TZ=UTC
+-e
+CLAUDE_CONTAINED_EXPLICIT_ENV_KEYS=TZ
+-e
+GIT_PROTECT_DIRS=<PROJ>
+--mount
+type=bind,src=<HOME>/.claude-contained,dst=<HOME>/.claude-contained
+claude-contained:latest
+/usr/local/bin/shell-run
+
+--- stdout ---
+(empty)
+--- stderr ---
+(empty)
+--- filesystem ---
+HOME dir 755
+HOME/.claude dir 755
+HOME/.claude-contained dir 755
+HOME/.codex dir 755
+HOME/.copilot dir 755
+HOME/.gemini dir 755
+HOME/.vibe dir 755
+PROJ dir 755

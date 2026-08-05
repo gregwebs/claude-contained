@@ -761,4 +761,17 @@ var goldenCases = []goldenCase{
 		},
 		NoRuntimeArgs: true,
 	},
+	{
+		// The env var is the second entry point to the --share-host-claude
+		// behavior proven by case 30: with no flag, CLAUDE_CONTAINED_SHARE_HOST_CLAUDE=1
+		// must produce the same direct host ~/.claude mount (skipping the
+		// contained profile and its nested resource mounts). Case 30 only covers
+		// the flag arm, so this pins the env path end-to-end.
+		Slug: "65-share-host-claude-via-env",
+		Desc: "CLAUDE_CONTAINED_SHARE_HOST_CLAUDE=1 mounts host ~/.claude directly, matching --share-host-claude",
+		Setup: func(t *testing.T, proj, home string) goldenExtras {
+			return goldenExtras{Env: map[string]string{"CLAUDE_CONTAINED_SHARE_HOST_CLAUDE": "1"}}
+		},
+		Args: func(proj, home string) []string { return []string{"-N", "-s", "-C", proj} },
+	},
 }

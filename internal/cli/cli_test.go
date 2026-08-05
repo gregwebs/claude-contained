@@ -70,6 +70,31 @@ func TestParseDefersRequiredValueDiagnosticsToValidate(t *testing.T) {
 	}
 }
 
+// A value flag must not silently swallow a following option-looking token as its
+// value; the migrated arg-parsing shell case proved `-t --yolo` is a missing
+// value, not "tool=--yolo". This exercises the strings.HasPrefix(value, "-")
+// branch of recordRequiredValue, distinct from the value=="" (final-arg) branch
+// tabled in TestParseDefersRequiredValueDiagnosticsToValidate.
+func TestValueFlagDoesNotSwallowAFollowingOption(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"tool", []string{"-t", "--yolo"}, "error: -t/--tool requires a value\n"},
+		{"env", []string{"-e", "--yolo"}, "error: -e/--env requires KEY=VALUE\n"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, stderr, err := validateArgs(tc.args...)
+			requireUsageError(t, err)
+			if stderr != tc.want {
+				t.Errorf("stderr = %q, want %q", stderr, tc.want)
+			}
+		})
+	}
+}
+
 func TestParseDefersInlineValueDiagnosticsToValidate(t *testing.T) {
 	cases := []struct {
 		arg  string
