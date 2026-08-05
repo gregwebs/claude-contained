@@ -456,6 +456,15 @@ func TestResolveDNS(t *testing.T) {
 			host.State{DNSEnvSet: true, DNSEnv: "system"}, apple, nil},
 		{"empty opts out", cli.Config{},
 			host.State{DNSEnvSet: true, DNSEnv: ""}, apple, nil},
+		// Docker has no default DNS, but the CLAUDE_DNS / --dns resolution rules
+		// apply identically once a value is present. These pin the Docker arm of
+		// the dns-flags shell suite (list expansion, =system opt-out, flag wins).
+		{"docker env list expands", cli.Config{},
+			host.State{DNSEnvSet: true, DNSEnv: "9.9.9.9,8.8.8.8"}, docker, []string{"9.9.9.9", "8.8.8.8"}},
+		{"docker system keeps runtime dns", cli.Config{},
+			host.State{DNSEnvSet: true, DNSEnv: "system"}, docker, nil},
+		{"docker explicit flag beats env", cli.Config{DNSServers: []string{"4.4.4.4"}},
+			host.State{DNSEnvSet: true, DNSEnv: "9.9.9.9"}, docker, []string{"4.4.4.4"}},
 	}
 
 	for _, tc := range cases {
