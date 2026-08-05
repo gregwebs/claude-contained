@@ -78,8 +78,8 @@ Injecting the platform is what makes all three configurations reachable from
 either host. A subprocess reads the real `GOOS`, and Apple Containers is
 unselectable off macOS, so a subprocess suite could never cover `apple-darwin`
 on CI at all. See [ADR-0004](docs/adr/0004-go-launcher-rewrite.md) before
-changing this. The shell suites under `tests/` are what exercise the shipped
-binary end to end.
+changing this. The compiled-binary black-box suite below is what exercises the
+shipped binary end to end.
 
 - `go test ./cmd/claude-contained -run TestGolden` runs it; it is part of
   `make test` / `make quality`.
@@ -100,11 +100,33 @@ binary end to end.
   production code path ever sets or reads). A new volatile field is one new
   named substitution, not a per-case exception.
 
+### Compiled-binary black-box tests
+
+`cmd/claude-contained/artifact_test.go` drives the **built launcher artifact**
+as a real subprocess, covering only what an in-process call cannot prove: that
+the shipped binary embeds and emits the help text verbatim, selects its runtime
+from `argv[0]`, propagates a real child exit status, and gives its foreground
+child the correct signal disposition. Exact CLI error text and the two-pass
+selection grammar stay in the in-process suites (`internal/cli`,
+`selection_test.go`); they are not re-proven here. See
+[ADR-0008](docs/adr/0008-go-owned-test-migration.md).
+
+The shared harness is `internal/blackbox`. It builds the launcher once per test
+process into a temporary directory (never a pre-existing `bin/`), creates the
+`-docked` symlink beside it, and models external runtimes with a stub that is
+the test binary re-executed under a runtime name — enabled only in a launcher
+subprocess via `BLACKBOX_STUB_SPEC`, recording each call's argv structurally.
+Signal and exit tests synchronize on a ready marker and a FIFO release rather
+than a sleep, so a launcher that mishandled a signal hangs and trips a hang
+guard instead of passing on a lucky timing. It is part of `make test` /
+`make quality` and needs no running container runtime (though it does build git
+worktree fixtures, so `git` must be present).
+
 ## Repository Architecture
 
 - **Go launcher**: `cmd/claude-contained` is the entry point. `internal/cli` parses flags, `internal/host` inspects and prepares host state, `internal/plan` builds a resumable execution plan, and `internal/runtime` is the container-runtime seam.
 - **Container image**: `Dockerfile` assembles the image. Production helpers and configuration live under `image/`; each script documents its purpose at the top of the file.
-- **Tests**: Go unit tests live beside their packages. Golden tests in `cmd/claude-contained` call `runWith` in-process against a stubbed container runtime and assert the full observable result (runtime argv, stdout, stderr, exit status, filesystem manifest) against `testdata/golden/` -- see "Golden tests" above. Shell suites under `tests/` exercise the shipped build outputs (`make test-shell` runs every `tests/*.test.sh` against both build outputs), and are the only place the built binary itself is under test. Suites create scratch directories through `tests/lib/tmp.sh` (`mk_tmpdir`/`mk_tmpdir_resolved`/`mk_tmpfile`/`mk_tmpname`) and delete them through `safe_rm_rf`, never bare `mktemp`/`rm -rf`: bare `mktemp -d` can fail into an empty string that a later `cd`+`pwd -P` turns into the repo root, so `safe_rm_rf` refuses the repo root, its ancestors, `$HOME`, `/`, and empty paths. The guard is covered by `tests/tmp-lib.test.sh`.
+- **Tests**: Go unit tests live beside their packages. Golden tests in `cmd/claude-contained` call `runWith` in-process against a stubbed container runtime and assert the full observable result (runtime argv, stdout, stderr, exit status, filesystem manifest) against `testdata/golden/` -- see "Golden tests" above. The built binary itself is under test in `cmd/claude-contained/artifact_test.go`, the compiled-binary black-box suite, via the `internal/blackbox` harness -- see "Compiled-binary black-box tests" above. Shell suites under `tests/` still exercise the shipped build outputs for areas not yet migrated to Go (`make test-shell` runs every `tests/*.test.sh` against both build outputs; it is not part of `make quality`). Those suites create scratch directories through `tests/lib/tmp.sh` (`mk_tmpdir`/`mk_tmpdir_resolved`/`mk_tmpfile`/`mk_tmpname`) and delete them through `safe_rm_rf`, never bare `mktemp`/`rm -rf`: bare `mktemp -d` can fail into an empty string that a later `cd`+`pwd -P` turns into the repo root, so `safe_rm_rf` refuses the repo root, its ancestors, `$HOME`, `/`, and empty paths. The guard is covered by `tests/tmp-lib.test.sh`.
 - **Design records**: [CONTEXT.md](CONTEXT.md) defines project vocabulary. Architectural decisions live under [`docs/adr/`](docs/adr/).
 
 The VS Code template has separate implementation notes in [devcontainer/CLAUDE.md](devcontainer/CLAUDE.md).
@@ -151,7 +173,7 @@ The Go launcher selects its container runtime in this order: `--container-runtim
 
 Code above `internal/runtime` must not mention `container` or `docker` commands.
 
-See [ADR-0003](docs/adr/0003-flag-only-cli.md) for the flag-only CLI, [ADR-0004](docs/adr/0004-go-launcher-rewrite.md) for the Go port, [ADR-0005](docs/adr/0005-diagnostic-stream.md) for the separate diagnostic stream, and [ADR-0006](docs/adr/0006-tooling-layers.md) for the base/derived image split.
+See [ADR-0003](docs/adr/0003-flag-only-cli.md) for the flag-only CLI, [ADR-0004](docs/adr/0004-go-launcher-rewrite.md) for the Go port, [ADR-0005](docs/adr/0005-diagnostic-stream.md) for the separate diagnostic stream, [ADR-0006](docs/adr/0006-tooling-layers.md) for the base/derived image split, and [ADR-0008](docs/adr/0008-go-owned-test-migration.md) for the Go-owned test migration and its compiled-binary black-box boundary.
 
 ### Add Diagnostic Records Deliberately
 

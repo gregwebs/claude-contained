@@ -89,8 +89,9 @@ suite() {
   # The runtime is left unselected on purpose. Forcing apple would make every
   # case that gets past ValidateSelection exit 2 on a Linux CI runner ("the
   # apple container runtime is available only on macOS"), and the cases below
-  # deliberately reach further than the CLI validation that cli-front-end.test.sh
-  # stops at. Both stub binaries point at the same script, so whichever the host
+  # deliberately reach further than the CLI validation the compiled-binary
+  # artifact suite (cmd/claude-contained/artifact_test.go) stops at. Both stub
+  # binaries point at the same script, so whichever the host
   # or the target's argv[0] selects behaves identically.
   capture() {
     rm -f "$stub_dir/docker.called" "$stub_dir/container.called" "$runtime_log"

@@ -92,6 +92,14 @@ func TestProductionDiagnosticStaticGuardrails(t *testing.T) {
 			if path != repoRoot && strings.HasPrefix(entry.Name(), ".") {
 				return filepath.SkipDir
 			}
+			// internal/blackbox is compiled-binary test-support: it is imported
+			// only from _test.go and never links into the shipped launcher, so
+			// the production diagnostic-stream guardrails do not govern it. Its
+			// command stub is a standalone fake runtime that reports to os.Stderr
+			// like any CLI would.
+			if filepath.ToSlash(path) == filepath.ToSlash(filepath.Join(repoRoot, "internal", "blackbox")) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		if !strings.HasSuffix(path, ".go") || strings.HasSuffix(path, "_test.go") {
