@@ -6,8 +6,9 @@
 # target-independent: nothing here loops over CLAUDE_CONTAINED_TEST_TARGETS,
 # since there is no launcher involved.
 #
-# Split out of tests/zellij-flags.test.sh, which keeps only the launcher-level
-# --zellij cases that do run against every target.
+# Originally split out of the launcher-level --zellij suite; that suite's cases
+# now live in Go (internal/zellij, internal/cli, cmd/claude-contained golden
+# cases 31/33-37), leaving only these in-container image scripts here.
 #
 # Usage: tests/zellij-image-scripts.test.sh
 set -uo pipefail

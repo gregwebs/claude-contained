@@ -1,7 +1,14 @@
 #!/usr/bin/env bash
 #
-# Regression tests for startup diagnostics that should not appear in contained
-# Claude sessions.
+# Regression test for the in-container Claude native-link script
+# (image/claude-native-link.sh). This image script stays shell -- it runs
+# inside the image, where bash is a given -- and is covered here until slice 4
+# (#33) moves the remaining image-script tests to Go.
+#
+# The launcher-side srt placeholder-cleanup cases that used to live here now run
+# in Go: cmd/claude-contained TestPlaceholderCreatedDuringRunIsSweptAfterExit
+# and golden case 50-placeholder-cleanup-mounted-roots, plus the internal/host
+# placeholder tests.
 #
 # Usage: tests/startup-diagnostics.test.sh
 set -uo pipefail
@@ -21,74 +28,6 @@ _check() { # _check "description" <rc-that-should-be-0>
     fails=$((fails + 1))
   fi
 }
-
-setup_runtime_stubs() {
-  stub_dir="$(mk_tmpdir)"
-  cat > "${stub_dir}/container" <<'EOF'
-#!/usr/bin/env bash
-set -uo pipefail
-
-if [[ "${1:-}" == "system" ]]; then
-  exit 0
-fi
-if [[ "${1:-}" == "list" ]]; then
-  exit 0
-fi
-if [[ "${1:-}" == "run" && -n "${SRT_STUB_PLACEHOLDER_ROOTS:-}" ]]; then
-  IFS=':' read -ra roots <<< "$SRT_STUB_PLACEHOLDER_ROOTS"
-  for root in "${roots[@]}"; do
-    [[ -n "$root" ]] && : > "${root}/.mcp.json"
-  done
-fi
-printf '%s\n' "$@"
-EOF
-
-  cat > "${stub_dir}/docker" <<'EOF'
-#!/usr/bin/env bash
-set -uo pipefail
-
-if [[ "${1:-}" == "info" || "${1:-}" == "ps" ]]; then
-  exit 0
-fi
-if [[ "${1:-}" == "run" && -n "${SRT_STUB_PLACEHOLDER_ROOTS:-}" ]]; then
-  IFS=':' read -ra roots <<< "$SRT_STUB_PLACEHOLDER_ROOTS"
-  for root in "${roots[@]}"; do
-    [[ -n "$root" ]] && : > "${root}/.mcp.json"
-  done
-fi
-printf '%s\n' "$@"
-EOF
-  chmod +x "${stub_dir}/container" "${stub_dir}/docker"
-}
-
-launcher_run() { # launcher_run <target> <home> <project> [extra env...]
-  local target="$1" home="$2" project="$3"
-  shift 3
-
-  env "$@" HOME="$home" PATH="${stub_dir}:$PATH" \
-    "${repo_root}/${target}" -N -s -C "$project" >/dev/null 2>&1
-}
-
-echo "== srt placeholder cleanup =="
-read -ra targets <<< "${CLAUDE_CONTAINED_TEST_TARGETS:-bin/claude-contained bin/claude-contained-docked}"
-for target in "${targets[@]}"; do
-  setup_runtime_stubs
-  home="$(mk_tmpdir)"
-  project="$(mk_tmpdir)"
-
-  : > "${project}/.mcp.json"
-  : > "${project}/.bashrc"
-  printf '{}\n' > "${project}/.ripgreprc"
-  launcher_run "$target" "$home" "$project"
-  if [[ ! -e "${project}/.mcp.json" && ! -e "${project}/.bashrc" && -s "${project}/.ripgreprc" ]]; then check_rc=0; else check_rc=1; fi
-  _check "${target}: removes pre-existing zero-byte srt placeholders only" "$check_rc"
-
-  SRT_STUB_PLACEHOLDER_ROOTS="$project" launcher_run "$target" "$home" "$project"
-  if [[ ! -e "${project}/.mcp.json" ]]; then check_rc=0; else check_rc=1; fi
-  _check "${target}: removes zero-byte srt placeholders created during run" "$check_rc"
-
-  safe_rm_rf "$stub_dir" "$home" "$project"
-done
 
 echo "== Claude native link =="
 link_home="$(mk_tmpdir)"
