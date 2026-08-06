@@ -1,0 +1,4 @@
+JAVA_HOME=/opt/custom-java
+JAVA_TOOL_OPTIONS=-XX:+UseG1GC -XX:+AllowEnhancedClassRedefinition -Dvaadin.productionMode=false
+MAVEN_OPTS=-Dmaven.repo.local=$HOME/.claude-contained/cache/maven
+PATH=/opt/custom-java/bin:/opt/maven/bin:/opt/jbang/bin:$PATH

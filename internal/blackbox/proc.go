@@ -191,6 +191,23 @@ func WaitForFile(path string, within time.Duration) bool {
 	return err == nil
 }
 
+// WaitForEvents blocks until the stub log holds at least n invocations or the
+// deadline elapses, returning whether the count was reached. It is the
+// observable-readiness stand-in for commands the script under test backgrounds
+// (e.g. `socat &`) and then exits before they have recorded -- the analogue of
+// polling a log for a line count, with the deadline as a hang guard only.
+func WaitForEvents(t testing.TB, s *Stubs, n int, within time.Duration) bool {
+	t.Helper()
+	deadline := time.Now().Add(within)
+	for time.Now().Before(deadline) {
+		if len(s.Events(t)) >= n {
+			return true
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	return len(s.Events(t)) >= n
+}
+
 // StaysRunning reports whether the process is still running throughout a short
 // bounded window -- the observable proof that the launcher deferred a
 // launcher-only signal rather than acting on it immediately. The window is a
