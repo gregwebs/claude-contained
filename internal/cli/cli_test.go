@@ -254,6 +254,37 @@ func TestValidateRejectsAnEmptyZellijSessionName(t *testing.T) {
 	}
 }
 
+// The retired zellij-flags suite's "accepts valid names" case used Good_1.2-3,
+// which exercises every allowed class at once: mixed-case letters, digits, '_',
+// '.', and '-'. The negative twins (empty, slash) are pinned by
+// TestValidatePreservesSemanticDiagnosticOrderAndText and golden 31; this pins
+// acceptance of the full class, so a narrowed pattern would be caught.
+func TestValidateZellijSessionNameAcceptsTheFullAllowedClass(t *testing.T) {
+	for _, name := range []string{"Good_1.2-3", "a", "A.B_c-9", "with.dots", "under_score", "1"} {
+		var stderr bytes.Buffer
+		if err := ValidateZellijSessionName(name, &stderr); err != nil {
+			t.Errorf("ValidateZellijSessionName(%q) = %v, want accepted; stderr=%q", name, err, stderr.String())
+		}
+		if stderr.Len() != 0 {
+			t.Errorf("ValidateZellijSessionName(%q) wrote stderr %q, want none", name, stderr.String())
+		}
+	}
+}
+
+// The leading-dash branch is distinct from the pattern-mismatch branch the
+// slash case covers: '-lead' matches the character class but is refused by the
+// explicit name[0]=='-' guard.
+func TestValidateZellijSessionNameRejectsLeadingDash(t *testing.T) {
+	var stderr bytes.Buffer
+	err := ValidateZellijSessionName("-lead", &stderr)
+	requireUsageError(t, err)
+	want := "error: invalid Zellij session name: -lead\n" +
+		"       Use only letters, numbers, '_', '.', and '-'; do not start with '-'.\n"
+	if stderr.String() != want {
+		t.Errorf("stderr = %q, want %q", stderr.String(), want)
+	}
+}
+
 func TestValidateNormalizesCustomContainerName(t *testing.T) {
 	cfg, stderr, err := validateArgs("--name", "aic-My Project")
 	if err != nil {

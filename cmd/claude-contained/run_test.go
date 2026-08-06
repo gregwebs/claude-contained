@@ -508,3 +508,42 @@ func TestNoLayerRunSpecIsRuntimeIndependent(t *testing.T) {
 		})
 	}
 }
+
+// A zero-byte srt placeholder that appears *during* the container run is swept
+// by the deferred post-run cleanup (run.go:324-326), not by the pre-run sweeps
+// (run.go:236, :290) a golden case can reach. Golden 50 seeds its placeholders
+// before the run, so it only exercises the pre-run sweep; this drives the
+// deferred one by having the injected runner create the file mid-run, the way
+// the retired startup-diagnostics.test.sh drove it with SRT_STUB_PLACEHOLDER_ROOTS.
+// A pre-seeded non-empty placeholder-named file rides along to keep the negative
+// side: the sweep removes only the zero-byte one.
+func TestPlaceholderCreatedDuringRunIsSweptAfterExit(t *testing.T) {
+	project := host.ResolvePath(t.TempDir())
+	withStubbedHostAndPath(t)
+
+	survivor := filepath.Join(project, ".zshrc")
+	if err := os.WriteFile(survivor, []byte("keep me\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	created := filepath.Join(project, ".mcp.json")
+
+	fake := func(ctx context.Context, argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
+		if err := os.WriteFile(created, nil, 0o644); err != nil {
+			t.Errorf("seeding the mid-run placeholder: %v", err)
+		}
+		return 0
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := runWith(fake, runtime.Darwin, []string{"claude-contained", "-s", "-N", "-C", project}, strings.NewReader(""), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("runWith exit = %d, want 0\nstderr:\n%s", code, stderr.String())
+	}
+
+	if _, err := os.Lstat(created); !os.IsNotExist(err) {
+		t.Errorf(".mcp.json created during the run should have been swept by the deferred cleanup (err=%v)", err)
+	}
+	if _, err := os.Lstat(survivor); err != nil {
+		t.Errorf("a non-empty placeholder-named file must survive (err=%v)", err)
+	}
+}
