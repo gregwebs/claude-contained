@@ -52,6 +52,7 @@ type zellijFixture struct {
 	cacheDir   string
 	dataDir    string
 	layoutFile string
+	logDir     string // /tmp/zellij-<uid>/zellij-log, the temp log dir the run pre-creates
 }
 
 // newZellijFixture arms the zellij stub to report the given list-sessions
@@ -95,6 +96,7 @@ func newZellijFixture(t *testing.T, liveness string) *zellijFixture {
 		cacheDir:   filepath.Join(home, ".claude-contained", "zellij", "cache"),
 		dataDir:    filepath.Join(home, ".claude-contained", "zellij", "data"),
 		layoutFile: filepath.Join(zellijRuntimeDir, "layouts", session+".kdl"),
+		logDir:     filepath.Join("/tmp", "zellij-"+fakeUID, "zellij-log"),
 	}
 	t.Cleanup(func() {
 		_ = os.RemoveAll("/tmp/zellij-" + fakeUID)
@@ -227,6 +229,7 @@ func TestZellijRunPreCreatesRuntimeDirectories(t *testing.T) {
 	f := newZellijFixture(t, "empty")
 	f.runRun(t)
 	for name, dir := range map[string]string{
+		"temp log dir":       f.logDir,
 		"runtime socket dir": filepath.Join(zellijRuntimeDir, "zellij", "contract_version_1"),
 		"runtime layout dir": filepath.Join(zellijRuntimeDir, "layouts"),
 		"project cache dir":  filepath.Join(f.cacheDir, "org", "Zellij-Contributors", "Zellij"),

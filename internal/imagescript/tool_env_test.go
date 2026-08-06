@@ -67,17 +67,31 @@ func TestToolEnvBaseAddsOnlyGenericPathsNoJava(t *testing.T) {
 }
 
 func TestToolEnvFragmentsExpandOnlyHomeAndPathNeverEvaluated(t *testing.T) {
-	_ = os.Remove("/tmp/must-not-run")
-	env := resolveToolEnv(t, "/host/home", testdataPath(t, "tool-env", "expand"))
+	// The no-eval sentinel is a per-test path under t.TempDir() rather than a
+	// shared global, so a pre-existing or foreign file can never turn a correct
+	// run into a false failure. The fragment carries `$(touch <sentinel>)`; if
+	// tool-env ever evaluated it, the sentinel would appear.
+	sentinel := filepath.Join(t.TempDir(), "must-not-run")
+	fragDir := t.TempDir()
+	writeFragment(t, fragDir, "10-tool", "CACHE=${HOME}/.cache/tool\nPATH=${HOME}/bin:$PATH\nLITERAL=$(touch "+sentinel+")\n")
+	writeFragment(t, fragDir, "20-path", "PATH=/opt/tool/bin:$PATH\n")
+
+	env := resolveToolEnv(t, "/host/home", fragDir)
 
 	assertEnv(t, env, "CACHE", "/host/home/.cache/tool")
 	if !strings.Contains(env["PATH"], "/opt/tool/bin:/host/home/bin:/host/home/.local/bin:/opt/claude:") {
 		t.Errorf("PATH = %q, want the fragment-prepended entries with $PATH expanded", env["PATH"])
 	}
-	assertEnv(t, env, "LITERAL", "$(touch /tmp/must-not-run)")
-	if _, err := os.Stat("/tmp/must-not-run"); err == nil {
-		t.Error("tool-env evaluated a $(...) fragment value: /tmp/must-not-run was created")
-		_ = os.Remove("/tmp/must-not-run")
+	assertEnv(t, env, "LITERAL", "$(touch "+sentinel+")")
+	if _, err := os.Stat(sentinel); err == nil {
+		t.Errorf("tool-env evaluated a $(...) fragment value: the sentinel %s was created", sentinel)
+	}
+}
+
+func writeFragment(t *testing.T, dir, name, content string) {
+	t.Helper()
+	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -89,9 +103,7 @@ func TestToolEnvReservedKeysRefused(t *testing.T) {
 	for _, key := range reserved {
 		t.Run(key, func(t *testing.T) {
 			dir := t.TempDir()
-			if err := os.WriteFile(filepath.Join(dir, "10-tool"), []byte(key+"=bad\n"), 0o644); err != nil {
-				t.Fatal(err)
-			}
+			writeFragment(t, dir, "10-tool", key+"=bad\n")
 			res := runScript(t, scriptOpts{
 				Script: scriptPath(t, "tool-env.sh"),
 				Args:   []string{"--directory", dir, "true"},

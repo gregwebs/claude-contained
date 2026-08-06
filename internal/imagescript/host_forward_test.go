@@ -132,8 +132,13 @@ func TestHostForwardEmptyStartsNoRelays(t *testing.T) {
 }
 
 // assertNoRelays proves the negative: no HOST_FORWARD_PORTS starts nothing.
-// The script forks no background process at all in this case, so a bounded
-// settle window confirms none appears rather than merely that none has yet.
+// Unlike the positive tests -- which synchronize on WaitForEvents -- a negative
+// has no readiness event to wait on, so a bounded settle is the only tool. This
+// is not the fixed sleep ADR-0008 warns against for *sequencing*: runScript has
+// already blocked until the script fully exited, so a correct script has forked
+// nothing; the window only gives a *regressed* script (one that wrongly ran the
+// loop and backgrounded a relay) time to record before we assert zero. Do not
+// copy this into a positive path, where WaitForEvents is correct.
 func assertNoRelays(t *testing.T, stubs *blackbox.Stubs) {
 	t.Helper()
 	time.Sleep(200 * time.Millisecond)

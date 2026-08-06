@@ -1,3 +1,0 @@
-CACHE=${HOME}/.cache/tool
-PATH=${HOME}/bin:$PATH
-LITERAL=$(touch /tmp/must-not-run)
