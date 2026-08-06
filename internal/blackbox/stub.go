@@ -32,22 +32,32 @@ import (
 const stubEnvVar = "BLACKBOX_STUB_SPEC"
 
 // Invocation is one recorded stub call. Argv excludes argv[0]; Bin is its
-// basename (the runtime name the launcher invoked, e.g. "docker").
+// basename (the runtime name the launcher invoked, e.g. "docker"). Env is
+// populated only for the keys a spec's CaptureEnv requested and that were
+// actually set in the stub's environment -- the observable proof that the
+// script under test exported a variable into the command it invoked.
 type Invocation struct {
-	Bin        string   `json:"bin"`
-	Argv       []string `json:"argv"`
-	PID        int      `json:"pid"`
-	StartNanos int64    `json:"startNanos"`
+	Bin        string            `json:"bin"`
+	Argv       []string          `json:"argv"`
+	PID        int               `json:"pid"`
+	StartNanos int64             `json:"startNanos"`
+	Env        map[string]string `json:"env,omitempty"`
 }
 
-// stubArm is one behavior rule for a stubbed runtime, matched against argv[1].
-// The order of side effects models a foreground container run: signal readiness,
-// block until released, record completion, then exit -- so a signal delivered
-// while blocked is observable through which of ReadyFile/DoneFile exist and the
-// launcher's own exit status.
+// stubArm is one behavior rule for a stubbed runtime. The order of side effects
+// models a foreground container run: signal readiness, block until released,
+// record completion, then exit -- so a signal delivered while blocked is
+// observable through which of ReadyFile/DoneFile exist and the launcher's own
+// exit status.
 type stubArm struct {
-	// Match is the argv[1] subcommand this arm answers, or "*" for any.
+	// Match is the argv[1] subcommand this arm answers, or "*" for any. It is
+	// ignored when MatchContains is set.
 	Match string `json:"match"`
+	// MatchContains, when set, selects this arm if the token appears anywhere in
+	// the recorded argv, not only at argv[0]. Some commands (e.g. `zellij
+	// --config X --data-dir Y list-sessions`) carry their discriminating
+	// subcommand past argv[0], where an exact Match cannot reach it.
+	MatchContains string `json:"matchContains,omitempty"`
 	// ReadyFile, if set, is created (empty) before the arm blocks, signaling to
 	// the harness that the child has started.
 	ReadyFile string `json:"readyFile,omitempty"`
@@ -76,6 +86,10 @@ type stubArm struct {
 type stubSpec struct {
 	LogPath string               `json:"logPath"`
 	Bins    map[string][]stubArm `json:"bins"`
+	// CaptureEnv names environment variables the stub records on each
+	// Invocation when they are set. Empty (the default) records no environment,
+	// so launcher tests that never ask for it are unaffected.
+	CaptureEnv []string `json:"captureEnv,omitempty"`
 }
 
 // RunStubIfInvoked runs the command stub and exits when this process was started
@@ -103,7 +117,7 @@ func runStub(specPath string) int {
 	}
 
 	bin := filepath.Base(os.Args[0])
-	recordInvocation(spec.LogPath, bin, os.Args[1:])
+	recordInvocation(spec.LogPath, bin, os.Args[1:], captureEnv(spec.CaptureEnv))
 
 	arm, ok := matchArm(spec.Bins[bin], os.Args[1:])
 	if !ok {
@@ -134,13 +148,21 @@ func runStub(specPath string) int {
 	return arm.Exit
 }
 
-// matchArm returns the first arm whose Match equals argv[1] or is "*".
+// matchArm returns the first arm that answers this argv. An arm with
+// MatchContains matches when the token appears anywhere in argv; otherwise the
+// arm matches when its Match equals argv[0] or is "*".
 func matchArm(arms []stubArm, argv []string) (stubArm, bool) {
 	sub := ""
 	if len(argv) > 0 {
 		sub = argv[0]
 	}
 	for _, a := range arms {
+		if a.MatchContains != "" {
+			if containsArg(argv, a.MatchContains) {
+				return a, true
+			}
+			continue
+		}
 		if a.Match == "*" || a.Match == sub {
 			return a, true
 		}
@@ -148,9 +170,33 @@ func matchArm(arms []stubArm, argv []string) (stubArm, bool) {
 	return stubArm{}, false
 }
 
+func containsArg(argv []string, want string) bool {
+	for _, a := range argv {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
+// captureEnv returns the values of the requested keys that are set in this
+// process's environment, or nil when nothing was requested.
+func captureEnv(keys []string) map[string]string {
+	if len(keys) == 0 {
+		return nil
+	}
+	env := map[string]string{}
+	for _, k := range keys {
+		if v, ok := os.LookupEnv(k); ok {
+			env[k] = v
+		}
+	}
+	return env
+}
+
 // recordInvocation appends one JSON line describing this call. O_APPEND makes
 // concurrent single-line writes from separate stub processes atomic.
-func recordInvocation(logPath, bin string, argv []string) {
+func recordInvocation(logPath, bin string, argv []string, env map[string]string) {
 	if logPath == "" {
 		return
 	}
@@ -159,6 +205,7 @@ func recordInvocation(logPath, bin string, argv []string) {
 		Argv:       argv,
 		PID:        os.Getpid(),
 		StartNanos: time.Now().UnixNano(),
+		Env:        env,
 	})
 	if err != nil {
 		return

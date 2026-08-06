@@ -7,10 +7,9 @@
 *.swp
 *~
 
-# Tests and the devcontainer template run on the host, never inside the
-# image. Keeping them out of the context also keeps every file Apple
-# Containers has to transfer under its 16k-per-file limit.
-tests
+# The devcontainer template runs on the host, never inside the image.
+# Keeping it out of the context also keeps every file Apple Containers has
+# to transfer under its 16k-per-file limit.
 devcontainer
 .claude
 

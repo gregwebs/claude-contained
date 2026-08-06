@@ -46,27 +46,39 @@ func NewStubs(t testing.TB, bins ...string) *Stubs {
 // ArmConfig is the side-effect-naming shape a test uses to describe one behavior
 // rule, decoupling test call sites from the wire-format stubArm.
 type ArmConfig struct {
-	Match       string
-	Exit        int
-	Stdout      string
-	Stderr      string
-	ReadyFile   string
-	BlockOnFIFO string
-	DoneFile    string
+	Match         string
+	MatchContains string
+	Exit          int
+	Stdout        string
+	Stderr        string
+	ReadyFile     string
+	BlockOnFIFO   string
+	DoneFile      string
 }
 
 // Arm appends a behavior rule for one runtime and rewrites the spec file.
 func (s *Stubs) Arm(t testing.TB, bin string, arm ArmConfig) *Stubs {
 	t.Helper()
 	s.spec.Bins[bin] = append(s.spec.Bins[bin], stubArm{
-		Match:       arm.Match,
-		ReadyFile:   arm.ReadyFile,
-		BlockOnFIFO: arm.BlockOnFIFO,
-		DoneFile:    arm.DoneFile,
-		Stdout:      arm.Stdout,
-		Stderr:      arm.Stderr,
-		Exit:        arm.Exit,
+		Match:         arm.Match,
+		MatchContains: arm.MatchContains,
+		ReadyFile:     arm.ReadyFile,
+		BlockOnFIFO:   arm.BlockOnFIFO,
+		DoneFile:      arm.DoneFile,
+		Stdout:        arm.Stdout,
+		Stderr:        arm.Stderr,
+		Exit:          arm.Exit,
 	})
+	s.writeSpec(t)
+	return s
+}
+
+// CaptureEnv records, on every subsequent invocation of any stubbed command,
+// the value of each named environment variable that is set. It is how a test
+// proves the script under test exported a variable into the command it ran.
+func (s *Stubs) CaptureEnv(t testing.TB, keys ...string) *Stubs {
+	t.Helper()
+	s.spec.CaptureEnv = append(s.spec.CaptureEnv, keys...)
 	s.writeSpec(t)
 	return s
 }

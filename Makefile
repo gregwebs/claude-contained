@@ -22,7 +22,7 @@ BIN_DOCKED := $(BIN_DIR)/claude-contained-docked
 PREFIX ?= $(HOME)/.local
 
 .PHONY: build test vet fmt clean quality fmt-check lint-go lint-shell check-tools \
-	check-shellcheck-version check-golangci-lint-version install test-shell
+	check-shellcheck-version check-golangci-lint-version install
 
 quality: check-tools fmt-check vet test lint-go lint-shell
 
@@ -92,7 +92,3 @@ clean:
 install: build
 	mkdir -p $(PREFIX)/bin
 	ln -sf $(abspath $(BIN)) $(PREFIX)/bin/claude-contained
-
-test-shell: build
-	@for t in tests/*.test.sh; do echo "== $$t"; \
-	  CLAUDE_CONTAINED_TEST_TARGETS="$(BIN) $(BIN_DOCKED)" "$$t" || exit 1; done

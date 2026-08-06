@@ -24,6 +24,10 @@ The local quality gate requires:
 - ShellCheck `0.11.0`
 - golangci-lint `2.12.2` from github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
 - A Go toolchain compatible with `go.mod`
+- `bash` and `jq` on `PATH`: the image-script tests run the shipped `image/*.sh`
+  under a real bash, and `srt-settings.sh` generates its policy with `jq`. Both
+  are mandatory -- a missing one fails those tests clearly rather than skipping
+  coverage.
 
 Verify tool versions match CI with:
 
@@ -57,11 +61,12 @@ The formatter rewrites Go files and remains a separate command:
 make fmt
 ```
 
-The slower runtime suites are deliberately excluded from the fast static and unit baseline:
-
-```bash
-make test-shell
-```
+Test orchestration is entirely Go: `make test` (`go test ./...`) runs the
+package, golden, compiled-binary black-box, and image-script suites. There is no
+separate shell-test step -- the `tests/*.test.sh` harness and its `make
+test-shell` target were retired once every image-side contract had Go coverage
+(see [ADR-0008](docs/adr/0008-go-owned-test-migration.md)). `make lint-shell`
+still ShellChecks the shipped `image/*.sh`.
 
 GitHub Actions runs `make quality` for pull requests and pushes to `main`.
 
@@ -122,11 +127,24 @@ guard instead of passing on a lucky timing. It is part of `make test` /
 `make quality` and needs no running container runtime (though it does build git
 worktree fixtures, so `git` must be present).
 
+### Image-script tests
+
+`internal/imagescript` runs each shipped `image/*.sh` under a real bash and
+asserts its observable contract structurally: the argv of the external commands
+it drives, the files and permissions it produces, the JSON policy it generates,
+and its fail-closed behavior on bad input. External commands whose argument
+boundary -- not their implementation -- is under test (`socat`, `script`,
+`zellij`, `id`) are modeled by the same `internal/blackbox` re-exec stub the
+compiled-binary suite uses; Bash and `jq` are mandatory prerequisites that fail
+clearly when absent, never skip. Small shell-syntax fixtures live under
+`internal/imagescript/testdata/` only where shell interpretation is the contract
+(the tool-env layer fragments). It is part of `make test` / `make quality`.
+
 ## Repository Architecture
 
 - **Go launcher**: `cmd/claude-contained` is the entry point. `internal/cli` parses flags, `internal/host` inspects and prepares host state, `internal/plan` builds a resumable execution plan, and `internal/runtime` is the container-runtime seam.
 - **Container image**: `Dockerfile` assembles the image. Production helpers and configuration live under `image/`; each script documents its purpose at the top of the file.
-- **Tests**: Go unit tests live beside their packages. Golden tests in `cmd/claude-contained` call `runWith` in-process against a stubbed container runtime and assert the full observable result (runtime argv, stdout, stderr, exit status, filesystem manifest) against `testdata/golden/` -- see "Golden tests" above. The built binary itself is under test in `cmd/claude-contained/artifact_test.go`, the compiled-binary black-box suite, via the `internal/blackbox` harness -- see "Compiled-binary black-box tests" above. Shell suites under `tests/` still exercise the shipped build outputs for areas not yet migrated to Go (`make test-shell` runs every `tests/*.test.sh` against both build outputs; it is not part of `make quality`). Those suites create scratch directories through `tests/lib/tmp.sh` (`mk_tmpdir`/`mk_tmpdir_resolved`/`mk_tmpfile`/`mk_tmpname`) and delete them through `safe_rm_rf`, never bare `mktemp`/`rm -rf`: bare `mktemp -d` can fail into an empty string that a later `cd`+`pwd -P` turns into the repo root, so `safe_rm_rf` refuses the repo root, its ancestors, `$HOME`, `/`, and empty paths. The guard is covered by `tests/tmp-lib.test.sh`.
+- **Tests**: Go owns all test orchestration. Go unit tests live beside their packages. Golden tests in `cmd/claude-contained` call `runWith` in-process against a stubbed container runtime and assert the full observable result (runtime argv, stdout, stderr, exit status, filesystem manifest) against `testdata/golden/` -- see "Golden tests" above. The built binary itself is under test in `cmd/claude-contained/artifact_test.go`, the compiled-binary black-box suite, via the `internal/blackbox` harness -- see "Compiled-binary black-box tests" above. The shipped `image/*.sh` are driven from `internal/imagescript` -- see "Image-script tests" above. There is no shell test harness: `go test ./...` runs everything, and scratch state uses Go's `t.TempDir()`, so the retired `tests/lib/tmp.sh` `mktemp`/`rm -rf` footgun cannot recur.
 - **Design records**: [CONTEXT.md](CONTEXT.md) defines project vocabulary. Architectural decisions live under [`docs/adr/`](docs/adr/).
 
 The VS Code template has separate implementation notes in [devcontainer/CLAUDE.md](devcontainer/CLAUDE.md).
@@ -191,7 +209,7 @@ Apple Containers fails when the Dockerfile reaches 16k. Keep it comfortably belo
 
 This separation also protects build caching: editing a runtime helper should not force unrelated package-install layers to rebuild.
 
-The build context is trimmed the same way: `bin/`, `cmd/`, `internal/`, `go.mod`, `Makefile`, `tests/`, `devcontainer/` and `.scratch` are excluded via `.dockerignore`. A multi-megabyte compiled binary must never ship to the builder, and `*.md` in `.dockerignore` does not match nested paths, so `.scratch` needs its own entry. See `docs/adr/0004-go-launcher-rewrite.md` Consequences for the rationale; this is the one place it is documented.
+The build context is trimmed the same way: `bin/`, `cmd/`, `internal/`, `go.mod`, `Makefile`, `devcontainer/` and `.scratch` are excluded via `.dockerignore`. A multi-megabyte compiled binary must never ship to the builder, and `*.md` in `.dockerignore` does not match nested paths, so `.scratch` needs its own entry. See `docs/adr/0004-go-launcher-rewrite.md` Consequences for the rationale; this is the one place it is documented.
 
 ### Preserve Security Boundaries
 
