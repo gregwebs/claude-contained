@@ -382,3 +382,34 @@ func TestHelpDocumentsRuntimeSelection(t *testing.T) {
 		t.Error("docker help should not carry the -H caveat: Docker reaches those services")
 	}
 }
+
+// Attach carries no runtime-specific behavior (ticket 03 of #20): unlike -H or
+// --dns, its option description and examples do not vary by runtime, so the
+// two Profile help texts must describe it identically. CONTRIBUTING.md's
+// "Runtime-Conditional Behavior" section requires updating both help_*.txt
+// files together for any flag/behavior change; this pins the shared lines so a
+// future edit that touches only one file (or only the .txt without the other)
+// fails here instead of silently drifting, the way a manual side-by-side diff
+// of --help output would catch it.
+func TestHelpAttachLinesAreIdenticalAcrossRuntimes(t *testing.T) {
+	apple := lines(NewApple(Darwin).Profile().Help)
+	docker := lines(NewDocker(Darwin).Profile().Help)
+
+	for _, want := range []string{
+		"  -a, --attach [NAME] [-- CMD]  Attach to a running container (errors if none",
+		"                     matches); with no command, runs a debug shell",
+		"  claude-contained -a myproject        # Attach to aic-myproject; run a debug shell",
+		"  claude-contained -a myproject -- claude  # Attach to aic-myproject; run Claude Code",
+	} {
+		if !contains(apple, want) {
+			t.Errorf("apple help missing attach line %q", want)
+		}
+		if !contains(docker, want) {
+			t.Errorf("docker help missing attach line %q", want)
+		}
+	}
+}
+
+func lines(s string) []string {
+	return strings.Split(s, "\n")
+}

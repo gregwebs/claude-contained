@@ -23,7 +23,8 @@ Options:
   --share-skills DIR  Mount shared skill folders from DIR read-only (opt-in)
   --share-host-claude  Mount host ~/.claude directly as container ~/.claude
   --readonly-extras  Mount all extra mounts read-only (suffix overrides per-path)
-  -a, --attach [NAME]  Attach to a running container; errors if none matches
+  -a, --attach [NAME] [-- CMD]  Attach to a running container (errors if none
+                     matches); with no command, runs a debug shell
   --name NAME        Name for a new container (mutually exclusive with --attach)
   --zellij           Run the tool inside a persistent Zellij workspace
   --session NAME     With --zellij, the Zellij session to start or attach to
@@ -121,7 +122,8 @@ Examples:
   claude-contained --no-sandbox -s     # Debug shell with the sandbox off
   claude-contained --share-skills /Users/me/Projects/skills
   claude-contained -a                  # List and attach to running container
-  claude-contained -a myproject        # Attach to container aic-myproject
+  claude-contained -a myproject        # Attach to aic-myproject; run a debug shell
+  claude-contained -a myproject -- claude  # Attach to aic-myproject; run Claude Code
   claude-contained --name myproject    # Create a container named aic-myproject
   claude-contained --zellij            # Start this project in Zellij
   claude-contained --zellij --attach   # Attach to a live Zellij-backed container

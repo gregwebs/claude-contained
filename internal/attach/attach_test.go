@@ -22,7 +22,6 @@ func neverPrompt(t *testing.T) func(string) (string, bool) {
 func baseRequest(t *testing.T) Request {
 	var stdout, stderr strings.Builder
 	return Request{
-		Tool:   "claude",
 		Home:   "/h",
 		Stdout: &stdout,
 		Stderr: &stderr,
@@ -53,7 +52,7 @@ func TestResolveByNameBuildsExec(t *testing.T) {
 	if !dec.Spec.TTY {
 		t.Error("TTY = false, want true")
 	}
-	want := []string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "/opt/claude/claude"}
+	want := []string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "/usr/local/bin/shell-run"}
 	if !reflect.DeepEqual(dec.Spec.Command, want) {
 		t.Errorf("Command = %#v, want %#v", dec.Spec.Command, want)
 	}
@@ -287,8 +286,6 @@ func TestCommandDebugShell(t *testing.T) {
 	req := baseRequest(t)
 	req.Stderr = &stderr
 	req.Shell = true
-	req.Tool = "codex"
-	req.Yolo = true
 
 	got := Command(req)
 	want := []string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "/usr/local/bin/shell-run"}
@@ -296,7 +293,7 @@ func TestCommandDebugShell(t *testing.T) {
 		t.Errorf("Command = %#v, want %#v", got, want)
 	}
 	if stderr.String() != "" {
-		t.Errorf("stderr = %q, want empty (shell ignores tool/yolo)", stderr.String())
+		t.Errorf("stderr = %q, want empty", stderr.String())
 	}
 }
 
@@ -309,8 +306,8 @@ func TestCommandSandboxWrapper(t *testing.T) {
 		srtDisable bool
 		want       []string
 	}{
-		{"tool, sandboxed", false, false, []string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "/opt/claude/claude"}},
-		{"tool, no-sandbox", false, true, []string{"/usr/local/bin/tool-env", "/opt/claude/claude"}},
+		{"default, sandboxed", false, false, []string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "/usr/local/bin/shell-run"}},
+		{"default, no-sandbox", false, true, []string{"/usr/local/bin/tool-env", "/usr/local/bin/shell-run"}},
 		{"shell, sandboxed", true, false, []string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "/usr/local/bin/shell-run"}},
 		{"shell, no-sandbox", true, true, []string{"/usr/local/bin/tool-env", "/usr/local/bin/shell-run"}},
 	}
@@ -328,35 +325,36 @@ func TestCommandSandboxWrapper(t *testing.T) {
 	}
 }
 
-// --- checklist box 8: yolo lands after the tool, behind the wrapper --------
+// --- checklist box 8: the user's command runs verbatim, behind the wrapper -
 
-func TestCommandYoloPlacement(t *testing.T) {
+func TestCommandRunsUserCommand(t *testing.T) {
 	cases := []struct {
-		tool       string
-		wantCmd    []string
-		wantStderr string
+		name       string
+		command    []string
+		srtDisable bool
+		want       []string
 	}{
-		{"claude", []string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "/opt/claude/claude", "--dangerously-skip-permissions"}, ""},
-		{"codex", []string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "codex", "--yolo"}, ""},
-		{"copilot", []string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "copilot", "--yolo"}, ""},
-		{"gemini", []string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "gemini", "--yolo"}, ""},
-		{"vibe", []string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "vibe"}, "Warning: vibe does not support yolo mode\n"},
-		{"bogus", []string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "bogus"}, ""},
+		{"command, sandboxed", []string{"npm", "test"}, false,
+			[]string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "npm", "test"}},
+		{"command, no-sandbox", []string{"npm", "test"}, true,
+			[]string{"/usr/local/bin/tool-env", "npm", "test"}},
+		// The bare program name passes through verbatim -- resolution happens
+		// in-container via the native launcher link, not the launcher itself
+		// (see docs/adr/0009 and ticket 03 of #20's native-link note).
+		{"bare program name, sandboxed", []string{"claude"}, false,
+			[]string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "claude"}},
+		{"empty command falls back to the default shell", nil, false,
+			[]string{"/usr/local/bin/tool-env", "/usr/local/bin/srt-run", "/usr/local/bin/shell-run"}},
 	}
 	for _, tc := range cases {
-		t.Run(tc.tool, func(t *testing.T) {
-			var stderr strings.Builder
+		t.Run(tc.name, func(t *testing.T) {
 			req := baseRequest(t)
-			req.Stderr = &stderr
-			req.Tool = tc.tool
-			req.Yolo = true
+			req.Command = tc.command
+			req.SrtDisable = tc.srtDisable
 
 			got := Command(req)
-			if !reflect.DeepEqual(got, tc.wantCmd) {
-				t.Errorf("Command = %#v, want %#v", got, tc.wantCmd)
-			}
-			if stderr.String() != tc.wantStderr {
-				t.Errorf("stderr = %q, want %q", stderr.String(), tc.wantStderr)
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("Command = %#v, want %#v", got, tc.want)
 			}
 		})
 	}

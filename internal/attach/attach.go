@@ -26,7 +26,6 @@ const (
 	sandboxWrapper = "/usr/local/bin/srt-run" // claude-contained:148
 	ToolEnvPath    = "/usr/local/bin/tool-env"
 	shellPath      = "/usr/local/bin/shell-run" // claude-contained:140
-	claudePath     = "/opt/claude/claude"       // claude-contained:134
 )
 
 var selectionPattern = regexp.MustCompile(`^[0-9]+$`)
@@ -36,11 +35,12 @@ var selectionPattern = regexp.MustCompile(`^[0-9]+$`)
 type Request struct {
 	Name  string // cli.Config.AttachName, unnormalized, may be ""
 	Shell bool   // cli.Config.ShellMode
-	// Tool and Yolo no longer come from cli.Config (#22 deleted -t/-y and the
-	// closed tool set); the caller supplies a literal transitional default
-	// until ticket 03 (#23) gives attach its own program resolution.
-	Tool       string
-	Yolo       bool
+	// Command is the container command from the CLI (everything after `--`).
+	// Empty means run the attach default: a debug shell. `container exec` /
+	// `docker exec` bypass the image ENTRYPOINT/CMD, so unlike the run path
+	// there is no image default to inherit (see docs/adr/0009 and ticket 03
+	// of #20).
+	Command    []string
 	SrtDisable bool       // cli.Config.SrtDisable
 	Home       string     // host.State.Home
 	Env        []env.Pair // --env flags only; the project file is read later
@@ -187,45 +187,23 @@ func buildSpec(req Request, name string) *runtime.ExecSpec {
 	}
 }
 
-// Command builds the container command (build_attach_cmd /
-// build_attach_shell_cmd, claude-contained:143-165). --shell ignores the tool
-// and the yolo flag entirely.
+// Command builds the container command: the env resolver, the optional
+// sandbox wrapper, then the user's command. `container exec` bypasses the
+// image CMD, so an empty command (and -s) default to shell-run explicitly.
 func Command(req Request) []string {
 	cmd := []string{ToolEnvPath}
 	if !req.SrtDisable {
 		cmd = append(cmd, sandboxWrapper)
 	}
 
-	if req.Shell {
+	// req.Shell and an empty req.Command both resolve to shellPath. -s plus a
+	// command is already rejected by Validate's "shell-with-command" check, so
+	// req.Shell == true always implies an empty req.Command; the || is
+	// belt-and-suspenders and documents intent.
+	if req.Shell || len(req.Command) == 0 {
 		return append(cmd, shellPath)
 	}
-
-	cmd = append(cmd, toolPath(req.Tool))
-	if req.Yolo {
-		switch req.Tool {
-		case "claude":
-			cmd = append(cmd, "--dangerously-skip-permissions")
-		case "codex", "copilot", "gemini":
-			cmd = append(cmd, "--yolo")
-		case "vibe":
-			// This string deliberately differs from the run path's warning
-			// (internal/plan/plan.go), which adds " (no equivalent flag)".
-			_, _ = fmt.Fprintln(req.Stderr, "Warning: vibe does not support yolo mode")
-		}
-		// Any other tool: no flag, no error -- the attach path never
-		// validates the tool (claude-contained:132-137, :151-155).
-	}
-	return cmd
-}
-
-// toolPath mirrors get_tool_path (claude-contained:132-137): claude lives
-// under /opt/claude, everything else is looked up on PATH verbatim, including
-// an unknown tool.
-func toolPath(tool string) string {
-	if tool == "claude" {
-		return claudePath
-	}
-	return tool
+	return append(cmd, req.Command...)
 }
 
 // ExecEnv carries only host-known values. Tool paths and layer fragments are
