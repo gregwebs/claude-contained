@@ -34,10 +34,13 @@ var selectionPattern = regexp.MustCompile(`^[0-9]+$`)
 // Request is everything Resolve needs. Running is passed in rather than
 // fetched, so Resolve stays a function of its inputs and needs no runtime.
 type Request struct {
-	Name       string     // cli.Config.AttachName, unnormalized, may be ""
-	Shell      bool       // cli.Config.ShellMode
-	Tool       string     // cli.Config.Tool (never validated -- see doc)
-	Yolo       bool       // cli.Config.YoloMode
+	Name  string // cli.Config.AttachName, unnormalized, may be ""
+	Shell bool   // cli.Config.ShellMode
+	// Tool and Yolo no longer come from cli.Config (#22 deleted -t/-y and the
+	// closed tool set); the caller supplies a literal transitional default
+	// until ticket 03 (#23) gives attach its own program resolution.
+	Tool       string
+	Yolo       bool
 	SrtDisable bool       // cli.Config.SrtDisable
 	Home       string     // host.State.Home
 	Env        []env.Pair // --env flags only; the project file is read later

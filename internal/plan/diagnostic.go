@@ -13,8 +13,8 @@ import (
 // no command or environment-value fields.
 type DiagnosticSummary struct {
 	Route            string
-	Tool             string
-	Shell            bool
+	CommandSource    string
+	CommandLen       int
 	ProjectDir       string
 	ContainerName    string
 	StepCount        int
@@ -25,8 +25,8 @@ type DiagnosticSummary struct {
 func (s DiagnosticSummary) LogValue() slog.Value {
 	return slog.GroupValue(
 		slog.String("route", s.Route),
-		slog.String("tool", s.Tool),
-		slog.Bool("shell", s.Shell),
+		slog.String("command_source", s.CommandSource),
+		slog.Int("command_len", s.CommandLen),
 		slog.String("project_dir", s.ProjectDir),
 		slog.String("container_name", s.ContainerName),
 		slog.Int("step_count", s.StepCount),
@@ -37,17 +37,11 @@ func (s DiagnosticSummary) LogValue() slog.Value {
 
 // Summarize extracts only reviewed fields from the plan and parsed config.
 func Summarize(program Program, cfg cli.Config) DiagnosticSummary {
-	tool := cfg.Tool
-	switch tool {
-	case "claude", "codex", "copilot", "gemini", "vibe":
-	default:
-		tool = "invalid"
-	}
 	summary := DiagnosticSummary{
-		Route:     "incomplete",
-		Tool:      tool,
-		Shell:     cfg.ShellMode,
-		StepCount: len(program.Steps),
+		Route:         "incomplete",
+		CommandSource: cli.CommandSource(cfg),
+		CommandLen:    len(cfg.Command),
+		StepCount:     len(program.Steps),
 	}
 	if program.Pending != nil {
 		summary.Route = "prompt"

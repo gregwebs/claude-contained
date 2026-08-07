@@ -66,6 +66,26 @@ func TestToolEnvBaseAddsOnlyGenericPathsNoJava(t *testing.T) {
 	}
 }
 
+// An empty effective command (a tooling layer with CMD [], or an old base
+// image run by a newer launcher) is "no command was given," not an error: it
+// falls back to shell-run, consistent with the launcher's own image-default
+// behavior (docs/adr/0009), rather than tool-env's former hard "command
+// required" failure.
+func TestToolEnvEmptyArgvFallsBackToShellRun(t *testing.T) {
+	res := runScript(t, scriptOpts{
+		Script: scriptPath(t, "tool-env.sh"),
+		Args:   []string{"--directory", filepath.Join(t.TempDir(), "missing")},
+		Path:   toolEnvBasePath,
+		Home:   "/host/home",
+	})
+	if strings.Contains(res.Stderr, "command required") {
+		t.Errorf("stderr = %q, want no more \"command required\" failure", res.Stderr)
+	}
+	if !strings.Contains(res.Stderr, "shell-run") {
+		t.Errorf("stderr = %q, want it to reflect an attempt to exec shell-run", res.Stderr)
+	}
+}
+
 func TestToolEnvFragmentsExpandOnlyHomeAndPathNeverEvaluated(t *testing.T) {
 	// The no-eval sentinel is a per-test path under t.TempDir() rather than a
 	// shared global, so a pre-existing or foreign file can never turn a correct

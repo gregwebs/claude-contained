@@ -1,13 +1,12 @@
 Usage:
-  claude-contained [options] [-- <tool args...>]
+  claude-contained [options] [--] [command ...]
 
 Description:
-  Runs AI coding assistants inside an Apple Containers sandbox.
+  Runs a command inside an Apple Containers sandbox.
 
 Options:
   -C, --dir DIR      Project directory (default: current directory)
   -m, --mount DIR[:ro|:rw]  Mount an extra directory (can be repeated)
-  -t, --tool TOOL    AI tool to run: claude (default), codex, copilot, gemini, vibe
   -R, --rebuild[=MODE]  Rebuild image and exit: tools (default) or full
   -H PORT[:HOSTPORT] Forward host port to container localhost (can be repeated)
   -p HOST:CONTAINER  Publish container port to host (can be repeated)
@@ -16,11 +15,10 @@ Options:
   --dns IP           Use IP as a DNS resolver (default: 1.1.1.1; repeatable)
   --allow-host HOST  Allow sandbox egress to HOST (can be repeated)
   --no-sandbox       Disable the srt sandbox (debugging escape hatch)
-  -s, --shell        Start a bash shell instead of the AI tool (for debugging)
+  -s, --shell        Run a debug shell instead of the container command
   -S, --ssh          Enable SSH agent forwarding (for git push)
   -w, --worktree     Auto-include git worktree's main repository (skip prompt)
   -W, --lock-worktrees  Auto-lock hidden linked worktrees (skip prompt)
-  -y, --yolo         Skip all permission prompts (tool-specific flag)
   -N, --contained-node-modules  Use container-specific node_modules (skip prompt)
   --share-skills DIR  Mount shared skill folders from DIR read-only (opt-in)
   --share-host-claude  Mount host ~/.claude directly as container ~/.claude
@@ -41,11 +39,14 @@ Options:
   -h, --help         Show this help message
 
 Behavior:
-  - There are no positional arguments. The project directory comes from -C
-    (default: the current directory) and extra mounts from -m; everything after
-    the first -- is passed to the tool verbatim.
+  - The first token not consumed by a flag terminates flag parsing; everything
+    from it on, including any -flags of its own, is the container command, run
+    verbatim in place of the image's own CMD. -- is an always-optional marker
+    meaning "the command starts here", needed only when the command's first
+    token would otherwise look like a launcher flag. Launcher flags must
+    precede the command. A bare invocation runs the image's default CMD.
   - Directories are mounted at their original host paths for full path parity.
-  - Extra mounts are automatically added via --add-dir (claude, codex only).
+  - -m only mounts; it injects nothing into the container command.
   - Append :ro to an extra mount to mount it read-only (or :rw to force
     read-write). The project directory cannot be read-only.
   - Claude uses ~/.claude-contained/claude as container ~/.claude by default.
@@ -99,17 +100,16 @@ Behavior:
     Use --zellij --attach [--session NAME] to reconnect to a live Zellij session.
 
 Examples:
-  claude-contained                     # Run claude in current directory
-  claude-contained -t codex            # Run codex instead
-  claude-contained -t copilot          # Run copilot instead
-  claude-contained -t gemini           # Run gemini instead
-  claude-contained -t vibe             # Run vibe instead
+  claude-contained                     # Run the image's default CMD
+  claude-contained npm test            # Run an arbitrary command
+  claude-contained claude              # Run claude
+  claude-contained claude --dangerously-skip-permissions --model sonnet
+  claude-contained codex               # Run codex
   claude-contained -C ~/code/my-app    # Run in a specific project directory
   claude-contained -m ../other/project # Mount an extra directory
   claude-contained -m ../lib:ro        # Mount ../lib read-only
   claude-contained --readonly-extras -m ../a -m ../b  # All extra mounts read-only
-  claude-contained -- --model sonnet   # Pass args to tool
-  claude-contained -y -t codex         # Codex with --yolo
+  claude-contained -- claude --model sonnet  # -- optional; "claude" isn't a flag
   claude-contained -S                  # Enable SSH agent (for git push)
   claude-contained -s                  # Debug shell in current directory
   claude-contained --rebuild           # Refresh AI tools, then exit

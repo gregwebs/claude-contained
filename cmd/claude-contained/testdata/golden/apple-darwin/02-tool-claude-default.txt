@@ -1,5 +1,5 @@
 # case: 02-tool-claude-default
-# desc: default tool selection (claude, no -t)
+# desc: default command: no positional, image CMD runs
 # config: apple-darwin
 --- exit ---
 0
@@ -50,7 +50,6 @@ GIT_PROTECT_DIRS=<PROJ>
 --mount
 type=bind,src=<HOME>/.claude-contained,dst=<HOME>/.claude-contained
 claude-contained:latest
-claude
 
 --- stdout ---
 (empty)

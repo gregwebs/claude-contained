@@ -46,8 +46,6 @@ func TestParseDefersRequiredValueDiagnosticsToValidate(t *testing.T) {
 		{"container runtime", "--container-runtime", "error: --container-runtime requires apple or docker\n"},
 		{"build context", "--build-context", "error: --build-context requires a directory\n"},
 		{"share skills", "--share-skills", "error: --share-skills requires a value\n"},
-		{"short tool", "-t", "error: -t/--tool requires a value\n"},
-		{"long tool", "--tool", "error: -t/--tool requires a value\n"},
 		{"short env", "-e", "error: -e/--env requires KEY=VALUE\n"},
 		{"long env", "--env", "error: -e/--env requires KEY=VALUE\n"},
 		{"publish", "-p", "error: -p requires a value\n"},
@@ -63,7 +61,7 @@ func TestParseDefersRequiredValueDiagnosticsToValidate(t *testing.T) {
 			if stderr != tc.want {
 				t.Errorf("stderr = %q, want %q", stderr, tc.want)
 			}
-			if cfg.RebuildMode != "none" || cfg.Tool != "claude" {
+			if cfg.RebuildMode != "none" {
 				t.Errorf("Parse did not return its configuration: %+v", cfg)
 			}
 		})
@@ -81,7 +79,6 @@ func TestValueFlagDoesNotSwallowAFollowingOption(t *testing.T) {
 		args []string
 		want string
 	}{
-		{"tool", []string{"-t", "--yolo"}, "error: -t/--tool requires a value\n"},
 		{"env", []string{"-e", "--yolo"}, "error: -e/--env requires KEY=VALUE\n"},
 	}
 	for _, tc := range cases {
@@ -141,14 +138,6 @@ func TestParseDefersOtherSyntaxDiagnosticsToValidate(t *testing.T) {
 			[]string{"--wat"},
 			"error: unknown flag: --wat\n" +
 				"       run 'claude-contained --help' for the supported flags\n",
-		},
-		{
-			"positional argument",
-			[]string{"project"},
-			"error: positional arguments are no longer accepted: project\n" +
-				"       use -C/--dir for the project directory:  claude-contained -C project\n" +
-				"       use -m/--mount for extra directories:    claude-contained -m project\n" +
-				"       (bare 'claude-contained' uses the current directory)\n",
 		},
 	}
 
@@ -299,6 +288,10 @@ func TestValidateNormalizesCustomContainerName(t *testing.T) {
 }
 
 func TestValidateReportsOnlyTheFirstSyntaxFailure(t *testing.T) {
+	// "positional first" is no longer a syntax-failure scenario: the first
+	// unconsumed token terminates flag parsing and becomes the command, so
+	// "project --wat" is a *valid* command (["project", "--wat"]), not two
+	// failures racing to be first. See TestFirstPositionalTerminatesFlagParsing.
 	cases := []struct {
 		name string
 		args []string
@@ -306,11 +299,6 @@ func TestValidateReportsOnlyTheFirstSyntaxFailure(t *testing.T) {
 	}{
 		{"unknown first", []string{"--wat", "project"},
 			"error: unknown flag: --wat\n       run 'claude-contained --help' for the supported flags\n"},
-		{"positional first", []string{"project", "--wat"},
-			"error: positional arguments are no longer accepted: project\n" +
-				"       use -C/--dir for the project directory:  claude-contained -C project\n" +
-				"       use -m/--mount for extra directories:    claude-contained -m project\n" +
-				"       (bare 'claude-contained' uses the current directory)\n"},
 	}
 
 	for _, tc := range cases {
@@ -421,14 +409,159 @@ func TestParsePreservesMergedRuntimeSelectionGrammar(t *testing.T) {
 	}
 }
 
-func TestParseForwardsToolArgumentsAfterTheFirstRealBoundary(t *testing.T) {
+func TestParseForwardsCommandArgumentsAfterTheFirstRealBoundary(t *testing.T) {
 	cfg := Parse([]string{"-s", "--", "--", "--container-runtime=docker", "arg"}, testProgName, false)
 	want := []string{"--", "--container-runtime=docker", "arg"}
-	if strings.Join(cfg.ToolArgs, "\x00") != strings.Join(want, "\x00") {
-		t.Errorf("ToolArgs = %q, want %q", cfg.ToolArgs, want)
+	if strings.Join(cfg.Command, "\x00") != strings.Join(want, "\x00") {
+		t.Errorf("Command = %q, want %q", cfg.Command, want)
 	}
 	if cfg.ContainerRuntime != "" {
 		t.Errorf("ContainerRuntime = %q, want empty", cfg.ContainerRuntime)
+	}
+}
+
+// TestFirstPositionalTerminatesFlagParsing pins the grammar docs/adr/0009
+// describes: the first token not consumed by a flag terminates flag parsing,
+// and everything from it onward -- including further dash-leading tokens --
+// is the container command, verbatim.
+func TestFirstPositionalTerminatesFlagParsing(t *testing.T) {
+	joined := func(cmd []string) string { return strings.Join(cmd, "\x00") }
+
+	t.Run("bare positional becomes a command", func(t *testing.T) {
+		cfg, stderr, err := validateArgs("npm", "test")
+		if err != nil {
+			t.Fatalf("Validate: %v", err)
+		}
+		if stderr != "" {
+			t.Errorf("stderr = %q, want empty", stderr)
+		}
+		want := []string{"npm", "test"}
+		if joined(cfg.Command) != joined(want) {
+			t.Errorf("Command = %q, want %q", cfg.Command, want)
+		}
+	})
+
+	t.Run("flags before the command still parse", func(t *testing.T) {
+		cfg := Parse([]string{"-C", "/foo", "npm", "test"}, testProgName, false)
+		if cfg.ProjectDir != "/foo" {
+			t.Errorf("ProjectDir = %q, want /foo", cfg.ProjectDir)
+		}
+		want := []string{"npm", "test"}
+		if joined(cfg.Command) != joined(want) {
+			t.Errorf("Command = %q, want %q", cfg.Command, want)
+		}
+	})
+
+	t.Run("the command owns its own flags", func(t *testing.T) {
+		cfg := Parse([]string{"npm", "test", "-C", "/foo"}, testProgName, false)
+		if cfg.ProjectDir != "" {
+			t.Errorf("ProjectDir = %q, want empty: -C after the command belongs to npm", cfg.ProjectDir)
+		}
+		want := []string{"npm", "test", "-C", "/foo"}
+		if joined(cfg.Command) != joined(want) {
+			t.Errorf("Command = %q, want %q", cfg.Command, want)
+		}
+	})
+
+	t.Run("-- and a bare command are identical", func(t *testing.T) {
+		withMarker := Parse([]string{"--", "npm", "test"}, testProgName, false)
+		bare := Parse([]string{"npm", "test"}, testProgName, false)
+		if joined(withMarker.Command) != joined(bare.Command) {
+			t.Errorf("Command = %q, want %q", withMarker.Command, bare.Command)
+		}
+	})
+
+	t.Run("empty command falls through to the image default", func(t *testing.T) {
+		for _, args := range [][]string{{}, {"--"}} {
+			cfg, stderr, err := validateArgs(args...)
+			if err != nil {
+				t.Fatalf("Validate(%v): %v", args, err)
+			}
+			if stderr != "" {
+				t.Errorf("stderr(%v) = %q, want empty", args, stderr)
+			}
+			if len(cfg.Command) != 0 {
+				t.Errorf("Command(%v) = %q, want empty", args, cfg.Command)
+			}
+		}
+	})
+}
+
+// TestDeletedSpellingsBecomeMigrationErrors pins -t/-y as removed flags, each
+// naming its positional replacement rather than being silently accepted or
+// falling into the generic unknown-flag path.
+func TestDeletedSpellingsBecomeMigrationErrors(t *testing.T) {
+	t.Run("-t names its removal and consumes the value", func(t *testing.T) {
+		cfg, stderr, err := validateArgs("-t", "codex")
+		requireUsageError(t, err)
+		want := "error: -t/--tool is no longer accepted\n" +
+			"       name the program positionally:  claude-contained <program>\n"
+		if stderr != want {
+			t.Errorf("stderr = %q, want %q", stderr, want)
+		}
+		// The value is consumed, not left to also start a positional command.
+		if len(cfg.Command) != 0 {
+			t.Errorf("Command = %q, want empty: -t's value must not also be read as a command", cfg.Command)
+		}
+	})
+
+	t.Run("-y names its removal", func(t *testing.T) {
+		_, stderr, err := validateArgs("-y")
+		requireUsageError(t, err)
+		want := "error: -y/--yolo is no longer accepted\n" +
+			"       pass the flag to the program:  claude-contained claude --dangerously-skip-permissions\n"
+		if stderr != want {
+			t.Errorf("stderr = %q, want %q", stderr, want)
+		}
+	})
+
+	t.Run("-- --model sonnet cannot start a command with a flag", func(t *testing.T) {
+		_, stderr, err := validateArgs("--", "--model", "sonnet")
+		requireUsageError(t, err)
+		want := "error: command cannot start with a flag: --model\n" +
+			"       name the program first:  claude-contained claude --model sonnet\n"
+		if stderr != want {
+			t.Errorf("stderr = %q, want %q", stderr, want)
+		}
+	})
+}
+
+// TestCommandConflictsWithNoWhereToRun pins each flag that supplies its own
+// command (or reconnects instead of running one) as a usage error when a
+// command is also given, rather than a silent discard.
+func TestCommandConflictsWithNoWhereToRun(t *testing.T) {
+	cases := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"shell with command", []string{"-s", "npm", "test"},
+			"error: -s/--shell cannot be combined with a command\n" +
+				"       -s runs a debug shell in place of the container command.\n"},
+		{"rebuild with command", []string{"-R", "npm", "test"},
+			"error: -R/--rebuild cannot be combined with a command\n" +
+				"       --rebuild builds an image and exits; it runs no command.\n" +
+				"       select the mode with --rebuild=MODE:  claude-contained --rebuild=full\n"},
+		// -a's own optional-value consumption (section 4.6) would otherwise read
+		// "npm" as the attach name and fail the pre-existing "zellij-attach-name"
+		// check first; "--" keeps the command's first token dash-leading so -a
+		// leaves it alone and the command actually reaches this conflict check.
+		{"zellij attach with command", []string{"--zellij", "--attach", "--", "npm", "test"},
+			"error: --zellij --attach cannot be combined with a command\n" +
+				"       Attaching reconnects to an existing session; the command would never run.\n"},
+		{"attach with command", []string{"-a", "npm", "test"},
+			"error: -a/--attach cannot be combined with a command\n" +
+				"       Attaching reconnects to a running container.\n"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, stderr, err := validateArgs(tc.args...)
+			requireUsageError(t, err)
+			if stderr != tc.want {
+				t.Errorf("stderr = %q, want %q", stderr, tc.want)
+			}
+		})
 	}
 }
 

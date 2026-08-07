@@ -86,7 +86,9 @@ const (
 	syntaxRequiredValue syntaxFailureKind = iota
 	syntaxNewSessionValue
 	syntaxUnknownFlag
-	syntaxPositional
+	syntaxToolRemoved
+	syntaxYoloRemoved
+	syntaxCommandFlag
 )
 
 // syntaxFailure keeps only the source facts needed to render a diagnosis.
@@ -110,14 +112,17 @@ type Config struct {
 	SSHMode              bool
 	WorktreeMode         bool
 	LockWorktrees        bool
-	YoloMode             bool
 	ContainedNodeModules bool
 	AttachMode           bool
 	AttachName           string
 	CustomContainerName  string
 	ProjectDir           string
 	ExtraMounts          []string
-	ToolArgs             []string
+	// Command is the container command: the first token not consumed by a flag
+	// terminates flag parsing, and everything from it onward (verbatim, including
+	// any `-flags` and any further `--`) lands here. Empty means no command was
+	// given, so the image's own CMD runs. See docs/adr/0009.
+	Command []string
 	// ContainerRuntime is --container-runtime's value, unvalidated: the accepted
 	// names live in internal/runtime, which diagnoses a bad one after --help has
 	// had its chance.
@@ -143,7 +148,6 @@ type Config struct {
 	ZellijSessionName    string
 	ZellijSessionNameSet bool
 	RebuildMode          string
-	Tool                 string
 	ReadonlyExtras       bool
 	ShareSkillsDir       string
 	ShareHostClaude      bool
@@ -169,7 +173,6 @@ type Config struct {
 func Parse(args []string, progName string, shareHostClaudeEnv bool) Config {
 	cfg := Config{
 		RebuildMode:     "none",
-		Tool:            "claude",
 		ShareHostClaude: shareHostClaudeEnv,
 		parse:           parseState{progName: progName},
 	}
@@ -208,9 +211,28 @@ func Parse(args []string, progName string, shareHostClaudeEnv bool) Config {
 
 		// `--` matches -* and must be handled before any flag dispatch, or the
 		// unknown-flag arm below would swallow it. Everything after the first
-		// `--` goes to the tool verbatim, including any further `--`.
+		// `--` is the container command verbatim, including any further `--`.
 		if arg == "--" {
-			cfg.ToolArgs = append(cfg.ToolArgs, args[i+1:]...)
+			cfg.Command = append(cfg.Command, args[i+1:]...)
+			// A dash-leading first command token is the only shape the old `--`
+			// passthrough could produce (`-- --model sonnet`); catch it precisely.
+			if len(cfg.Command) > 0 && strings.HasPrefix(cfg.Command[0], "-") {
+				cfg.parse.failures = append(cfg.parse.failures, syntaxFailure{
+					kind:  syntaxCommandFlag,
+					flag:  cfg.Command[0],
+					value: strings.Join(cfg.Command, " "),
+				})
+			}
+			break
+		}
+
+		// The first token not consumed by a flag terminates flag parsing;
+		// everything from it on is the container command, verbatim. Non-dash
+		// because flag values are consumed via i++ and never reach the top of
+		// the loop, and dash tokens are either known flags or (after `--`)
+		// already handled above.
+		if !strings.HasPrefix(arg, "-") {
+			cfg.Command = args[i:]
 			break
 		}
 
@@ -407,16 +429,15 @@ func Parse(args []string, progName string, shareHostClaudeEnv bool) Config {
 		case arg == "-W" || arg == "--lock-worktrees":
 			cfg.LockWorktrees = true
 		case arg == "-y" || arg == "--yolo":
-			cfg.YoloMode = true
+			cfg.parse.failures = append(cfg.parse.failures, syntaxFailure{kind: syntaxYoloRemoved})
 		case arg == "-N" || arg == "--contained-node-modules":
 			cfg.ContainedNodeModules = true
 
 		case arg == "-t" || arg == "--tool":
 			// Note: there is no --tool= form; it falls through to the
-			// unknown-flag arm, as in bash.
-			if recordRequiredValue("-t/--tool", next, "") {
-				cfg.Tool = next
-			}
+			// unknown-flag arm, as in bash. Consume the value so it does not
+			// also start a positional command; record the removal regardless.
+			cfg.parse.failures = append(cfg.parse.failures, syntaxFailure{kind: syntaxToolRemoved})
 			if hasNext {
 				i++
 			}
@@ -495,15 +516,23 @@ func Parse(args []string, progName string, shareHostClaudeEnv bool) Config {
 				kind:  syntaxUnknownFlag,
 				value: arg,
 			})
-
-		default:
-			cfg.parse.failures = append(cfg.parse.failures, syntaxFailure{
-				kind:  syntaxPositional,
-				value: arg,
-			})
 		}
 	}
 	return cfg
+}
+
+// CommandSource classifies where the container command came from, for
+// diagnostics. It never carries the command itself -- see docs/adr/0009 and
+// the diagnostic-stream rules in AGENTS.md.
+func CommandSource(cfg Config) string {
+	switch {
+	case cfg.ShellMode:
+		return "shell"
+	case len(cfg.Command) > 0:
+		return "explicit"
+	default:
+		return "image-default"
+	}
 }
 
 var zellijSessionNamePattern = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
@@ -572,12 +601,18 @@ func ValidateContext(ctx context.Context, cfg *Config, stderr io.Writer) error {
 			kind = "unknown-flag"
 			_, _ = fmt.Fprintf(stderr, "error: unknown flag: %s\n", failure.value)
 			_, _ = fmt.Fprintf(stderr, "       run '%s --help' for the supported flags\n", cfg.parse.progName)
-		case syntaxPositional:
-			kind = "positional-argument"
-			_, _ = fmt.Fprintf(stderr, "error: positional arguments are no longer accepted: %s\n", failure.value)
-			_, _ = fmt.Fprintf(stderr, "       use -C/--dir for the project directory:  %s -C %s\n", cfg.parse.progName, failure.value)
-			_, _ = fmt.Fprintf(stderr, "       use -m/--mount for extra directories:    %s -m %s\n", cfg.parse.progName, failure.value)
-			_, _ = fmt.Fprintf(stderr, "       (bare '%s' uses the current directory)\n", cfg.parse.progName)
+		case syntaxToolRemoved:
+			kind = "tool-flag-removed"
+			_, _ = fmt.Fprintln(stderr, "error: -t/--tool is no longer accepted")
+			_, _ = fmt.Fprintf(stderr, "       name the program positionally:  %s <program>\n", cfg.parse.progName)
+		case syntaxYoloRemoved:
+			kind = "yolo-flag-removed"
+			_, _ = fmt.Fprintln(stderr, "error: -y/--yolo is no longer accepted")
+			_, _ = fmt.Fprintf(stderr, "       pass the flag to the program:  %s claude --dangerously-skip-permissions\n", cfg.parse.progName)
+		case syntaxCommandFlag:
+			kind = "command-starts-with-flag"
+			_, _ = fmt.Fprintf(stderr, "error: command cannot start with a flag: %s\n", failure.flag)
+			_, _ = fmt.Fprintf(stderr, "       name the program first:  %s claude %s\n", cfg.parse.progName, failure.value)
 		}
 		return fail(kind)
 	}
@@ -621,6 +656,30 @@ func ValidateContext(ctx context.Context, cfg *Config, stderr io.Writer) error {
 		_, _ = fmt.Fprintln(stderr, "       created with, so the variable would silently never reach the tool.")
 		_, _ = fmt.Fprintln(stderr, "       Set it when the session is created instead.")
 		return fail("zellij-attach-environment")
+	}
+	// A command has nowhere to go alongside any of these: -s/-R substitute their
+	// own command, --zellij --attach and -a reconnect to something already
+	// running. Each is a usage error rather than a silent discard.
+	if len(cfg.Command) > 0 {
+		switch {
+		case cfg.ShellMode:
+			_, _ = fmt.Fprintln(stderr, "error: -s/--shell cannot be combined with a command")
+			_, _ = fmt.Fprintln(stderr, "       -s runs a debug shell in place of the container command.")
+			return fail("shell-with-command")
+		case cfg.RebuildMode != "none":
+			_, _ = fmt.Fprintln(stderr, "error: -R/--rebuild cannot be combined with a command")
+			_, _ = fmt.Fprintln(stderr, "       --rebuild builds an image and exits; it runs no command.")
+			_, _ = fmt.Fprintf(stderr, "       select the mode with --rebuild=MODE:  %s --rebuild=full\n", cfg.parse.progName)
+			return fail("rebuild-with-command")
+		case cfg.ZellijMode && cfg.AttachMode:
+			_, _ = fmt.Fprintln(stderr, "error: --zellij --attach cannot be combined with a command")
+			_, _ = fmt.Fprintln(stderr, "       Attaching reconnects to an existing session; the command would never run.")
+			return fail("zellij-attach-with-command")
+		case cfg.AttachMode:
+			_, _ = fmt.Fprintln(stderr, "error: -a/--attach cannot be combined with a command")
+			_, _ = fmt.Fprintln(stderr, "       Attaching reconnects to a running container.")
+			return fail("attach-with-command")
+		}
 	}
 	// Last, immediately before the return, and that placement is load-bearing
 	// rather than stylistic. This function's message order is observable, and

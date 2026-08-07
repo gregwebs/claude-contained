@@ -1,5 +1,5 @@
 # case: 05-tool-gemini
-# desc: tool selection: gemini
+# desc: gemini as a positional command
 # config: docker-linux
 --- exit ---
 0

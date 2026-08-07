@@ -5,10 +5,12 @@ This guide covers the complete `claude-contained` command-line interface and its
 ## Command Line
 
 ```text
-claude-contained [options] [-- <tool args...>]
+claude-contained [options] [--] [command ...]
 ```
 
-There are no positional arguments. Use `-C` for the project directory, `-m` for extra mounts, and the first `--` to pass all remaining arguments to the selected tool verbatim.
+The first token not consumed by a flag terminates flag parsing; everything from it onward, including any `-flags` of its own and any further `--`, is the container command, run verbatim in place of the image's default `CMD`. `--` is an always-legal, always-optional marker meaning "the command starts here" -- needed only when the command's own first token would otherwise be read as a launcher flag (`claude-contained -- --model sonnet`). Launcher flags must precede the command, the same shape as `docker run` or `env`: `claude-contained -C /foo npm test` sets the project directory, while `claude-contained npm test -C /foo` passes `-C /foo` to `npm` untouched. Bare `claude-contained` and `claude-contained --` give an empty command, so the launcher emits no command operand and the image's own `CMD` runs.
+
+> **Migrating from an older launcher:** an already-built `claude-contained:latest` still carries its old `CMD ["claude"]` until the image is rebuilt, so bare `claude-contained` keeps starting Claude even after upgrading the launcher binary. Run `claude-contained --rebuild=full` to pick up the new default (the image's `CMD` becomes `/usr/local/bin/shell-run`, a debug shell).
 
 ### Options
 
@@ -16,7 +18,6 @@ There are no positional arguments. Use `-C` for the project directory, `-m` for 
 |------|-------------|
 | `-C`, `--dir DIR` | Project directory (default: current directory) |
 | `-m`, `--mount DIR[:ro\|:rw]` | Mount an extra directory at the same path (repeatable) |
-| `-t`, `--tool TOOL` | Run `claude` (default), `codex`, `copilot`, `gemini`, or `vibe` |
 | `-R`, `--rebuild[=MODE]` | Rebuild and exit: `tools` (default) or `full` |
 | `-H PORT[:HOSTPORT]` | Forward a host port to container localhost (repeatable) |
 | `-p HOST:CONTAINER` | Publish a container port to the host (repeatable) |
@@ -33,11 +34,10 @@ There are no positional arguments. Use `-C` for the project directory, `-m` for 
 | `--log-level LEVEL` | Diagnostic detail: `debug`, `info`, `warn`, `error`, or `off` (default) |
 | `--log-file PATH` | Write the diagnostic stream to a secured, truncated file |
 | `--log-only` | Carry user-facing output on the diagnostic stream |
-| `-s`, `--shell` | Start a bash shell instead of the selected tool |
+| `-s`, `--shell` | Run a debug shell instead of the container command -- an escape hatch, not a mode |
 | `-S`, `--ssh` | Enable SSH agent forwarding |
 | `-w`, `--worktree` | Include a Git worktree's main repository without prompting |
 | `-W`, `--lock-worktrees` | Auto-lock hidden linked worktrees without prompting |
-| `-y`, `--yolo` | Skip permission prompts using the selected tool's flag |
 | `-N`, `--contained-node-modules` | Use container-specific `node_modules` without prompting |
 | `--share-skills DIR` | Mount shared skill folders from an absolute path read-only |
 | `--share-host-claude` | Mount the host Claude profile directly instead of using the contained profile |
@@ -54,7 +54,7 @@ The launcher's `--help` output is authoritative for the installed version.
 ### Behavior
 
 - The project directory and every extra mount appear at their original absolute host paths.
-- Extra mounts are passed to Claude and Codex with `--add-dir`.
+- `-m` only mounts; it injects nothing into the container command. The launcher does not know program names or their flags.
 - Append `:ro` or `:rw` to an extra mount to override its access. The project directory cannot be read-only.
 - Claude uses `~/.claude-contained/claude` as its contained profile by default. The host's `~/.claude/settings.json` is not mounted or copied there.
 - Claude account state remains shared through `~/.claude-contained/.claude.json`.
@@ -83,22 +83,19 @@ Relocated output has a different security boundary: it is existing launcher, run
 ## Examples
 
 ```bash
-# Tool selection
-claude-contained                             # Claude (default)
-claude-contained -t codex                    # OpenAI Codex
-claude-contained -t copilot                  # GitHub Copilot CLI
-claude-contained -t gemini                   # Google Gemini CLI
-claude-contained -t vibe                     # Mistral Vibe
+# The container command
+claude-contained                            # image default CMD (a debug shell)
+claude-contained claude                     # Claude
+claude-contained codex                      # OpenAI Codex
+claude-contained npm test                   # an arbitrary command, run verbatim
+claude-contained claude --dangerously-skip-permissions --model sonnet
+claude-contained -- claude --model sonnet   # -- is optional here; "claude" isn't a flag
 
 # Projects and mounts
 claude-contained -C ~/code/my-app
 claude-contained -m ../other/project
 claude-contained -m ../lib:ro
 claude-contained --readonly-extras -m ../a -m ../b
-
-# Tool arguments and permissions
-claude-contained -- --model sonnet --verbose
-claude-contained -y -t codex
 
 # Debugging and persistence
 claude-contained -s
@@ -303,7 +300,7 @@ Images built by the Docker runtime additionally carry `claude-contained.layer`, 
 
 ## Zellij Workspaces
 
-`--zellij` makes Zellij the top-level container process. The initial pane runs the same tool or shell the launcher would otherwise start. The entrypoint still wraps Zellij in the srt sandbox unless `--no-sandbox` is set, so child panes inherit the same network policy.
+`--zellij` makes Zellij the top-level container process. The initial pane runs the same command or shell the launcher would otherwise start -- under `--zellij`, the image's own `CMD` is never consulted, since Zellij owns the pane's command (see [ADR-0009](docs/adr/0009-positional-container-command.md)). The entrypoint still wraps Zellij in the srt sandbox unless `--no-sandbox` is set, so child panes inherit the same network policy.
 
 Session names are either explicit with `--session` or generated as `cc-{sanitized-project}-{path-hash}`. Explicit names may use letters, numbers, `_`, `.`, and `-`, and cannot start with `-`. `--new-session` is a force flag and takes no value.
 

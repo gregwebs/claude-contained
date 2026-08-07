@@ -39,15 +39,6 @@ func diagnosticDestinationKind(path string) string {
 	return "stderr"
 }
 
-func diagnosticToolName(tool string) string {
-	switch tool {
-	case "claude", "codex", "copilot", "gemini", "vibe":
-		return tool
-	default:
-		return "invalid"
-	}
-}
-
 // plat is a parameter for the same reason exec is: it is the only way a test can
 // exercise the Docker-on-Linux and Docker-on-macOS configurations from either
 // host. Without it, every test here would silently change which runtime it
@@ -110,8 +101,8 @@ func runWith(exec runner, plat runtime.Platform, argv []string, stdin io.Reader,
 		diagnostic.Bool("log_only", cfg.LogOnly),
 	)
 	diagnostic.For(ctx, diagnostic.ComponentCLI).Debug("launcher configuration parsed",
-		diagnostic.String("tool", diagnosticToolName(cfg.Tool)),
-		diagnostic.Bool("shell", cfg.ShellMode),
+		diagnostic.String("command_source", cli.CommandSource(cfg)),
+		diagnostic.Int("command_len", len(cfg.Command)),
 		diagnostic.Bool("attach", cfg.AttachMode),
 		diagnostic.Bool("zellij", cfg.ZellijMode),
 		diagnostic.Int("environment_assignments", len(cfg.EnvFlagArgs)),
@@ -539,8 +530,9 @@ func buildAndApply(
 		diagnostic.For(e.ctx, diagnostic.ComponentPlan).Debug("execution plan built",
 			diagnostic.Value("summary", plan.Summarize(program, cfg)))
 
-		// Steps are applied even when Build reported an error: bash discovers
-		// an unknown tool only after these mutations have happened.
+		// Steps are applied even when Build reported an error: a --share-skills
+		// conflict, for instance, is discovered only after the mounts and host
+		// mutations above it in Build have already been emitted.
 		n, applyErr := e.apply(program.Steps, appliedCount)
 		appliedCount = n
 		if applyErr != nil {
@@ -553,12 +545,6 @@ func buildAndApply(
 		}
 
 		if err != nil {
-			var toolErr *plan.ToolError
-			if errors.As(err, &toolErr) {
-				_, _ = fmt.Fprintf(e.stderr, "Unknown tool: %s\n", toolErr.Tool)
-				_, _ = fmt.Fprintln(e.stderr, "Supported tools: claude, codex, copilot, gemini, vibe")
-				return program, cli.ExitFailure
-			}
 			// --share-skills conflicts and a missing symlink target are both
 			// `exit 2` in bash, with a message that is already fully formatted
 			// (claude-contained:1666-1685, :1729-1732) -- printed verbatim

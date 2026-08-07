@@ -29,8 +29,12 @@ initially_set() {
   [[ "$initial_keys" == *$'\n'"$1"$'\n'* ]]
 }
 if [[ $# -eq 0 ]]; then
-  echo "tool-env: command required" >&2
-  exit 2
+  # An empty effective CMD reaches here only from a tooling layer that sets
+  # CMD [] or an old base image run by a newer launcher -- the base image's
+  # own CMD is now shell-run, so the run path always supplies a non-empty
+  # operand. Treat it as "no command was given" rather than a hard failure,
+  # consistent with the launcher's own image-default behavior (docs/adr/0009).
+  set -- /usr/local/bin/shell-run
 fi
 
 prepend_path() {

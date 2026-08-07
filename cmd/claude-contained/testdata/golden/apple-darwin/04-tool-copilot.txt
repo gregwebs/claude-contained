@@ -1,5 +1,5 @@
 # case: 04-tool-copilot
-# desc: tool selection: copilot
+# desc: copilot as a positional command
 # config: apple-darwin
 --- exit ---
 0

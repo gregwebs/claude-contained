@@ -1,5 +1,5 @@
 # case: 03-tool-codex
-# desc: tool selection: codex
+# desc: codex as a positional command
 # config: docker-darwin
 --- exit ---
 0
