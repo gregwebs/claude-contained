@@ -104,6 +104,12 @@ type syntaxFailure struct {
 type parseState struct {
 	progName string
 	failures []syntaxFailure
+	// commandFromSeparator is true when the container command was introduced by
+	// `--` rather than by the bare-positional rule. -a's own token can only ever
+	// be a container name, so a bare-positional command after it is ambiguous
+	// with a second name; a `--`-introduced one is not. See ValidateContext's
+	// AttachMode case and docs/adr/0009.
+	commandFromSeparator bool
 }
 
 // Config is the parsed command line.
@@ -214,6 +220,7 @@ func Parse(args []string, progName string, shareHostClaudeEnv bool) Config {
 		// `--` is the container command verbatim, including any further `--`.
 		if arg == "--" {
 			cfg.Command = append(cfg.Command, args[i+1:]...)
+			cfg.parse.commandFromSeparator = true
 			// A dash-leading first command token is the only shape the old `--`
 			// passthrough could produce (`-- --model sonnet`); catch it precisely.
 			if len(cfg.Command) > 0 && strings.HasPrefix(cfg.Command[0], "-") {
@@ -675,10 +682,14 @@ func ValidateContext(ctx context.Context, cfg *Config, stderr io.Writer) error {
 			_, _ = fmt.Fprintln(stderr, "error: --zellij --attach cannot be combined with a command")
 			_, _ = fmt.Fprintln(stderr, "       Attaching reconnects to an existing session; the command would never run.")
 			return fail("zellij-attach-with-command")
-		case cfg.AttachMode:
-			_, _ = fmt.Fprintln(stderr, "error: -a/--attach cannot be combined with a command")
-			_, _ = fmt.Fprintln(stderr, "       Attaching reconnects to a running container.")
-			return fail("attach-with-command")
+		case cfg.AttachMode && !cfg.parse.commandFromSeparator:
+			// A second bare token after -a NAME. Commands ARE allowed with -a, but
+			// only when introduced by -- (docs/adr/0009's "-a/-R require --"): a
+			// bare token can only be the container name, and a second one has no
+			// meaning.
+			_, _ = fmt.Fprintln(stderr, "error: -a/--attach takes only a container name before a command")
+			_, _ = fmt.Fprintf(stderr, "       introduce the command with --:  %s -a NAME -- npm test\n", cfg.parse.progName)
+			return fail("attach-bare-command")
 		}
 	}
 	// Last, immediately before the return, and that placement is load-bearing

@@ -42,7 +42,7 @@ The first token not consumed by a flag terminates flag parsing; everything from 
 | `--share-skills DIR` | Mount shared skill folders from an absolute path read-only |
 | `--share-host-claude` | Mount the host Claude profile directly instead of using the contained profile |
 | `--readonly-extras` | Default all extra mounts to read-only; a per-mount suffix wins |
-| `-a`, `--attach [NAME]` | Attach to a running container; error if none matches |
+| `-a`, `--attach [NAME] [-- CMD…]` | Attach to a running container (error if none matches); with no command, runs a debug shell |
 | `--name NAME` | Name a new container; mutually exclusive with `--attach` |
 | `--zellij` | Run the tool inside a persistent Zellij workspace |
 | `--session NAME` | With `--zellij`, select the session to start or attach |
@@ -63,6 +63,7 @@ The launcher's `--help` output is authoritative for the installed version.
 - Other tool configs (`~/.codex`, `~/.copilot`, `~/.gemini`, and `~/.vibe`) and shared launcher state under `~/.claude-contained` are bind-mounted for persistence.
 - SSH agent forwarding is disabled by default. Enable it with `-S` or `--ssh`.
 - Git worktrees are detected and the main repository's Git metadata is included for full Git access.
+- `container exec`/`docker exec` bypass the image's `ENTRYPOINT`/`CMD`, so `-a NAME` with no command has no image default to fall through to and instead starts a debug shell. This is a behavior change from earlier versions, which started Claude by default; the replacement is `claude-contained -a NAME -- claude`. A command given with `-a` must be introduced by `--` (`-a NAME -- CMD`), because a bare token after `-a` is always read as the container name, never as the start of a command.
 
 `--share-skills DIR` mounts the directory read-only as each tool's skills directory. The directory and symlink targets under it are also mounted read-only at path-parity locations so absolute symlinks continue to resolve. For Codex, the host's `~/.codex/skills/.system` is mounted back over `DIR/.system` so built-in skills remain visible. Supply an absolute path; the launcher does not expand `~`.
 
@@ -118,8 +119,10 @@ claude-contained --rebuild
 claude-contained --rebuild=full
 
 # Containers
-claude-contained -a
-claude-contained -a myproject
+claude-contained -a                        # attach (picker); run a debug shell
+claude-contained -a myproject               # attach by name; run a debug shell
+claude-contained -a myproject -- claude     # attach by name; run Claude Code
+claude-contained -a myproject -- npm test
 claude-contained --name myproject
 
 # Zellij workspaces

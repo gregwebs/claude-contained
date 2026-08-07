@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -549,9 +550,9 @@ func TestCommandConflictsWithNoWhereToRun(t *testing.T) {
 		{"zellij attach with command", []string{"--zellij", "--attach", "--", "npm", "test"},
 			"error: --zellij --attach cannot be combined with a command\n" +
 				"       Attaching reconnects to an existing session; the command would never run.\n"},
-		{"attach with command", []string{"-a", "npm", "test"},
-			"error: -a/--attach cannot be combined with a command\n" +
-				"       Attaching reconnects to a running container.\n"},
+		{"attach with a bare second token", []string{"-a", "npm", "test"},
+			"error: -a/--attach takes only a container name before a command\n" +
+				"       introduce the command with --:  claude-contained -a NAME -- npm test\n"},
 	}
 
 	for _, tc := range cases {
@@ -563,6 +564,73 @@ func TestCommandConflictsWithNoWhereToRun(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestAttachAllowsDoubleDashCommand proves the ticket-03 capability: a
+// `--`-introduced command is allowed alongside -a, while a bare positional
+// after -a NAME stays a usage error. commandFromSeparator is unexported, so
+// this asserts it indirectly through Validate's outcome and cfg.Command.
+func TestAttachAllowsDoubleDashCommand(t *testing.T) {
+	t.Run("-a foo -- npm test attaches and carries the command", func(t *testing.T) {
+		cfg, stderr, err := validateArgs("-a", "foo", "--", "npm", "test")
+		if err != nil {
+			t.Fatalf("Validate returned %v, want nil; stderr=%q", err, stderr)
+		}
+		if !cfg.AttachMode || cfg.AttachName != "foo" {
+			t.Errorf("AttachMode=%v AttachName=%q, want true, %q", cfg.AttachMode, cfg.AttachName, "foo")
+		}
+		wantCmd := []string{"npm", "test"}
+		if !reflect.DeepEqual(cfg.Command, wantCmd) {
+			t.Errorf("Command = %#v, want %#v", cfg.Command, wantCmd)
+		}
+	})
+
+	t.Run("-a -- npm test attaches via the picker and carries the command", func(t *testing.T) {
+		cfg, stderr, err := validateArgs("-a", "--", "npm", "test")
+		if err != nil {
+			t.Fatalf("Validate returned %v, want nil; stderr=%q", err, stderr)
+		}
+		if cfg.AttachName != "" {
+			t.Errorf("AttachName = %q, want empty", cfg.AttachName)
+		}
+		wantCmd := []string{"npm", "test"}
+		if !reflect.DeepEqual(cfg.Command, wantCmd) {
+			t.Errorf("Command = %#v, want %#v", cfg.Command, wantCmd)
+		}
+	})
+
+	t.Run("-a foo npm test is a bare second token: usage error", func(t *testing.T) {
+		_, stderr, err := validateArgs("-a", "foo", "npm", "test")
+		requireUsageError(t, err)
+		want := "error: -a/--attach takes only a container name before a command\n" +
+			"       introduce the command with --:  claude-contained -a NAME -- npm test\n"
+		if stderr != want {
+			t.Errorf("stderr = %q, want %q", stderr, want)
+		}
+	})
+
+	t.Run("-a npm attaches to a container literally named npm, no command", func(t *testing.T) {
+		cfg, stderr, err := validateArgs("-a", "npm")
+		if err != nil {
+			t.Fatalf("Validate returned %v, want nil; stderr=%q", err, stderr)
+		}
+		if cfg.AttachName != "npm" {
+			t.Errorf("AttachName = %q, want %q", cfg.AttachName, "npm")
+		}
+		if len(cfg.Command) != 0 {
+			t.Errorf("Command = %#v, want empty", cfg.Command)
+		}
+	})
+
+	t.Run("--zellij --attach -- npm test still errors: Zellij attach takes no command", func(t *testing.T) {
+		_, stderr, err := validateArgs("--zellij", "--attach", "--", "npm", "test")
+		requireUsageError(t, err)
+		want := "error: --zellij --attach cannot be combined with a command\n" +
+			"       Attaching reconnects to an existing session; the command would never run.\n"
+		if stderr != want {
+			t.Errorf("stderr = %q, want %q", stderr, want)
+		}
+	})
 }
 
 func TestParsePreservesOptionalValueConsumption(t *testing.T) {

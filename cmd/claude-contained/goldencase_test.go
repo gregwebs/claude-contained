@@ -775,4 +775,12 @@ var goldenCases = []goldenCase{
 		},
 		Args: func(proj, home string) []string { return []string{"-N", "-s", "-C", proj} },
 	},
+	{
+		Slug: "66-attach-by-name-with-command",
+		Desc: "-a NAME -- CMD attaches and runs the given command instead of the shell default",
+		Setup: func(t *testing.T, proj, home string) goldenExtras {
+			return goldenExtras{ListOutput: []string{"aic-myproject"}}
+		},
+		Args: func(proj, home string) []string { return []string{"-a", "myproject", "--", "npm", "test"} },
+	},
 }

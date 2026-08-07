@@ -15,7 +15,7 @@ CLAUDE_CONTAINED_EXPLICIT_ENV_KEYS=
 aic-myproject
 /usr/local/bin/tool-env
 /usr/local/bin/srt-run
-/opt/claude/claude
+/usr/local/bin/shell-run
 
 --- stdout ---
 (empty)

@@ -56,13 +56,9 @@ func attachAndExec(
 		diagnostic.String("request_mode", requestMode))
 
 	dec := attach.Resolve(attach.Request{
-		Name:  cfg.AttachName,
-		Shell: cfg.ShellMode,
-		// Transitional: -t/-y are gone (#22) and the attach path's program
-		// resolution is ticket 03's (#23). Until then attach keeps its prior
-		// default behavior.
-		Tool:       "claude",
-		Yolo:       false,
+		Name:       cfg.AttachName,
+		Shell:      cfg.ShellMode,
+		Command:    cfg.Command,
 		SrtDisable: cfg.SrtDisable,
 		Home:       h.Home,
 		Env:        pairs,

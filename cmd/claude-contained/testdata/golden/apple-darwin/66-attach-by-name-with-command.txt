@@ -1,5 +1,5 @@
-# case: 40-attach-picker
-# desc: bare -a with multiple running containers prompts a picker (scripted stdin choice)
+# case: 66-attach-by-name-with-command
+# desc: -a NAME -- CMD attaches and runs the given command instead of the shell default
 # config: apple-darwin
 --- exit ---
 0
@@ -12,16 +12,14 @@ dev
 HOME=<HOME>
 -e
 CLAUDE_CONTAINED_EXPLICIT_ENV_KEYS=
-aic-beta
+aic-myproject
 /usr/local/bin/tool-env
 /usr/local/bin/srt-run
-/usr/local/bin/shell-run
+npm
+test
 
 --- stdout ---
-Running containers:
-  1) alpha
-  2) beta
-
+(empty)
 --- stderr ---
 (empty)
 --- filesystem ---
