@@ -27,10 +27,6 @@ import (
 // the container command.
 const Image = "claude-contained:latest"
 
-// shellPath is what -s runs inside the container: a wrapper that gives bash a
-// controlling terminal after the sandbox/runtime handoff, not bash itself.
-const shellPath = "/usr/local/bin/shell-run"
-
 // Program is the result of one Build call.
 type Program struct {
 	// Steps are the ordered host mutations determined so far. A later call
@@ -43,13 +39,6 @@ type Program struct {
 	// Run is non-nil only when Pending is nil: the intended invocation.
 	Run *runtime.RunSpec
 }
-
-// ToolError reports an unknown -t/--tool value. Bash discovers this late, after
-// mounts and mutations have already been applied, so it is returned alongside a
-// populated Program rather than short-circuiting the plan.
-type ToolError struct{ Tool string }
-
-func (e *ToolError) Error() string { return "unknown tool: " + e.Tool }
 
 // Build is pure: no I/O, no clock, no environment access. It is deterministic
 // in its inputs, which is what makes the already-executed prefix safe to replay
@@ -286,7 +275,7 @@ func Build(cfg cli.Config, h host.State, f Facts, prof runtime.Profile, ans Answ
 	// Bash validates the tool here, not during parsing: by this point every
 	// mount and host mutation above has already happened, and corpus entry 07
 	// asserts exactly that.
-	toolArgv, warn, err := toolCommand(cfg.Tool, cfg.YoloMode)
+	cmd, warn, err := newContainerCommand(cfg.Tool, cfg.YoloMode)
 	if warn != "" {
 		p.Steps = append(p.Steps, Print{Text: warn, Stderr: true})
 	}
@@ -299,10 +288,7 @@ func Build(cfg cli.Config, h host.State, f Facts, prof runtime.Profile, ans Answ
 		mode := f.ExtraModes[i]
 		add(runtime.MountArg{Src: src, Dst: src, ReadOnly: mode == "ro"})
 		reg.addUser(src, src, mode)
-		// Only claude and codex understand --add-dir.
-		if cfg.Tool == "claude" || cfg.Tool == "codex" {
-			toolArgv = append(toolArgv, "--add-dir", src)
-		}
+		cmd.addExtraMount(src)
 	}
 
 	// --- Shared skills -------------------------------------------------------
@@ -349,22 +335,7 @@ func Build(cfg cli.Config, h host.State, f Facts, prof runtime.Profile, ans Answ
 	}
 
 	// --- The container command ---------------------------------------------
-	toolArgv = append(toolArgv, cfg.ToolArgs...)
-
-	command := toolArgv
-	if cfg.ShellMode {
-		// Under Zellij the debug shell is plain bash: shell-run exists to give
-		// bash a controlling terminal after the sandbox/runtime handoff, which
-		// Zellij's own pane already provides (claude-contained:1957-1961).
-		if f.ZellijSession != "" {
-			command = []string{zellij.ShellCommand}
-		} else {
-			command = []string{shellPath}
-		}
-	}
-	if f.ZellijSession != "" {
-		command = zellij.RunCommand(f.ZellijSession, prof.Name, command)
-	}
+	command := cmd.finish(cfg.ToolArgs, cfg.ShellMode, f.ZellijSession, prof.Name)
 
 	// A project with a tooling layer runs its derived image in place of the
 	// base one. Nothing else about the run changes: same args, same command,
@@ -460,29 +431,4 @@ func accountStateSteps(paths hostPaths, f Facts) []Step {
 		steps = append(steps, Symlink{Target: paths.SharedClaudeJSON, Link: paths.ClaudeJSON})
 	}
 	return steps
-}
-
-// toolCommand maps the tool name to its command and yolo flag. The warning is
-// returned rather than printed so it stays ordered with the other steps.
-func toolCommand(tool string, yolo bool) (argv []string, warning string, err error) {
-	switch tool {
-	case "claude":
-		argv = []string{"claude"}
-		if yolo {
-			argv = append(argv, "--dangerously-skip-permissions")
-		}
-	case "codex", "copilot", "gemini":
-		argv = []string{tool}
-		if yolo {
-			argv = append(argv, "--yolo")
-		}
-	case "vibe":
-		argv = []string{"vibe"}
-		if yolo {
-			warning = "Warning: vibe does not support yolo mode (no equivalent flag)"
-		}
-	default:
-		return nil, "", &ToolError{Tool: tool}
-	}
-	return argv, warning, nil
 }
