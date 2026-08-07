@@ -1,77 +1,15 @@
 # case: 09-yolo-flag
-# desc: -y/--yolo skips permission prompts
+# desc: -y is no longer accepted
 # config: docker-linux
 --- exit ---
-0
+2
 --- runtime-args ---
-== docker run ==
---rm
--it
---memory
-8g
---name
-aic-project-<TIME>
--e
-HOST_HOME=<HOME>
--e
-HOST_UID=<UID>
--e
-HOST_GID=<GID>
--w
-<PROJ>
---mount
-type=bind,src=<HOME>/.claude-contained/claude,dst=<HOME>/.claude
---mount
-type=bind,src=<HOME>/.codex,dst=<HOME>/.codex
---mount
-type=bind,src=<HOME>/.copilot,dst=<HOME>/.copilot
---mount
-type=bind,src=<HOME>/.gemini,dst=<HOME>/.gemini
---mount
-type=bind,src=<HOME>/.vibe,dst=<HOME>/.vibe
---mount
-type=bind,src=<PROJ>,dst=<PROJ>
--e
-TZ=UTC
--e
-CLAUDE_CONTAINED_EXPLICIT_ENV_KEYS=TZ
---mount
-type=bind,src=<HOME>/.claude/skills,dst=<HOME>/.claude/skills
---mount
-type=bind,src=<HOME>/.claude/agents,dst=<HOME>/.claude/agents
---mount
-type=bind,src=<HOME>/.claude/commands,dst=<HOME>/.claude/commands
---mount
-type=bind,src=<HOME>/.claude/plugins,dst=<HOME>/.claude/plugins
--e
-GIT_PROTECT_DIRS=<PROJ>
---add-host
-host.docker.internal:host-gateway
---mount
-type=bind,src=<HOME>/.claude-contained,dst=<HOME>/.claude-contained
-claude-contained:latest
-claude
---dangerously-skip-permissions
-
+(empty)
 --- stdout ---
 (empty)
 --- stderr ---
-(empty)
+error: -y/--yolo is no longer accepted
+       pass the flag to the program:  claude-contained claude --dangerously-skip-permissions
 --- filesystem ---
 HOME dir 755
-HOME/.claude dir 755
-HOME/.claude-contained dir 755
-HOME/.claude-contained/claude dir 755
-HOME/.claude-contained/claude/agents dir 755
-HOME/.claude-contained/claude/commands dir 755
-HOME/.claude-contained/claude/plugins dir 755
-HOME/.claude-contained/claude/skills dir 755
-HOME/.claude/agents dir 755
-HOME/.claude/commands dir 755
-HOME/.claude/plugins dir 755
-HOME/.claude/skills dir 755
-HOME/.codex dir 755
-HOME/.copilot dir 755
-HOME/.gemini dir 755
-HOME/.vibe dir 755
 PROJ dir 755

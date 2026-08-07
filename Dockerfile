@@ -178,4 +178,4 @@ WORKDIR /work
 # HOME is set dynamically in entrypoint based on HOST_HOME
 
 ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
-CMD ["claude"]
+CMD ["/usr/local/bin/shell-run"]

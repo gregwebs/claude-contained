@@ -271,24 +271,11 @@ func Build(cfg cli.Config, h host.State, f Facts, prof runtime.Profile, ans Answ
 	p.Steps = append(p.Steps, accountStateSteps(paths, f)...)
 	add(runtime.MountArg{Src: paths.ClaudeContained, Dst: paths.ClaudeContained})
 
-	// --- Tool selection ----------------------------------------------------
-	// Bash validates the tool here, not during parsing: by this point every
-	// mount and host mutation above has already happened, and corpus entry 07
-	// asserts exactly that.
-	cmd, warn, err := newContainerCommand(cfg.Tool, cfg.YoloMode)
-	if warn != "" {
-		p.Steps = append(p.Steps, Print{Text: warn, Stderr: true})
-	}
-	if err != nil {
-		return p, err
-	}
-
 	// --- Extra mounts ------------------------------------------------------
 	for i, src := range f.ExtraMounts {
 		mode := f.ExtraModes[i]
 		add(runtime.MountArg{Src: src, Dst: src, ReadOnly: mode == "ro"})
 		reg.addUser(src, src, mode)
-		cmd.addExtraMount(src)
 	}
 
 	// --- Shared skills -------------------------------------------------------
@@ -335,7 +322,7 @@ func Build(cfg cli.Config, h host.State, f Facts, prof runtime.Profile, ans Answ
 	}
 
 	// --- The container command ---------------------------------------------
-	command := cmd.finish(cfg.ToolArgs, cfg.ShellMode, f.ZellijSession, prof.Name)
+	command := containerCommand(cfg.Command, cfg.ShellMode, f.ZellijSession, prof.Name)
 
 	// A project with a tooling layer runs its derived image in place of the
 	// base one. Nothing else about the run changes: same args, same command,

@@ -115,7 +115,13 @@ smaller change than the grammar above:
 
 - Under `--zellij`, the image's `CMD` is never consulted: Zellij owns the
   pane's command and substitutes its own shell invocation, so the container
-  command default only matters outside a Zellij session.
+  command default only matters outside a Zellij session. This is an accepted
+  limitation, not an oversight: it means a tooling layer's own `CMD` can never
+  be the pane's initial command under Zellij, and it makes `-s` inconsistent
+  across the boundary it otherwise treats as invisible -- a debug shell is
+  `/usr/local/bin/shell-run` outside Zellij but plain `bash` inside it, because
+  the pane already supplies a controlling terminal `shell-run`'s rationale
+  assumes is missing.
 - `-a`/`-R`, having lost their old value-guessing heuristics, require `--` to
   introduce a container command when one is wanted alongside them, since
   their own values are no longer distinguishable from a bare positional by

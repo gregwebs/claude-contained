@@ -31,7 +31,7 @@ func TestDiagnosticSummaryOmitsEnvironmentAndCommandValues(t *testing.T) {
 		Level: slog.LevelDebug,
 	})))
 	diagnostic.For(ctx, diagnostic.ComponentPlan).Info("execution plan built",
-		diagnostic.Value("summary", Summarize(program, cli.Config{Tool: "claude"})))
+		diagnostic.Value("summary", Summarize(program, cli.Config{Command: []string{"claude"}})))
 	RecordAppliedStep(ctx, 0, program.Steps[0])
 	got := out.String()
 	if strings.Contains(got, sentinel) {
@@ -40,7 +40,7 @@ func TestDiagnosticSummaryOmitsEnvironmentAndCommandValues(t *testing.T) {
 	if strings.Contains(got, " stream=") {
 		t.Fatalf("plan diagnostic used output-only stream metadata: %q", got)
 	}
-	for _, anchor := range []string{"summary.tool=claude", "summary.project_dir=/project", "summary.environment_count=1", "step_kind=print"} {
+	for _, anchor := range []string{"summary.command_source=explicit", "summary.command_len=1", "summary.project_dir=/project", "summary.environment_count=1", "step_kind=print"} {
 		if !strings.Contains(got, anchor) {
 			t.Errorf("plan diagnostics missing %q: %q", anchor, got)
 		}

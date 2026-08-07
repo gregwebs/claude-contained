@@ -1,5 +1,5 @@
 # case: 06-tool-vibe
-# desc: tool selection: vibe
+# desc: vibe as a positional command
 # config: docker-linux
 --- exit ---
 0

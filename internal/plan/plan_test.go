@@ -35,7 +35,7 @@ func appleProfile() runtime.Profile {
 // entire Program -- every mutation in order plus the final run -- in one call,
 // with no process started and no filesystem touched.
 func TestBuildProducesCompleteProgramInOneCall(t *testing.T) {
-	cfg := cli.Config{Tool: "claude", ShellMode: true, ContainedNodeModules: true}
+	cfg := cli.Config{ShellMode: true, ContainedNodeModules: true}
 	// The environment arrives already resolved: Build emits it verbatim and
 	// derives nothing itself, which is what keeps it pure.
 	facts := Facts{
@@ -116,7 +116,7 @@ func TestBuildProducesCompleteProgramInOneCall(t *testing.T) {
 // repository from GIT_PROTECT_DIRS, which is the sole input to the sandbox's
 // writable-path policy. That coupling is why answers are inputs to planning.
 func TestBuildWorktreeAnswerDrivesMountAndProtectDirs(t *testing.T) {
-	cfg := cli.Config{Tool: "claude", ShellMode: true, ContainedNodeModules: true}
+	cfg := cli.Config{ShellMode: true, ContainedNodeModules: true}
 	facts := Facts{ProjectDir: "/w/app", WorktreeMainRepo: "/w/main"}
 	h := testHost()
 
@@ -161,7 +161,7 @@ func TestBuildWorktreeAnswerDrivesMountAndProtectDirs(t *testing.T) {
 // Build is called repeatedly as answers arrive, so the prefix it re-emits must
 // be identical or the driver's skip-by-index would apply a step twice.
 func TestBuildReplaysAnIdenticalPrefix(t *testing.T) {
-	cfg := cli.Config{Tool: "claude", ShellMode: true, ContainedNodeModules: true}
+	cfg := cli.Config{ShellMode: true, ContainedNodeModules: true}
 	facts := Facts{ProjectDir: "/w/app", WorktreeMainRepo: "/w/main"}
 	h := testHost()
 
@@ -211,7 +211,7 @@ func containsString(list []string, want string) bool {
 // prompt, and only accepting produces the WorktreeAutoLock step -- the
 // "Auto-locked N" count is an I/O result the applier owns, not Build.
 func TestBuildOffersWorktreeAutoLock(t *testing.T) {
-	cfg := cli.Config{Tool: "claude", ShellMode: true, ContainedNodeModules: true}
+	cfg := cli.Config{ShellMode: true, ContainedNodeModules: true}
 	facts := Facts{
 		ProjectDir: "/w/app",
 		WorktreeLocks: WorktreeLockCandidates{
@@ -257,7 +257,7 @@ func TestBuildOffersWorktreeAutoLock(t *testing.T) {
 // A declined offer must emit the prune-risk Print and nothing else: no
 // WorktreeAutoLock step at all.
 func TestBuildDeclinedOfferEmitsPrintOnly(t *testing.T) {
-	cfg := cli.Config{Tool: "claude", ShellMode: true, ContainedNodeModules: true}
+	cfg := cli.Config{ShellMode: true, ContainedNodeModules: true}
 	facts := Facts{
 		ProjectDir: "/w/app",
 		WorktreeLocks: WorktreeLockCandidates{
@@ -288,7 +288,7 @@ func TestBuildDeclinedOfferEmitsPrintOnly(t *testing.T) {
 // -W/--lock-worktrees (cfg.LockWorktrees) skips the prompt entirely and locks
 // unconditionally.
 func TestBuildLockWorktreesFlagSkipsPrompt(t *testing.T) {
-	cfg := cli.Config{Tool: "claude", ShellMode: true, ContainedNodeModules: true, LockWorktrees: true}
+	cfg := cli.Config{ShellMode: true, ContainedNodeModules: true, LockWorktrees: true}
 	facts := Facts{
 		ProjectDir: "/w/app",
 		WorktreeLocks: WorktreeLockCandidates{
@@ -311,7 +311,7 @@ func TestBuildLockWorktreesFlagSkipsPrompt(t *testing.T) {
 
 // No hidden worktrees at all: neither the Print nor a prompt nor a step.
 func TestBuildNoHiddenWorktreesIsSilent(t *testing.T) {
-	cfg := cli.Config{Tool: "claude", ShellMode: true, ContainedNodeModules: true}
+	cfg := cli.Config{ShellMode: true, ContainedNodeModules: true}
 	facts := Facts{ProjectDir: "/w/app"}
 
 	program, err := Build(cfg, testHost(), facts, appleProfile(), Answers{})
@@ -334,7 +334,7 @@ func TestBuildNoHiddenWorktreesIsSilent(t *testing.T) {
 // so the two candidate sets are genuinely independent inputs, not derivable
 // from one another.
 func TestBuildWorktreeGitAnswerSelectsLockCandidateSet(t *testing.T) {
-	cfg := cli.Config{Tool: "claude", ShellMode: true, ContainedNodeModules: true}
+	cfg := cli.Config{ShellMode: true, ContainedNodeModules: true}
 	facts := Facts{
 		ProjectDir:       "/w/app",
 		WorktreeMainRepo: "/w/main",
@@ -378,7 +378,7 @@ func TestBuildWorktreeGitAnswerSelectsLockCandidateSet(t *testing.T) {
 // answering the worktree-git question first, then the worktree-lock question,
 // must see the first call's steps as an exact prefix of the second's.
 func TestBuildReplaysPrefixAcrossTwoPrompts(t *testing.T) {
-	cfg := cli.Config{Tool: "claude", ShellMode: true, ContainedNodeModules: true}
+	cfg := cli.Config{ShellMode: true, ContainedNodeModules: true}
 	facts := Facts{
 		ProjectDir:       "/w/app",
 		WorktreeMainRepo: "/w/main",
@@ -410,26 +410,63 @@ func TestBuildReplaysPrefixAcrossTwoPrompts(t *testing.T) {
 	}
 }
 
-// Bash reports an unknown tool only after the mounts and mutations above it
-// have already been applied, and corpus entry 07 asserts exactly that. So the
-// error arrives with a populated Program rather than short-circuiting it.
-func TestBuildUnknownToolStillReportsItsSteps(t *testing.T) {
-	cfg := cli.Config{Tool: "nope", ContainedNodeModules: true}
+// The launcher no longer recognizes program names at all (docs/adr/0009):
+// an arbitrary command is passed through unexamined, and Build never fails
+// because of what it names.
+func TestBuildPassesAnyCommandThroughUnexamined(t *testing.T) {
+	cfg := cli.Config{Command: []string{"does-not-exist", "--flag"}, ContainedNodeModules: true}
 	facts := Facts{ProjectDir: "/w/app"}
 
 	program, err := Build(cfg, testHost(), facts, appleProfile(), Answers{})
-	var toolErr *ToolError
-	if !asToolError(err, &toolErr) {
-		t.Fatalf("expected a ToolError, got %v", err)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
 	}
-	if toolErr.Tool != "nope" {
-		t.Errorf("ToolError.Tool = %q, want %q", toolErr.Tool, "nope")
+	want := []string{"does-not-exist", "--flag"}
+	if !reflect.DeepEqual(program.Run.Command, want) {
+		t.Errorf("Command = %#v, want %#v", program.Run.Command, want)
 	}
-	if len(program.Steps) == 0 {
-		t.Error("the mutations determined before the tool check must still be reported")
+}
+
+// The migration anchor: -m mounts the extra directory without injecting
+// anything into the container command. Ticket 04 (#39) reintroduces
+// mount-driven injection as explicit user configuration; with no config
+// present, -m stays silent.
+func TestExtraMountDoesNotInjectAddDir(t *testing.T) {
+	cfg := cli.Config{
+		Command:     []string{"claude", "--dangerously-skip-permissions", "--model", "sonnet"},
+		ExtraMounts: []string{"/data"},
 	}
-	if program.Run != nil {
-		t.Error("Run must be nil when the tool is unknown")
+	facts := Facts{
+		ProjectDir:  "/w/app",
+		ExtraMounts: []string{"/data"},
+		ExtraModes:  []string{"rw"},
+	}
+
+	program, err := Build(cfg, testHost(), facts, appleProfile(), Answers{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	want := []string{"claude", "--dangerously-skip-permissions", "--model", "sonnet"}
+	if !reflect.DeepEqual(program.Run.Command, want) {
+		t.Errorf("Command = %#v, want %#v (no --add-dir)", program.Run.Command, want)
+	}
+	if !hasMount(program.Run.Args, "/data") {
+		t.Error("expected /data to still be mounted")
+	}
+}
+
+// Bare config produces an empty Run.Command: the launcher emits no command
+// operand, and the runtime falls through to the image's own CMD.
+func TestBareConfigProducesNoCommandOperand(t *testing.T) {
+	cfg := cli.Config{}
+	facts := Facts{ProjectDir: "/w/app"}
+
+	program, err := Build(cfg, testHost(), facts, appleProfile(), Answers{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(program.Run.Command) != 0 {
+		t.Errorf("Command = %#v, want empty", program.Run.Command)
 	}
 }
 
@@ -573,7 +610,7 @@ func argIndex(args []runtime.Arg, want runtime.Arg) int {
 // session-store mkdirs, the env markers plus Docker labels, and the
 // container command wrapper -- all only when a session is set.
 func TestZellijProgram(t *testing.T) {
-	cfg := cli.Config{Tool: "claude"}
+	cfg := cli.Config{Command: []string{"claude"}}
 	facts := Facts{ProjectDir: "/home/dev/work/app", ZellijSession: "review"}
 	prof := appleProfile()
 
@@ -634,7 +671,7 @@ func TestZellijProgram(t *testing.T) {
 // TestZellijShellIsBashNotShellRun pins risk 13: under Zellij, --shell is
 // plain bash, never /usr/local/bin/shell-run.
 func TestZellijShellIsBashNotShellRun(t *testing.T) {
-	cfg := cli.Config{Tool: "claude", ShellMode: true}
+	cfg := cli.Config{ShellMode: true}
 	facts := Facts{ProjectDir: "/home/dev/work/app", ZellijSession: "review"}
 
 	program, err := Build(cfg, testHost(), facts, appleProfile(), Answers{})
@@ -657,7 +694,7 @@ func TestZellijShellIsBashNotShellRun(t *testing.T) {
 // unset ZellijSession must produce no marker env, no labels, no zellij
 // mkdirs, and an unwrapped Run.Command.
 func TestNoZellijArgsWithoutSession(t *testing.T) {
-	cfg := cli.Config{Tool: "claude"}
+	cfg := cli.Config{Command: []string{"claude"}}
 	facts := Facts{ProjectDir: "/home/dev/work/app"}
 
 	program, err := Build(cfg, testHost(), facts, appleProfile(), Answers{})
@@ -706,14 +743,6 @@ func envValue(args []runtime.Arg, key string) string {
 	return ""
 }
 
-func asToolError(err error, target **ToolError) bool {
-	te, ok := err.(*ToolError)
-	if ok {
-		*target = te
-	}
-	return ok
-}
-
 // The -H capability notice. It is a Print step rather than direct output because
 // Build is pure and resumable: its prefix is re-emitted on every prompt round, so
 // printing directly would repeat the notice once per round.
@@ -721,7 +750,7 @@ func TestHostForwardNoticeIsEmittedForApple(t *testing.T) {
 	prof := appleProfile()
 	prof.HostForwardNotice = []string{"first", "second"}
 
-	cfg := cli.Config{Tool: "claude", ShellMode: true, HostForwards: []string{"3845"}}
+	cfg := cli.Config{ShellMode: true, HostForwards: []string{"3845"}}
 	program, err := Build(cfg, testHost(), Facts{ProjectDir: "/home/dev/work/app"}, prof, Answers{})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -745,17 +774,23 @@ func TestHostForwardNoticePrecedesTheOtherNotices(t *testing.T) {
 	prof := appleProfile()
 	prof.HostForwardNotice = []string{"host-forward notice"}
 
-	// -t vibe -y produces the tool warning; ContainedNodeModules produces the
-	// node_modules notice once the project looks like a Node project.
-	cfg := cli.Config{Tool: "vibe", YoloMode: true, ShellMode: true, HostForwards: []string{"3845"}}
-	program, err := Build(cfg, testHost(), Facts{ProjectDir: "/home/dev/work/app"}, prof, Answers{})
+	// ContainedNodeModules produces the node_modules-overlay notice once the
+	// project looks like a Node project; that is the "other notice" whose
+	// position relative to -H's is under test here.
+	cfg := cli.Config{ShellMode: true, ContainedNodeModules: true, HostForwards: []string{"3845"}}
+	facts := Facts{
+		ProjectDir:             "/home/dev/work/app",
+		NodeOverlayDirs:        []string{"/home/dev/work/app"},
+		NodeOverlayTargetEmpty: map[string]bool{"/home/dev/work/app": true},
+	}
+	program, err := Build(cfg, testHost(), facts, prof, Answers{})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
 
 	prints := printSteps(program.Steps)
 	if len(prints) < 2 {
-		t.Fatalf("expected the notice and the tool warning, got %#v", prints)
+		t.Fatalf("expected the notice and the node_modules notice, got %#v", prints)
 	}
 	if prints[0].(Print).Text != "host-forward notice" {
 		t.Errorf("the -H notice must come first, got %#v", prints)
@@ -767,7 +802,7 @@ func TestHostForwardNoticeAbsentForDocker(t *testing.T) {
 	// difference: it reaches host services bound to 127.0.0.1.
 	prof := runtime.Profile{Name: runtime.ProgName}
 
-	cfg := cli.Config{Tool: "claude", ShellMode: true, HostForwards: []string{"3845"}}
+	cfg := cli.Config{ShellMode: true, HostForwards: []string{"3845"}}
 	program, err := Build(cfg, testHost(), Facts{ProjectDir: "/home/dev/work/app"}, prof, Answers{})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -785,7 +820,7 @@ func TestNoHostForwardNoticeWithoutFlag(t *testing.T) {
 	prof := appleProfile()
 	prof.HostForwardNotice = []string{"should not appear"}
 
-	cfg := cli.Config{Tool: "claude", ShellMode: true}
+	cfg := cli.Config{ShellMode: true}
 	program, err := Build(cfg, testHost(), Facts{ProjectDir: "/home/dev/work/app"}, prof, Answers{})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
@@ -800,7 +835,7 @@ func TestNoHostForwardNoticeWithoutFlag(t *testing.T) {
 // a project with no layer produces byte-identical arguments, and this pins the
 // converse -- a project *with* one moves only the image operand.
 func TestDerivedImageReplacesOnlyTheImage(t *testing.T) {
-	cfg := cli.Config{Tool: "claude", ShellMode: true, ContainedNodeModules: true}
+	cfg := cli.Config{ShellMode: true, ContainedNodeModules: true}
 	base := Facts{ProjectDir: "/home/dev/work/app"}
 	derived := base
 	derived.DerivedImage = "claude-contained-layer:app-0123456789abcdef0123456789abcdef"

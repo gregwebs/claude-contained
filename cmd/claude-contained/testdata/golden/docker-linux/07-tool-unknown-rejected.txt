@@ -1,30 +1,15 @@
 # case: 07-tool-unknown-rejected
-# desc: unknown tool is rejected before any runtime argument is built
+# desc: -t is no longer accepted
 # config: docker-linux
 --- exit ---
-1
+2
 --- runtime-args ---
 (empty)
 --- stdout ---
 (empty)
 --- stderr ---
-Unknown tool: nonexistent-tool
-Supported tools: claude, codex, copilot, gemini, vibe
+error: -t/--tool is no longer accepted
+       name the program positionally:  claude-contained <program>
 --- filesystem ---
 HOME dir 755
-HOME/.claude dir 755
-HOME/.claude-contained dir 755
-HOME/.claude-contained/claude dir 755
-HOME/.claude-contained/claude/agents dir 755
-HOME/.claude-contained/claude/commands dir 755
-HOME/.claude-contained/claude/plugins dir 755
-HOME/.claude-contained/claude/skills dir 755
-HOME/.claude/agents dir 755
-HOME/.claude/commands dir 755
-HOME/.claude/plugins dir 755
-HOME/.claude/skills dir 755
-HOME/.codex dir 755
-HOME/.copilot dir 755
-HOME/.gemini dir 755
-HOME/.vibe dir 755
 PROJ dir 755
