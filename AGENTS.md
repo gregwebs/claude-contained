@@ -57,7 +57,7 @@ If commands that you run require approval, propose writing a script for that whi
 - /implement the changes using workflow component sections described below
   - **Documentation**
   - **Verification**
-- send a /pull-request
+- commit and send send a /pull-request
 
 # Workflow Components
 
