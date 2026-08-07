@@ -1,5 +1,12 @@
 # Flag-Only Command Line
 
+Status: superseded in part by ADR-0009 — [ADR-0009](0009-positional-container-command.md)
+reverses only this ADR's "nothing before `--` is positional" stance to
+reintroduce the container command as a single positional role. The three
+optional-value heuristics this ADR removed (`-a`'s guess, `-R`'s literal-value
+match, `--new-session`'s name-token rejection) still stand and are depended
+upon by the container-command grammar itself.
+
 The launcher accepted `[main_dir] [extra_dir ...]` positionally, which forced every optional-value flag to guess whether a bare token was its own value or a path. `-a/--attach` used a heuristic (not `-*`, no `/`, not `.`), `-R` consumed the next token only when it was literally `tools` or `full`, and `--new-session` went further and *rejected* a name-like token outright so it could not be confused with `main_dir`. An unrecognized flag fell through the parse loop's `*) break` arm and silently became `main_dir`, so a typo surfaced later as a confusing path error. The project directory now comes from `-C/--dir` (default: the current directory) and extra mounts from repeatable `-m/--mount DIR[:ro|:rw]`; nothing before `--` is positional, so all three heuristics are gone and unknown flags and stray positionals are hard errors that name their replacement.
 
 This was done deliberately ahead of the planned Go rewrite of the launcher, so that the port is a behavior-preserving translation instead of a reimplementation of disambiguation logic that was about to be deleted anyway.

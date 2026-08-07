@@ -16,6 +16,12 @@ _Avoid_: extra dir, volume, bind
 The engine that executes contained sessions — either Apple Containers or Docker.
 _Avoid_: backend, engine, driver, provider
 
+**Container command**:
+The argv a contained session executes inside the container. Taken from the
+first positional argument onward. When none is given, the image's own default
+command runs.
+_Avoid_: tool args, the tool, target command
+
 **Base image**:
 The image built from this repository's Dockerfile, tagged `claude-contained:latest`, and run directly when a project supplies no tooling layer.
 _Avoid_: the image, main image, parent image
@@ -62,7 +68,7 @@ Shared Claude file resources such as skills, agents, commands, and plugins.
 _Avoid_: Claude settings
 
 **Project env file**:
-The per-project `.claude-contained/env` file, holding `KEY=VALUE` lines applied to the tool process on the next launch of that directory. Writable from inside the container, so it is a convenience rather than a trusted input.
+The per-project `.claude-contained/env` file, holding `KEY=VALUE` lines applied to the container command on the next launch of that directory. Writable from inside the container, so it is a convenience rather than a trusted input.
 _Avoid_: dotenv, .env
 
 **Zellij session store**:

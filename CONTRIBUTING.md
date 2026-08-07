@@ -191,7 +191,7 @@ The Go launcher selects its container runtime in this order: `--container-runtim
 
 Code above `internal/runtime` must not mention `container` or `docker` commands.
 
-See [ADR-0003](docs/adr/0003-flag-only-cli.md) for the flag-only CLI, [ADR-0004](docs/adr/0004-go-launcher-rewrite.md) for the Go port, [ADR-0005](docs/adr/0005-diagnostic-stream.md) for the separate diagnostic stream, [ADR-0006](docs/adr/0006-tooling-layers.md) for the base/derived image split, and [ADR-0008](docs/adr/0008-go-owned-test-migration.md) for the Go-owned test migration and its compiled-binary black-box boundary.
+See [ADR-0003](docs/adr/0003-flag-only-cli.md) for the flag-only CLI, [ADR-0004](docs/adr/0004-go-launcher-rewrite.md) for the Go port, [ADR-0005](docs/adr/0005-diagnostic-stream.md) for the separate diagnostic stream, [ADR-0006](docs/adr/0006-tooling-layers.md) for the base/derived image split, [ADR-0008](docs/adr/0008-go-owned-test-migration.md) for the Go-owned test migration and its compiled-binary black-box boundary, and [ADR-0009](docs/adr/0009-positional-container-command.md) for the return of a positional container command.
 
 ### Add Diagnostic Records Deliberately
 
