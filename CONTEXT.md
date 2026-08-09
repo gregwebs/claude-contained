@@ -68,8 +68,12 @@ Shared Claude file resources such as skills, agents, commands, and plugins.
 _Avoid_: Claude settings
 
 **Project env file**:
-The per-project `.claude-contained/env` file, holding `KEY=VALUE` lines applied to the container command on the next launch of that directory. Writable from inside the container, so it is a convenience rather than a trusted input.
+The per-project `.claude-contained/env` file, holding `KEY=VALUE` lines applied to the container command on the next launch of that directory. The whole `.claude-contained/` directory (this file, the tooling layer, and the command-injection config) is mounted read-only into the container, so a running container cannot rewrite it to affect the next run ([ADR-0010](docs/adr/0010-project-claude-contained-read-only.md)). It is still not a security boundary against a malicious checkout: the file is read on the host before the container starts, so `--no-project-env` (and simply not creating a config) remain the mitigations for an untrusted checkout.
 _Avoid_: dotenv, .env
+
+**Command injection config**:
+The project-local `<project-dir>/.claude-contained/commands.json`, a sibling of the project env file, mapping a container command's literal first token to flags the launcher appends on its behalf (currently only `mountFlag`, contributed once per extra mount). Read on the host before container start and, like the rest of `.claude-contained/`, mounted read-only into the container ([ADR-0010](docs/adr/0010-project-claude-contained-read-only.md)).
+_Avoid_: tool config, command map, add-dir config
 
 **Zellij session store**:
 The host-backed Zellij state reserved for contained runs, used to resurrect named terminal workspaces after their container processes exit.

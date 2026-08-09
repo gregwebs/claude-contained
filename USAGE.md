@@ -54,7 +54,7 @@ The launcher's `--help` output is authoritative for the installed version.
 ### Behavior
 
 - The project directory and every extra mount appear at their original absolute host paths.
-- `-m` only mounts; it injects nothing into the container command. The launcher does not know program names or their flags.
+- `-m` only mounts; it injects nothing into the container command by default. The launcher does not know program names or their flags -- but a project-declared [`commands.json`](#mount-flag-injection-claude-containedcommandsjson) can make `-m` append a flag for a matching command.
 - Append `:ro` or `:rw` to an extra mount to override its access. The project directory cannot be read-only.
 - Claude uses `~/.claude-contained/claude` as its contained profile by default. The host's `~/.claude/settings.json` is not mounted or copied there.
 - Claude account state remains shared through `~/.claude-contained/.claude.json`.
@@ -252,7 +252,7 @@ Consequences worth knowing:
 - An unchanged layer never rebuilds; a changed one always does.
 - `--rebuild` invalidates every derived image, because the base image ID they were named after no longer exists. It never builds a layer itself — the next ordinary run does.
 - Switching container runtimes rebuilds the derived image: the two report different identities for the same base image.
-- Everything in the layer directory is hashed and no `.dockerignore` is interpreted, so a large layer directory makes every run slower. The launcher warns rather than refusing, because the directory is writable from inside the container and a refusal would let a contained agent disable its own toolchain.
+- Everything in the layer directory is hashed and no `.dockerignore` is interpreted, so a large layer directory makes every run slower. The launcher warns rather than refusing: hashing cost alone does not justify a hard limit, since the practical cost is a slower run rather than a broken one.
 - File modes are hashed the way Git tracks them — the execute bit and nothing else — so a checked-out layer hashes identically regardless of umask. `chmod +x` invalidates; `chmod 0640` does not.
 
 ### Confirmation
@@ -419,11 +419,37 @@ The `CLAUDE_CONTAINED_` prefix is reserved because the launcher reads it for its
 
 ### Security Considerations
 
-The project env file is not a security boundary. The project directory is writable from inside the container, so a contained agent can edit the file and affect the next launch. Use `--env` for security-sensitive values and `--no-project-env` with an untrusted checkout.
+The project env file is not a security boundary against a malicious checkout. `.claude-contained/` -- the env file, the tooling layer, and the [command-injection config](#mount-flag-injection-claude-containedcommandsjson) -- is mounted read-only into the container, so a running agent cannot edit the env file (or `commands.json`, or the layer) to affect the next launch; the rest of the project directory remains writable. That protects against a *running* container tampering with the next run, but a malicious file already present in an untrusted checkout is still read on the host before the container starts. Use `--env` for security-sensitive values and `--no-project-env` with an untrusted checkout.
 
 The launcher does not gitignore `.claude-contained/` for you, so an env file containing a token can be committed accidentally. Flag values are also visible to host process inspection and container inspection. This feature passes values into the container; it does not conceal secrets.
 
 The VS Code devcontainer does not use the launchers. Configure its environment through `containerEnv` in `devcontainer.json`.
+
+### Mount-Flag Injection (`.claude-contained/commands.json`)
+
+`-m` mounts a host directory into the container; it does not by itself tell the tool running inside about it. A project can opt a command in to automatic `-m` injection by creating `.claude-contained/commands.json`:
+
+```json
+{
+  "claude": { "mountFlag": "--add-dir" },
+  "codex":  { "mountFlag": "--add-dir" }
+}
+```
+
+This is a project-local file -- one per project directory, like the project env file -- and the launcher never writes it. Create it yourself with the block above to restore the pre-#22 `--add-dir` behavior for `claude` and `codex`, or map any other program you run inside the container to its own mount flag.
+
+The match is on the container command's **literal first token**: `claude` matches an entry named `claude`, but `/usr/local/bin/claude` or `./claude` does not -- there is no path sniffing. When the first token matches, the launcher appends `<mountFlag> <path>` once per `-m` mount, **in `-m` order, to the end of the container command** -- not inserted after the matched token. For example:
+
+```bash
+claude-contained -m /data claude --model sonnet
+# runs: claude --model sonnet --add-dir /data
+```
+
+A command that itself uses `--` to separate its own flags still receives the injected flag after that separator; it is not special-cased. Injection is skipped when the container command is empty (the image's own `CMD` runs unexamined) and under `-s`/`--shell` (which replaces the command outright).
+
+**Failure matrix:** no config file, or a first token with no matching entry, is silent -- no injection, no error. A malformed `commands.json`, or an entry missing `mountFlag` (or with an empty or non-string value), is a hard error naming the file's path, exit status 2, before the container starts.
+
+Like the rest of `.claude-contained/`, this file is mounted read-only into the container (see [Security Considerations](#security-considerations) above) -- a running container cannot rewrite it to change the next run. Recommend git-ignoring `.claude-contained/` in your project.
 
 ## Sandboxing
 

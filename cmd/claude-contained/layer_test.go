@@ -618,9 +618,10 @@ func TestBaseProbeFaultIsNotReportedAsAMissingBaseImage(t *testing.T) {
 	}
 }
 
-// The size guard warns and never refuses: the layer directory is writable from
-// inside the container, so a refusal would let a contained agent disable its
-// own project's toolchain.
+// The size guard warns and never refuses: the layer directory is read-only
+// inside the container (ADR-0010), so the concern is host-side hashing cost
+// on a legitimate layer, not a container disabling its own toolchain; a
+// refusal would still block that legitimate layer for no reachable benefit.
 func TestOversizedContextWarnsAndProceeds(t *testing.T) {
 	fx := newLayerFixture(t, true)
 	fx.setImageID(t, plan.Image, layerTestBaseID)

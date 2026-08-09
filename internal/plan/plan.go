@@ -183,6 +183,17 @@ func Build(cfg cli.Config, h host.State, f Facts, prof runtime.Profile, ans Answ
 		runtime.MountArg{Src: f.ProjectDir, Dst: f.ProjectDir},
 	)
 
+	// The project directory is mounted read-write above; its .claude-contained/
+	// subtree is re-mounted read-only on top so a running container cannot
+	// rewrite the project env file, tooling layer, or commands.json to change the
+	// *next* run (Decision A, #39). Gated on probe-time existence: the source must
+	// already be a directory, and a project that only creates .claude-contained/
+	// during the run (the node_modules overlay) is deliberately not covered.
+	if f.ProjectClaudeContainedExists {
+		dir := filepath.Join(f.ProjectDir, ".claude-contained")
+		add(runtime.MountArg{Src: dir, Dst: dir, ReadOnly: true})
+	}
+
 	// The tool process environment, already resolved: command line, then the
 	// project env file, then the launcher's built-ins, each key exactly once.
 	for _, e := range f.Env {
@@ -322,7 +333,7 @@ func Build(cfg cli.Config, h host.State, f Facts, prof runtime.Profile, ans Answ
 	}
 
 	// --- The container command ---------------------------------------------
-	command := containerCommand(cfg.Command, cfg.ShellMode, f.ZellijSession, prof.Name)
+	command := containerCommand(cfg.Command, f.ExtraMounts, f.CommandInjection, cfg.ShellMode, f.ZellijSession, prof.Name)
 
 	// A project with a tooling layer runs its derived image in place of the
 	// base one. Nothing else about the run changes: same args, same command,

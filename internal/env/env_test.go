@@ -380,8 +380,10 @@ func TestLoadFileSplitsOnFirstEquals(t *testing.T) {
 	}
 }
 
-// The file is agent-writable, so it is parsed literally. A command substitution
-// must survive as text and never be evaluated.
+// The file is read-only inside the container (ADR-0010), but that does not
+// sanitize a malicious or untrusted checkout, which the host still reads
+// before the container starts -- so it is parsed literally. A command
+// substitution must survive as text and never be evaluated.
 func TestLoadFileIsNeverEvaluated(t *testing.T) {
 	s := New()
 	content := "EVIL=$(touch CANARY)\nALSO=`touch CANARY`\n"

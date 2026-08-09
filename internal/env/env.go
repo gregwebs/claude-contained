@@ -3,11 +3,14 @@
 // refused outright.
 //
 // Everything here is a pure function of its inputs. In particular LoadFile
-// takes the file's *bytes*, never a path — the project env file is writable
-// from inside the container, so it is parsed literally and never evaluated.
-// Evaluating it would hand a contained agent arbitrary code execution on the
-// next launch, and a signature that cannot reach the filesystem or a shell
-// makes that guarantee visible rather than merely intended.
+// takes the file's *bytes*, never a path — the project env file is read-only
+// inside the container (ADR-0010), but that only stops a running container
+// from rewriting it to affect a later run; it does not sanitize a file a
+// malicious or untrusted checkout already ships, which the host still reads
+// before the container starts. So the file is parsed literally and never
+// evaluated: evaluating it would hand such a checkout arbitrary code
+// execution on the host, and a signature that cannot reach the filesystem or
+// a shell makes that guarantee visible rather than merely intended.
 package env
 
 import (

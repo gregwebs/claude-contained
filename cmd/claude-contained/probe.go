@@ -47,6 +47,15 @@ func probeFacts(
 		facts.GitConfigExists = true
 	}
 
+	// Decision A (#39): a directory specifically, because these runtimes cannot
+	// bind-mount a single file. Gates the read-only .claude-contained mount in
+	// plan.Build; a project that only creates the directory during the run
+	// (the node_modules overlay) is deliberately not covered, since this stat
+	// runs before that happens.
+	if info, err := os.Stat(filepath.Join(mainHost, ".claude-contained")); err == nil && info.IsDir() {
+		facts.ProjectClaudeContainedExists = true
+	}
+
 	// Each predicate is captured with the stat call bash's corresponding test
 	// uses: Lstat for `-L` (does not follow), Stat for `-e` and `-f` (do). Using
 	// one call for all of them is how the migration destroys credentials.

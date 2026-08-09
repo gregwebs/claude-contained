@@ -347,9 +347,10 @@ func TestDockerignoreIsHashedLikeAnyOtherFile(t *testing.T) {
 }
 
 // The size policy lives in the caller (cmd/claude-contained/layer.go warns);
-// this package refuses nothing, because the layer directory is writable from
-// inside the container and a hard limit would let a contained agent disable its
-// own project's launcher.
+// this package refuses nothing, because over-hashing a legitimate layer only
+// costs a slower run -- a host-side cost, not a container-writability risk
+// (the layer directory is read-only inside the container, ADR-0010) -- and a
+// hard limit would refuse that layer for no reachable benefit.
 func TestLargeContextIsNotAnError(t *testing.T) {
 	dir := t.TempDir()
 	writeLayerFile(t, dir, "Dockerfile", "FROM scratch\n", 0o644)

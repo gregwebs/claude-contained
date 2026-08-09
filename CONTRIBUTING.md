@@ -221,7 +221,7 @@ The container or VM is the primary isolation boundary. The sandbox runtime is de
 - Run the sandbox as the unprivileged user, never as root.
 - Route commands started through runtime `exec` through `srt-run`, because `exec` bypasses the image entrypoint.
 
-Project env files are writable by the contained agent and are convenience inputs, not a security boundary. Parse them literally, never source them, and preserve the reserved-key checks.
+Project env files (and the rest of `.claude-contained/`: the tooling layer and the command-injection config) are read-only from inside the container ([ADR-0010](docs/adr/0010-project-claude-contained-read-only.md)) but are still not a security boundary against a malicious checkout -- the host reads them before the container starts. Parse them literally, never source them, and preserve the reserved-key checks.
 
 ### Protect Worktrees and Signals
 

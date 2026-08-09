@@ -1,5 +1,5 @@
-# case: 22-env-flag-precedence-over-file
-# desc: -e wins over the same key in the project env file
+# case: 67-command-injection-mount-flag
+# desc: commands.json makes -m append <mountFlag> to a matching command
 # config: docker-darwin
 --- exit ---
 0
@@ -34,13 +34,9 @@ type=bind,src=<PROJ>,dst=<PROJ>
 --mount
 type=bind,src=<PROJ>/.claude-contained,dst=<PROJ>/.claude-contained,readonly
 -e
-FOO=from-flag
--e
-BAR=only-file
--e
 TZ=UTC
 -e
-CLAUDE_CONTAINED_EXPLICIT_ENV_KEYS=FOO,BAR,TZ
+CLAUDE_CONTAINED_EXPLICIT_ENV_KEYS=TZ
 --mount
 type=bind,src=<HOME>/.claude/skills,dst=<HOME>/.claude/skills
 --mount
@@ -50,16 +46,22 @@ type=bind,src=<HOME>/.claude/commands,dst=<HOME>/.claude/commands
 --mount
 type=bind,src=<HOME>/.claude/plugins,dst=<HOME>/.claude/plugins
 -e
-GIT_PROTECT_DIRS=<PROJ>
+GIT_PROTECT_DIRS=<PROJ>:<PROJ>/extra
 --mount
 type=bind,src=<HOME>/.claude-contained,dst=<HOME>/.claude-contained
+--mount
+type=bind,src=<PROJ>/extra,dst=<PROJ>/extra
 claude-contained:latest
-/usr/local/bin/shell-run
+claude
+--model
+sonnet
+--add-dir
+<PROJ>/extra
 
 --- stdout ---
 (empty)
 --- stderr ---
-env: FOO (--env); BAR (.claude-contained/env)
+(empty)
 --- filesystem ---
 HOME dir 755
 HOME/.claude dir 755
@@ -79,6 +81,6 @@ HOME/.gemini dir 755
 HOME/.vibe dir 755
 PROJ dir 755
 PROJ/.claude-contained dir 755
-PROJ/.claude-contained/env file 644
-  | FOO=from-file
-  | BAR=only-file
+PROJ/.claude-contained/commands.json file 644
+  | {"claude":{"mountFlag":"--add-dir"},"codex":{"mountFlag":"--add-dir"}}
+PROJ/extra dir 755

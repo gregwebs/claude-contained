@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"claude-contained/internal/cli"
 	"claude-contained/internal/host"
 	"claude-contained/internal/layer"
 	"claude-contained/internal/plan"
@@ -183,6 +184,42 @@ func boolStr(b bool) string {
 		return "true"
 	}
 	return "false"
+}
+
+// --- command injection config (#39) -----------------------------------------
+
+// A malformed <project>/.claude-contained/commands.json fails at the process
+// boundary before the container launch and any layer build: the file is
+// user-created and, per Decision A (#39), read-only inside the container, so a
+// parse failure is a user mistake to fail fast on, exit 2, with the path named
+// in stderr. The read happens after the stubbed liveness check and after the
+// attach/rebuild dispatch (neither reads this file), but before the Zellij
+// gate, the worktree prompt, and any layer build.
+func TestMalformedCommandInjectionConfigIsAUsageError(t *testing.T) {
+	withStubbedHostAndPath(t)
+	project := t.TempDir()
+	path := filepath.Join(project, ".claude-contained", "commands.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{ not json"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	calls, run := recordingRunner(0)
+	var stdout, stderr bytes.Buffer
+
+	code := runWith(run, runtime.Darwin, launcherArgv(project), strings.NewReader(""), &stdout, &stderr)
+
+	if code != cli.ExitUsage {
+		t.Fatalf("exit = %d, want %d\nstderr:\n%s", code, cli.ExitUsage, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), path) {
+		t.Errorf("stderr must name the path %q:\n%s", path, stderr.String())
+	}
+	if len(*calls) != 0 {
+		t.Errorf("nothing may run: %#v", *calls)
+	}
 }
 
 // --- Step 9: ordering tests ------------------------------------------------

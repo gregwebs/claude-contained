@@ -77,6 +77,8 @@ preserving refactor:
   is what anyone wants by default.
 - `-m` stops injecting `--add-dir` until a user opts back in through the
   configuration ticket 04 introduces; there is no interim tool-name gate.
+  (Ticket 04/#39 has since shipped this as `.claude-contained/commands.json`;
+  see [ADR-0010](0010-project-claude-contained-read-only.md).)
 - All three golden trees (`apple-darwin`, `docker-darwin`, `docker-linux`)
   churn deliberately once ticket 02 lands, because the observable CLI
   contract genuinely changes.
