@@ -87,6 +87,16 @@ func shrinkPollInterval(t *testing.T) {
 	t.Cleanup(func() { dockerPollInterval = previous })
 }
 
+// stubLaunchdSession forces the Apple launchd-session probe to a fixed answer so
+// EnsureUp's failure branch runs identically on CI (no launchctl) and on a
+// developer machine whose real session state is irrelevant to the test.
+func stubLaunchdSession(t *testing.T, usable bool) {
+	t.Helper()
+	previous := launchdSessionUsable
+	launchdSessionUsable = func(context.Context) bool { return usable }
+	t.Cleanup(func() { launchdSessionUsable = previous })
+}
+
 func refuseToConfirm(t *testing.T) func(string) bool {
 	t.Helper()
 	return func(string) bool {
@@ -246,6 +256,7 @@ func TestDockerEnsureUpContextCancelled(t *testing.T) {
 // writers, which is what makes this testable at all.
 func TestAppleEnsureUpStartsAndStreams(t *testing.T) {
 	dir := ensureUpStubs(t, 1)
+	stubLaunchdSession(t, true)
 	var stdout, stderr bytes.Buffer
 
 	err := NewApple(Darwin).EnsureUp(context.Background(), &stdout, &stderr, func(prompt string) bool {
@@ -270,6 +281,7 @@ func TestAppleEnsureUpStartsAndStreams(t *testing.T) {
 
 func TestAppleEnsureUpDeclined(t *testing.T) {
 	dir := ensureUpStubs(t, -1)
+	stubLaunchdSession(t, true)
 	var stdout, stderr bytes.Buffer
 
 	err := NewApple(Darwin).EnsureUp(context.Background(), &stdout, &stderr, func(string) bool { return false })
@@ -277,4 +289,52 @@ func TestAppleEnsureUpDeclined(t *testing.T) {
 		t.Fatalf("EnsureUp error = %v, want ErrAborted", err)
 	}
 	fileMissing(t, filepath.Join(dir, "start.marker"), "starting the container system")
+}
+
+// Without a usable launchd session, `container` cannot reach containermanagerd, so
+// EnsureUp must diagnose rather than prompt: a "yes" to a start it cannot perform
+// would only reproduce the opaque XPC failure.
+func TestAppleEnsureUpNoLaunchdSession(t *testing.T) {
+	dir := ensureUpStubs(t, -1)
+	stubLaunchdSession(t, false)
+	var stdout, stderr bytes.Buffer
+
+	err := NewApple(Darwin).EnsureUp(context.Background(), &stdout, &stderr, refuseToConfirm(t))
+	if !errors.Is(err, ErrNoLaunchdSession) {
+		t.Fatalf("EnsureUp error = %v, want ErrNoLaunchdSession", err)
+	}
+	fileMissing(t, filepath.Join(dir, "start.marker"), "starting the container system")
+	if stdout.Len() != 0 {
+		t.Errorf("the diagnosis belongs on stderr, stdout = %q", stdout.String())
+	}
+	for _, anchor := range []string{
+		"error: the container runtime is unreachable.",
+		"no usable launchd session",
+		"launchctl asuser $(id -u) claude-contained",
+	} {
+		if !strings.Contains(stderr.String(), anchor) {
+			t.Errorf("stderr missing %q: %q", anchor, stderr.String())
+		}
+	}
+}
+
+// A running system short-circuits before the launchd probe, so a broken session
+// never masks an already-healthy runtime.
+func TestAppleEnsureUpAlreadyRunningSkipsLaunchdProbe(t *testing.T) {
+	dir := ensureUpStubs(t, 0)
+	previous := launchdSessionUsable
+	launchdSessionUsable = func(context.Context) bool {
+		t.Error("launchd probe should not run when the system is already up")
+		return false
+	}
+	t.Cleanup(func() { launchdSessionUsable = previous })
+	var stdout, stderr bytes.Buffer
+
+	if err := NewApple(Darwin).EnsureUp(context.Background(), &stdout, &stderr, refuseToConfirm(t)); err != nil {
+		t.Fatalf("EnsureUp: %v", err)
+	}
+	fileMissing(t, filepath.Join(dir, "start.marker"), "starting the container system")
+	if stdout.Len() != 0 || stderr.Len() != 0 {
+		t.Errorf("a running system should say nothing, got stdout %q stderr %q", stdout.String(), stderr.String())
+	}
 }
