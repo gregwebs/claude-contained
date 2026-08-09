@@ -22,12 +22,13 @@ import (
 // exceeding them only decides whether the user is told why runs got slow, never
 // whether a run proceeds, which is why their arbitrariness costs nothing.
 //
-// A hard limit was rejected. The layer directory is writable from inside the
-// container, so a contained agent dropping node_modules there would, under a
-// hard limit, permanently break its own project's launcher -- the only escape
-// being --no-layer, i.e. a container that looks healthy while missing its
-// toolchain, the exact outcome this feature exists to prevent. A legitimate
-// layer vendoring a large tarball hits the same wall.
+// A hard limit was rejected. Under Decision A (ADR-0010), the layer directory
+// is read-only inside the container, so this is a host-side cost, not a
+// container-writability risk: over-hashing a legitimate layer -- one vendoring
+// a large tarball, say -- only costs a slower run. A hard limit would refuse
+// that layer for no reachable benefit, whose only escape would be --no-layer,
+// i.e. a container that looks healthy while missing its toolchain, the exact
+// outcome this feature exists to prevent.
 // Package variables only so a test can shrink them, the same reason
 // dockerPollInterval is one: reaching the warning otherwise means writing ten
 // thousand files in a test that is about a log line.

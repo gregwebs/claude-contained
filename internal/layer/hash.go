@@ -44,9 +44,9 @@ const schemeTag = "claude-contained-layer\x00v1\x00"
 // disagree about which bytes count.
 //
 // count and hashedBytes are returned, and nothing is refused. Size policy is
-// the caller's: the layer directory is writable from inside the container, so a
-// hard limit here would let a contained agent permanently break its own
-// project's launcher, whose only escape would be --no-layer -- "a container
+// the caller's: over-hashing only costs a slower run (docs/adr/0006-tooling-layers.md),
+// so a hard limit here would refuse a project's own legitimate layer for no
+// reachable benefit, whose only escape would be --no-layer -- "a container
 // that looks healthy while missing its toolchain", the exact outcome this
 // design exists to prevent.
 func canonicalStream(dir, baseImageID string) (stream []byte, count int, hashedBytes int64, err error) {

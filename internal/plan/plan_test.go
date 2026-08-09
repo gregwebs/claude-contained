@@ -470,6 +470,57 @@ func TestBareConfigProducesNoCommandOperand(t *testing.T) {
 	}
 }
 
+// Decision A (#39): when the probe found <ProjectDir>/.claude-contained on
+// disk, Build mounts it read-only immediately after the read-write
+// project-dir mount, so a running container cannot rewrite the project env
+// file, tooling layer, or commands.json to affect the next run.
+func TestBuildMountsProjectClaudeContainedReadOnlyWhenPresent(t *testing.T) {
+	cfg := cli.Config{}
+	facts := Facts{ProjectDir: "/p", ProjectClaudeContainedExists: true}
+
+	program, err := Build(cfg, testHost(), facts, appleProfile(), Answers{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	projectMount := runtime.MountArg{Src: "/p", Dst: "/p"}
+	wantMount := runtime.MountArg{Src: "/p/.claude-contained", Dst: "/p/.claude-contained", ReadOnly: true}
+
+	idx := indexOfArg(program.Run.Args, projectMount)
+	if idx == -1 {
+		t.Fatalf("project-dir mount %#v not found in %#v", projectMount, program.Run.Args)
+	}
+	if idx+1 >= len(program.Run.Args) || program.Run.Args[idx+1] != runtime.Arg(wantMount) {
+		t.Errorf("read-only .claude-contained mount must follow the project-dir mount immediately\n got: %#v\nwant %#v right after index %d",
+			program.Run.Args, wantMount, idx)
+	}
+}
+
+// The mount is existence-gated: a project without .claude-contained at probe
+// time (the common case, and the node_modules-overlay case where the
+// directory is only created *during* the run) must not get it.
+func TestBuildOmitsProjectClaudeContainedMountWhenAbsent(t *testing.T) {
+	cfg := cli.Config{}
+	facts := Facts{ProjectDir: "/p", ProjectClaudeContainedExists: false}
+
+	program, err := Build(cfg, testHost(), facts, appleProfile(), Answers{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if hasMount(program.Run.Args, "/p/.claude-contained") {
+		t.Errorf("unexpected read-only .claude-contained mount: %#v", program.Run.Args)
+	}
+}
+
+func indexOfArg(args []runtime.Arg, want runtime.Arg) int {
+	for i, a := range args {
+		if a == want {
+			return i
+		}
+	}
+	return -1
+}
+
 // CLAUDE_DNS distinguishes unset (take the runtime default) from set-but-empty
 // and the two opt-out spellings, which is a `${CLAUDE_DNS+x}` test in bash.
 func TestResolveDNS(t *testing.T) {

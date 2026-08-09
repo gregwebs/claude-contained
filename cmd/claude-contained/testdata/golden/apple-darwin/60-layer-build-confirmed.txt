@@ -46,6 +46,8 @@ type=bind,src=<HOME>/.gemini,dst=<HOME>/.gemini
 type=bind,src=<HOME>/.vibe,dst=<HOME>/.vibe
 --mount
 type=bind,src=<PROJ>,dst=<PROJ>
+--mount
+type=bind,src=<PROJ>/.claude-contained,dst=<PROJ>/.claude-contained,readonly
 -e
 TZ=UTC
 -e

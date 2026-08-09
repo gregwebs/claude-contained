@@ -103,6 +103,21 @@ type Facts struct {
 	// of the RunSpec, so the answer has to arrive as an input rather than as a
 	// later mutation of what Build produced.
 	DerivedImage string
+
+	// CommandInjection maps a container command's literal first token to the
+	// flag the launcher appends once per extra mount on its behalf. Read from
+	// the project-local <project-dir>/.claude-contained/commands.json in the
+	// impure layer and threaded here so Build stays pure. The file is
+	// user-created and, per Decision A (#39), read-only inside the container.
+	// Nil/empty means no injection.
+	CommandInjection map[string]string
+
+	// ProjectClaudeContainedExists reports whether <ProjectDir>/.claude-contained
+	// exists as a directory at probe time. When true, Build mounts that directory
+	// read-only into the container (Decision A, #39), so a running container cannot
+	// rewrite the project env file, tooling layer, or commands.json to influence the
+	// next run. Probed here because Build is pure and may not stat it.
+	ProjectClaudeContainedExists bool
 }
 
 // WorktreeLockCandidates is the auto-lock offer's input for one of the two

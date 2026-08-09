@@ -88,20 +88,23 @@ runtime that actually applies them. Over-hashing costs a spurious rebuild;
 under-hashing costs a stale toolchain, so the asymmetry is deliberate.
 
 This is also why an oversized context is *warned about* and never refused. The
-directory is writable from inside the container, so a hard limit would let a
-contained agent brick its own project's launcher — the only escape being
-`--no-layer`, which is exactly the healthy-looking container with no toolchain
-this design exists to prevent.
+directory is read-only from inside the container (see
+[ADR-0010](0010-project-claude-contained-read-only.md)), so this is a host-side
+hashing-cost argument alone: over-hashing costs a slower run, and a hard limit
+would refuse a project's own legitimate layer for no reachable benefit — the
+only escape being `--no-layer`, which is exactly the healthy-looking container
+with no toolchain this design exists to prevent.
 
 ## Every build is confirmed, and nothing is remembered
 
-The layer Dockerfile is writable from inside the container, like the project env
-file, but its blast radius is larger: building it makes the host's container
-runtime execute arbitrary steps with unrestricted network egress, which is
-precisely what the sandbox exists to prevent. Every derived build is therefore
-confirmed interactively. Because a build only fires when the content-hash tag is
-missing, confirming at build time covers first use and every subsequent change,
-with no approval state anywhere.
+The layer Dockerfile, like the project env file, is read on the host and
+mounted read-only inside the container (see
+[ADR-0010](0010-project-claude-contained-read-only.md)), but its blast radius is
+larger: building it makes the host's container runtime execute arbitrary steps
+with unrestricted network egress, which is precisely what the sandbox exists to
+prevent. Every derived build is therefore confirmed interactively. Because a
+build only fires when the content-hash tag is missing, confirming at build time
+covers first use and every subsequent change, with no approval state anywhere.
 
 **Rejected: a record of approved hashes.** It would suppress the prompt only
 after a prune or a base rebuild — the two cases where nothing about the layer

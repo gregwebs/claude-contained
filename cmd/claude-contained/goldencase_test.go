@@ -783,4 +783,23 @@ var goldenCases = []goldenCase{
 		},
 		Args: func(proj, home string) []string { return []string{"-a", "myproject", "--", "npm", "test"} },
 	},
+	{
+		// #39: a commands.json entry matching the command's literal first
+		// token makes -m append <mountFlag> <path> to the *end* of the
+		// container command, once per extra mount -- not inserted after
+		// token 0, so the operand is "claude --model sonnet --add-dir
+		// <PROJ>/extra" rather than the pre-#22 "claude --add-dir <PROJ>/extra
+		// --model sonnet".
+		Slug: "67-command-injection-mount-flag",
+		Desc: "commands.json makes -m append <mountFlag> to a matching command",
+		Setup: func(t *testing.T, proj, home string) goldenExtras {
+			mkExtraDir(t, proj)
+			mustWriteFile(t, filepath.Join(proj, ".claude-contained", "commands.json"),
+				`{"claude":{"mountFlag":"--add-dir"},"codex":{"mountFlag":"--add-dir"}}`+"\n")
+			return goldenExtras{}
+		},
+		Args: func(proj, home string) []string {
+			return []string{"-N", "-C", proj, "-m", filepath.Join(proj, "extra"), "claude", "--model", "sonnet"}
+		},
+	},
 }

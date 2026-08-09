@@ -237,6 +237,25 @@ func runWith(exec runner, plat runtime.Platform, argv []string, stdin io.Reader,
 			diagnostic.Value("assignment", pair))
 	}
 
+	// The mount-flag-injection config (#39) is read here too: a project-local
+	// input keyed on mainHost (matching the mount source plan.Build adds),
+	// validated right after the project env file and before the Zellij gate,
+	// the worktree prompt and resolveLayerImage, so a malformed file fails fast
+	// rather than after a multi-minute build. There is no seed (Decision B):
+	// absence is a silent, ordinary outcome.
+	commandInjection, commandInjectionPresent, err := readCommandInjection(mainHost)
+	if err != nil {
+		diagnostic.For(ctx, diagnostic.ComponentEnv).Warn(
+			"command injection config invalid", diagnostic.ErrorAttr(err))
+		_, _ = fmt.Fprintf(stderr, "error: %v\n", err)
+		return cli.ExitUsage
+	}
+	if commandInjectionPresent {
+		diagnostic.For(ctx, diagnostic.ComponentEnv).Debug("command injection config loaded")
+	} else {
+		diagnostic.For(ctx, diagnostic.ComponentEnv).Debug("command injection config absent")
+	}
+
 	// The Zellij launch gate sits exactly where bash's does
 	// (claude-contained:1439-1471): after the project env file has had its say,
 	// so a rejected file still fails with exit 2 first, and before the second
@@ -286,6 +305,7 @@ func runWith(exec runner, plat runtime.Platform, argv []string, stdin io.Reader,
 	facts.Env = envStore.Pairs()
 	facts.ZellijSession = zellijSession
 	facts.DerivedImage = derivedImage
+	facts.CommandInjection = commandInjection
 	if err != nil {
 		diagnostic.For(ctx, diagnostic.ComponentHost).Error("host and runtime facts probe failed",
 			diagnostic.ErrorAttr(err))
@@ -449,9 +469,11 @@ func signalExitCode(sig os.Signal) int {
 // completeEnv adds the project env file and the launcher's built-ins to the
 // store, then reports which variables are being passed in.
 //
-// The file is read here and handed to the store as bytes: it is writable from
-// inside the container, so it is parsed literally and never evaluated. An absent
-// file is a silent success, matching bash's `[[ -f "$file" ]] || return 0`.
+// The file is read here and handed to the store as bytes: it is read-only
+// inside the container (ADR-0010), but that is not a security boundary
+// against a malicious checkout -- the host reads the file before the
+// container starts -- so it is parsed literally and never evaluated. An
+// absent file is a silent success, matching bash's `[[ -f "$file" ]] || return 0`.
 func completeEnv(
 	ctx context.Context, store *env.Store, h host.State,
 	noProjectEnv bool, projectDir string, stderr io.Writer,
