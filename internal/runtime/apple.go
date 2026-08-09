@@ -4,6 +4,7 @@ import (
 	"context"
 	_ "embed"
 	"errors"
+	"fmt"
 	"io"
 	"os/exec"
 
@@ -20,6 +21,26 @@ var appleHelp string
 
 // ErrAborted reports that the user declined to start the container runtime.
 var ErrAborted = errors.New("aborted")
+
+// ErrNoLaunchdSession reports that this process has no usable per-user launchd
+// domain, so the `container` CLI cannot reach containermanagerd over XPC. It is
+// the condition behind the opaque "XPC connection error: Connection invalid" and
+// `launchctl managername failed with status 153` failures seen in
+// background/SSH-style sessions that are not the user's login (Aqua) session. The
+// remedy lives in how the session is launched -- not in anything this process can
+// do -- so EnsureUp diagnoses it instead of attempting a `system start` that would
+// fail the same opaque way.
+var ErrNoLaunchdSession = errors.New("no usable launchd session")
+
+// launchdSessionUsable reports whether this process sits in a launchd domain that
+// can reach per-user LaunchAgents such as containermanagerd. `launchctl
+// managername` prints the domain's manager (e.g. "Aqua") and exits non-zero
+// (status 153, "Could not get manager name") when there is none -- exactly when
+// containermanagerd is unreachable. Injectable so EnsureUp's failure branch is
+// testable without a real launchd session (mirrors appleDigestBuildRefSupported).
+var launchdSessionUsable = func(ctx context.Context) bool {
+	return exec.CommandContext(ctx, "launchctl", "managername").Run() == nil
+}
 
 // Apple drives Apple Containers via the `container` CLI.
 type Apple struct{ platform Platform }
@@ -168,6 +189,19 @@ func (a *Apple) EnsureUp(ctx context.Context, stdout, stderr io.Writer, confirm 
 	}
 	diagnostic.For(ctx, diagnostic.ComponentRuntime).Debug("container runtime liveness probe failed",
 		diagnostic.ErrorAttr(statusErr))
+	// A failed status probe here is ambiguous: the system may simply be stopped
+	// (start it), or this shell may have no launchd session that can reach
+	// containermanagerd at all (starting it will fail identically). Distinguish the
+	// two before prompting, so the unrecoverable case gets a diagnosis instead of a
+	// [Y/n] whose "yes" branch cannot work.
+	if !launchdSessionUsable(ctx) {
+		_, _ = fmt.Fprintln(stderr, "error: the container runtime is unreachable.")
+		_, _ = fmt.Fprintln(stderr, "       This shell has no usable launchd session, so `container` cannot reach")
+		_, _ = fmt.Fprintln(stderr, "       containermanagerd (XPC connection invalid). Run claude-contained inside")
+		_, _ = fmt.Fprintln(stderr, "       the user's login (Aqua) session, or wrap it (requires root):")
+		_, _ = fmt.Fprintln(stderr, "         launchctl asuser $(id -u) claude-contained ...")
+		return ErrNoLaunchdSession
+	}
 	if !confirm(a.Profile().NotRunningPrompt) {
 		return ErrAborted
 	}
