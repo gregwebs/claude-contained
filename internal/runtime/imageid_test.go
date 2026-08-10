@@ -34,7 +34,7 @@ func writeImageIDStubs(t *testing.T) string {
 		"case \"${STUB_MODE:-present}\" in\n" +
 		"  present)\n" +
 		"    if [ \"$self\" = container ]; then\n" +
-		"      printf '[{\"descriptor\":{\"digest\":\"sha256:stub\"}}]\\n'\n" +
+		"      printf '[{\"configuration\":{\"descriptor\":{\"digest\":\"sha256:stub\"},\"name\":\"%s\"}}]\\n' \"${STUB_CURRENT_NAME:-$1}\"\n" +
 		"    else\n" +
 		"      printf 'sha256:stub\\n'\n" +
 		"    fi\n" +
@@ -104,6 +104,25 @@ func TestImageDescriptorsSeparateIdentityFromAppleBuildReference(t *testing.T) {
 	}
 	if docker.Identity != "sha256:stub" || docker.BuildRef != "sha256:stub" || !docker.BuildRefImmutable {
 		t.Errorf("Docker descriptor = %+v, want immutable digest for both fields", docker)
+	}
+}
+
+func TestAppleDescribeImageRejectsAStaleBuildAnnotationMatch(t *testing.T) {
+	t.Setenv("PATH", writeImageIDStubs(t)+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("STUB_MODE", "present")
+	t.Setenv("STUB_CURRENT_NAME", "docker.io/library/claude-contained-layer:final")
+
+	desc, present, err := NewApple(Darwin).DescribeImage(t.Context(), "claude-contained-layer:final")
+	if err != nil || !present || desc.Identity != "sha256:stub" {
+		t.Fatalf("final DescribeImage = (%+v, %v, %v), want canonicalized current reference", desc, present, err)
+	}
+
+	desc, present, err = NewApple(Darwin).DescribeImage(t.Context(), "claude-contained-layer:stage")
+	if err != nil {
+		t.Fatalf("DescribeImage: %v", err)
+	}
+	if present || desc.Identity != "" {
+		t.Fatalf("DescribeImage = (%+v, %v), want absence: inspect matched a stale build annotation", desc, present)
 	}
 }
 

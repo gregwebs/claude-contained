@@ -20,7 +20,9 @@ import (
 // multi-minute build. So absence is only ever reported once the probe
 // subcommand is known to exist:
 //
-//	exit 0, parse yields an id       -> present. The ordinary case.
+//	exit 0, parse yields an id       -> present, unless matchesRef proves that
+//	                                   the runtime returned a different current
+//	                                   reference. The ordinary case.
 //	exit 0, parse yields nothing     -> fault. The probe answered and we could
 //	                                   not read it, which means our reading is
 //	                                   wrong, not that the image is missing.
@@ -52,6 +54,7 @@ import (
 // none. It is never handed a failed probe's output.
 func probeImageID(
 	ctx context.Context, bin, ref string, formatArgs []string, parse func(raw []byte) string,
+	matchesRef func(raw []byte, ref string) bool,
 ) (string, bool, error) {
 	args := append([]string{"image", "inspect"}, formatArgs...)
 	args = append(args, ref)
@@ -64,6 +67,9 @@ func probeImageID(
 
 	if runErr == nil {
 		if id := parse(stdout.Bytes()); id != "" {
+			if matchesRef != nil && !matchesRef(stdout.Bytes(), ref) {
+				return "", false, nil
+			}
 			return id, true, nil
 		}
 		return "", false, fmt.Errorf(

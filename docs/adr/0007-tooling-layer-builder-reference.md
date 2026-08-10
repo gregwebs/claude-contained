@@ -18,6 +18,15 @@ The settled Apple Containers 1.1.0 (5973b9c) probe found that
 attempted Docker Hub and failed 401. It is therefore an unverified, mutable
 case.
 
+Apple Containers 1.1.0 also resolves `image inspect <old-stage>` after
+promotion by matching the immutable OCI annotation written when that stage was
+built. The returned `configuration.name` carries only the current final tag,
+but the command still exits successfully after `image delete <old-stage>`.
+Apple image probes therefore compare that current name with the requested
+reference when the field is available, treating a mismatch as absence. The
+default `docker.io/library/` qualification is normalized for this comparison;
+older inspect shapes without a current name retain digest-only behavior.
+
 For a mutable reference, the launcher builds to a cryptographically random
 staging tag, checks the base identity immediately before and after the build,
 then promotes only the stage to the final tag. It removes that exact stage on

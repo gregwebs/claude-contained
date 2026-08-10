@@ -139,7 +139,7 @@ func (a *Apple) RenderBuild(spec BuildSpec) []string {
 // probeImageID's capability probe is what turns a wrong noun into a named
 // fault instead of a false "the base image is not built".
 func (a *Apple) DescribeImage(ctx context.Context, ref string) (ImageDescriptor, bool, error) {
-	id, ok, err := probeImageID(ctx, a.Bin(), ref, nil, parseAppleImageID)
+	id, ok, err := probeImageID(ctx, a.Bin(), ref, nil, parseAppleImageID, appleImageMatchesCurrentRef)
 	if err != nil || !ok {
 		return ImageDescriptor{}, ok, err
 	}
