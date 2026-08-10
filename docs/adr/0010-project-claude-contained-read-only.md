@@ -4,8 +4,10 @@ Status: accepted
 
 Ticket 04 of #20 (#39) restores mount-flag injection as user configuration,
 read from a new project-local file, `<project-dir>/.claude-contained/commands.json`.
-Deciding where that file lives raised a question the project env file and the
-tooling layer had already answered, differently: both were previously
+The project SRT policy, `<project-dir>/.claude-contained/srt-settings.json`,
+is likewise host-read configuration. Deciding where those files live raised a
+question the project env file and the tooling layer had already answered,
+differently: both were previously
 documented as *"writable from inside the container, so it is a convenience
 rather than a trusted input."* Adding a third file to that trust tier without
 revisiting it would have meant a contained agent could rewrite its own mount
@@ -34,7 +36,8 @@ This reverses previously documented, previously shipped behavior: the project
 env file (`internal/env`) and, when present, the tooling layer
 (`.claude-contained/layer/`, [ADR-0006](0006-tooling-layers.md)) become
 read-only from inside the container. A running container can no longer rewrite
-either -- or the new `commands.json` -- to change the *next* run.
+either -- or `commands.json` or `srt-settings.json` -- to change the *next*
+run.
 
 ## Why the whole directory, not just the new file
 
@@ -52,15 +55,17 @@ container starts.
 The read-only mount stops a *running* container from tampering with
 `.claude-contained/` to affect a *later* run. It does not sanitize a file a
 checkout already ships: every file under `.claude-contained/` is read on the
-host, before the container starts, so a malicious `commands.json` or env file
-already committed to an untrusted checkout is read exactly as before this
-decision. `--no-project-env` (skipping the env file) and simply not creating
-`commands.json` remain the mitigations for an untrusted checkout -- this
-decision does not add or remove either.
+host, before the container starts, so a malicious `commands.json`,
+`srt-settings.json`, or env file already committed to an untrusted checkout is
+read exactly as before this decision. `--no-project-env` (skipping the env
+file) and inspecting or avoiding project-local configuration remain the
+mitigations for an untrusted checkout -- this decision does not add or remove
+either.
 
-The host-side malformed-JSON hard error for `commands.json` (exit 2, path
-named) is independent of the mount: it fires when the launcher parses the file
-before the container starts, mount or no mount.
+The host-side malformed-JSON hard errors for `commands.json` and
+`srt-settings.json` (exit 2, path named) are independent of the mount: they
+fire when the launcher parses the file before the container starts, mount or
+no mount.
 
 ## Interactions checked
 

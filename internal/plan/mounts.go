@@ -9,8 +9,9 @@ import (
 
 // mountRecord is one entry in the observable mount bookkeeping the launcher
 // keeps solely to resolve --share-skills conflicts. It has nothing to do with
-// the arg list Build emits elsewhere -- this is bookkeeping only, mirroring
-// bash's parallel arrays rather than the argv itself.
+// the arg list Build emits elsewhere. Its ordered conflict bookkeeping comes
+// from bash's parallel arrays; ADR-0011 adds parity-only coverage and safe
+// target-root checks to that historical behavior.
 type mountRecord struct {
 	src, dst, mode string // mode is "rw" or "ro"; every entry in shared is "ro"
 }
@@ -19,7 +20,8 @@ type mountRecord struct {
 // shared_skill_readonly_mount_{srcs,dsts} (claude-contained:1580-1586,
 // :1612-1657): every mount recorded so far, in the order it was added, so a
 // later --share-skills mount can be checked against everything that came
-// before it exactly the way bash checks it.
+// before it. The existing exact-destination conflict order mirrors bash;
+// ADR-0011 adds the target-root safety queries below.
 type mountRegistry struct {
 	user   []mountRecord
 	shared []mountRecord
@@ -38,15 +40,39 @@ func (r *mountRegistry) addUser(src, dst, mode string) {
 	r.user = append(r.user, mountRecord{src: src, dst: dst, mode: mode})
 }
 
+// pathParityCovers reports whether a registered mount makes this host path
+// visible at the same path inside the container. Access mode does not affect
+// visibility, but a non-parity mount maps different host content and cannot
+// cover an absolute symlink target.
+func (r *mountRegistry) pathParityCovers(path string) bool {
+	return recordsPathParityCover(r.user, path) || recordsPathParityCover(r.shared, path)
+}
+
+// wouldShadowExisting reports whether adding path at path parity after the
+// mounts recorded so far would hide an existing destination. Mounts are
+// applied in order, so a later parent would shadow an equal or nested mount.
+func (r *mountRegistry) wouldShadowExisting(path string) bool {
+	return recordsAtOrUnder(r.user, path) || recordsAtOrUnder(r.shared, path)
+}
+
+// isNestedUnderReadonlyNonParityDestination reports whether a prior read-only
+// mount supplies different source content at an ancestor destination. Strict
+// runtimes cannot reliably create a later nested mountpoint in that mapped
+// read-only view, so ADR-0011 falls back to the established leaf replay.
+func (r *mountRegistry) isNestedUnderReadonlyNonParityDestination(path string) bool {
+	return recordsReadonlyNonParityAncestor(r.user, path) || recordsReadonlyNonParityAncestor(r.shared, path)
+}
+
 // ShareSkillsError reports a --share-skills mount that conflicts with
-// an existing one, mirroring the three error branches of
+// an existing one. Its three exact-destination error branches mirror
 // add_shared_skill_readonly_mount (claude-contained:1666-1685). Lines is the
-// exact stderr output, one line per bash `echo`.
+// exact stderr output, one line per historical bash `echo`.
 type ShareSkillsError struct{ Lines []string }
 
 func (e *ShareSkillsError) Error() string { return strings.Join(e.Lines, "\n") }
 
-// addShared mirrors add_shared_skill_readonly_mount (claude-contained:1659-1696).
+// addShared preserves add_shared_skill_readonly_mount's
+// (claude-contained:1659-1696) exact-conflict and ordering behavior.
 //
 // It returns the mount to emit, or a nil mount with a nil error when bash
 // would have silently skipped it: an identical mount already registered at
@@ -105,7 +131,34 @@ func indexForDst(records []mountRecord, dst string) (mountRecord, bool) {
 // that same primitive, reused rather than reimplemented.
 func readonlyCovers(records []mountRecord, dst string) bool {
 	for _, rec := range records {
-		if rec.mode == "ro" && host.PathIsAtOrUnder(dst, rec.dst) {
+		if rec.mode == "ro" && rec.src == rec.dst && host.PathIsAtOrUnder(dst, rec.dst) {
+			return true
+		}
+	}
+	return false
+}
+
+func recordsPathParityCover(records []mountRecord, path string) bool {
+	for _, rec := range records {
+		if rec.src == rec.dst && host.PathIsAtOrUnder(path, rec.dst) {
+			return true
+		}
+	}
+	return false
+}
+
+func recordsAtOrUnder(records []mountRecord, path string) bool {
+	for _, rec := range records {
+		if host.PathIsAtOrUnder(rec.dst, path) {
+			return true
+		}
+	}
+	return false
+}
+
+func recordsReadonlyNonParityAncestor(records []mountRecord, path string) bool {
+	for _, rec := range records {
+		if rec.mode == "ro" && rec.src != rec.dst && host.PathIsAtOrUnder(path, rec.dst) {
 			return true
 		}
 	}

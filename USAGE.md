@@ -65,7 +65,9 @@ The launcher's `--help` output is authoritative for the installed version.
 - Git worktrees are detected and the main repository's Git metadata is included for full Git access.
 - `container exec`/`docker exec` bypass the image's `ENTRYPOINT`/`CMD`, so `-a NAME` with no command has no image default to fall through to and instead starts a debug shell. This is a behavior change from earlier versions, which started Claude by default; the replacement is `claude-contained -a NAME -- claude`. A command given with `-a` must be introduced by `--` (`-a NAME -- CMD`), because a bare token after `-a` is always read as the container name, never as the start of a command.
 
-`--share-skills DIR` mounts the directory read-only as each tool's skills directory. The directory and symlink targets under it are also mounted read-only at path-parity locations so absolute symlinks continue to resolve. For Codex, the host's `~/.codex/skills/.system` is mounted back over `DIR/.system` so built-in skills remain visible. Supply an absolute path; the launcher does not expand `~`.
+`--share-skills DIR` mounts the directory read-only as each tool's skills directory. The directory and symlink targets under it are also mounted read-only at path-parity locations so absolute symlinks continue to resolve. If a resolved target lies outside `DIR`, the launcher may add a **shared skills target root**: the smallest safe non-volume-root common ancestor of `DIR` and those targets, mounted read-only at the same host path inside the container. This gives Apple Containers the parent hierarchy an absolute symlink needs, but also makes sibling files below that root visible read-only.
+
+Only an existing path-parity mount covers a host absolute path; a mount that maps a different source at that destination does not. The launcher skips the automatic root when an existing destination would be shadowed, including an equal destination, and retains the existing read-only source/target leaf mounts instead. It also skips a filesystem or volume root. When no safe automatic root can be mounted, explicitly provide a suitably narrow `-m SAFE_PARENT:ro` if the target needs its hierarchy. For Codex, the host's `~/.codex/skills/.system` is mounted back over `DIR/.system` so built-in skills remain visible. Supply an absolute path; the launcher does not expand `~`.
 
 If mounted Git metadata can see linked worktrees outside the mounted directories, the launcher offers to auto-lock them while the container runs. This prevents an in-container `git worktree prune` or `git gc` from removing worktrees it cannot see. `-W` accepts the offer without prompting. Locks owned by the launcher are released after the last owning container exits, and stale launcher locks are reclaimed on a later run.
 
@@ -105,6 +107,10 @@ claude-contained --log-level=debug
 claude-contained --log-level=debug --log-file ./launcher.log
 claude-contained --share-skills /Users/me/Projects/skills
 claude-contained --share-host-claude
+
+# Live shared-skills verification (requires a running container runtime)
+make build
+test/shared-skills-live.sh
 
 # Environment and networking
 claude-contained -e API_URL=http://host.local:8080
@@ -474,7 +480,7 @@ The default allowlist covers the provider APIs, OAuth endpoints, package registr
 claude-contained --allow-host example.com --allow-host '*.internal.dev'
 ```
 
-For persistent settings, create `~/.claude-contained/srt-settings.json`:
+For persistent user settings, create `~/.claude-contained/srt-settings.json`:
 
 ```json
 {
@@ -485,7 +491,21 @@ For persistent settings, create `~/.claude-contained/srt-settings.json`:
 }
 ```
 
-Default domains, file domains, and command-line domains are combined. Other srt settings in the file are passed through.
+The selected project directory can also provide
+`<project-dir>/.claude-contained/srt-settings.json`. It overlays the user
+policy for that launch; extra mounts never supply a policy. Both policy files
+must contain valid JSON, or launch stops and names the invalid path.
+
+Objects merge recursively and arrays combine recursively; when both policies
+set a scalar, the project value wins. Built-in domains, both policies' domain
+lists, and command-line domains are combined. `filesystem.allowWrite` remains
+launcher-generated from the actual mounts, while user-provided filesystem deny
+lists remain additive. Other srt settings are passed through.
+
+Like the rest of a project's `.claude-contained/` configuration, a project
+policy is read on the host before launch and is not safe input from an
+untrusted checkout. Inspect or avoid project-local configuration from
+repositories you do not trust.
 
 The filesystem section is generated for every run because mounted directories change and srt matches paths literally on Linux. The merged policy is written to `/run/srt-settings.json` as a root-owned, read-only file so the contained process cannot rewrite its own allowlist.
 

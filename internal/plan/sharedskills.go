@@ -1,19 +1,25 @@
 package plan
 
-import "claude-contained/internal/runtime"
+import (
+	"path/filepath"
 
-// sharedSkillsSpec is one call to add_shared_skills_mount
+	"claude-contained/internal/host"
+	"claude-contained/internal/runtime"
+)
+
+// sharedSkillsSpec preserves one historical add_shared_skills_mount call
 // (claude-contained:1698-1704): mount dst backed by the shared dir, after
-// mkdir -p'ing dstParent on the host first.
+// mkdir -p'ing dstParent on the host first. ADR-0011 inserts its target-root
+// optimization after these ordered tool mounts.
 type sharedSkillsSpec struct{ dst, dstParent string }
 
-// sharedSkillsMounts replays add_shared_skills_mounts (claude-contained:1745-1760)
-// against reg and the probed symlink scan in ss.
+// sharedSkillsMounts preserves the historical mount/error prefix while applying
+// ADR-0011 target-root planning against reg and the probed symlink scan in ss.
 //
 // It returns whatever Steps and Args it produced before any error. That
 // matters because bash's `exit 2` happens mid-function, after several
 // `mkdir -p` calls and possibly some `--mount` registrations have already
-// run -- those mutations survive the abort, and so does this replay's prefix.
+// run -- those mutations survive the abort, and so does the historical prefix.
 func sharedSkillsMounts(reg *mountRegistry, paths hostPaths, ss SharedSkills, remountNeedsMountpoint bool) ([]Step, []runtime.Arg, error) {
 	// Fail fast, before any mkdir or mount is emitted: on a runtime that cannot
 	// create a bind destination under an already-applied read-only mount, the
@@ -66,6 +72,17 @@ func sharedSkillsMounts(reg *mountRegistry, paths hostPaths, ss SharedSkills, re
 		addMount(mount, line)
 	}
 
+	if targetRoot := sharedSkillsTargetRoot(ss); targetRoot != "" &&
+		!reg.pathParityCovers(targetRoot) &&
+		!reg.wouldShadowExisting(targetRoot) &&
+		!reg.isNestedUnderReadonlyNonParityDestination(targetRoot) {
+		mount, line, err := reg.addShared(targetRoot, targetRoot, true, "shared skills target root")
+		if err != nil {
+			return steps, args, err
+		}
+		addMount(mount, line)
+	}
+
 	// The shared dir mounted over itself at path parity, so absolute paths
 	// under it keep resolving inside the container (claude-contained:1752).
 	mount, line, err := reg.addShared(ss.Dir, ss.Dir, true, "shared skills source")
@@ -108,4 +125,44 @@ func sharedSkillsMounts(reg *mountRegistry, paths hostPaths, ss SharedSkills, re
 	}
 
 	return steps, args, nil
+}
+
+func sharedSkillsTargetRoot(ss SharedSkills) string {
+	candidate := ss.Dir
+	hasExternalTarget := false
+	for _, link := range ss.Links {
+		if link.Missing {
+			return ""
+		}
+		if host.PathIsAtOrUnder(link.Resolved, ss.Dir) {
+			continue
+		}
+		hasExternalTarget = true
+		candidate = commonPathAncestor(candidate, link.Resolved)
+		if candidate == "" {
+			return ""
+		}
+	}
+	if !hasExternalTarget || isFilesystemRoot(candidate) {
+		return ""
+	}
+	return candidate
+}
+
+func commonPathAncestor(left, right string) string {
+	left = filepath.Clean(left)
+	right = filepath.Clean(right)
+	for !host.PathIsAtOrUnder(right, left) {
+		parent := filepath.Dir(left)
+		if parent == left {
+			return ""
+		}
+		left = parent
+	}
+	return left
+}
+
+func isFilesystemRoot(path string) bool {
+	clean := filepath.Clean(path)
+	return filepath.Dir(clean) == clean
 }

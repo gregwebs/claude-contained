@@ -19,6 +19,7 @@ The goal is a normal local workflow with a smaller host footprint: alias a tool 
 - **Contained Claude settings are separate**: Contained runs use `~/.claude-contained/claude` as their Claude profile by default and do not mount host `~/.claude/settings.json`. Host Claude extension resources (`skills`, `agents`, `commands`, and `plugins`) and `~/.claude-contained/.claude.json` are still shared.
 - **Concurrent contained and uncontained sessions share some state**: Regular and contained Claude use separate settings by default, but they share account state and extension resources. Concurrent writes to those shared files may conflict.
 - **Codex and PATH**: Codex runs commands through `bash -lc`, which sources `/etc/profile` and resets PATH to the Debian default. Tooling layers should link commands installed outside standard locations into `/usr/local/bin/`.
+- **Shared skills can expose sibling files**: `--share-skills` may mount the smallest safe common ancestor of the skills directory and external symlink targets read-only, because Apple Containers needs their parent hierarchy. See [Usage](USAGE.md#behavior) and [ADR-0011](docs/adr/0011-shared-skills-target-root.md).
 - **Devcontainer and standalone sessions share a profile**: Do not run the VS Code devcontainer and standalone launchers simultaneously against the same contained Claude profile.
 
 ## Quick Start
