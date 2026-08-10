@@ -9,11 +9,9 @@ Guidance for coding agents working in this repository.
 
 For repository workflow conventions, see:
 
-- [Issue tracker](docs/agents/issue-tracker.md)
+- [Issue tracker](docs/agents/issue-tracker.md) — GitHub Issues is the tracker of record; read and write through the `/github-app` skill.
 - [Triage labels](docs/agents/triage-labels.md)
 - [Domain documentation](docs/agents/domain.md)
-
-Issues and specs live under `.scratch/<feature-slug>/`.
 
 
 # Tool Usage

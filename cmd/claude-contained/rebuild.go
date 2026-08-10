@@ -24,7 +24,7 @@ const (
 	rebuildFull  = "full"
 )
 
-// cacheBustToken is the AI_TOOLS_CACHE_BUST value: `date -u +%Y%m%d%H%M%S`
+// cacheBustToken is the TOOLS_CACHE_BUST value: `date -u +%Y%m%d%H%M%S`
 // (claude-contained:538). The clock is host state rather than a fresh read, so
 // the token is one deterministic input in tests; the golden normalizer
 // neutralizes the field regardless, to `<TOKEN>` (N6 in goldenfixture_test.go).
@@ -55,14 +55,14 @@ func rebuildAttempts(mode string, now time.Time) ([]rebuildAttempt, bool) {
 	switch mode {
 	case rebuildTools:
 		tools := rebuildAttempt{
-			Before: []string{"Rebuilding claude-contained image (AI tools refresh)..."},
+			Before: []string{"Rebuilding claude-contained image (tools refresh)..."},
 			Spec: runtime.BuildSpec{
 				Tag:       plan.Image,
-				BuildArgs: []string{"AI_TOOLS_CACHE_BUST=" + now.UTC().Format(cacheBustToken)},
+				BuildArgs: []string{"TOOLS_CACHE_BUST=" + now.UTC().Format(cacheBustToken)},
 			},
 		}
 		retry := full
-		retry.Before = append([]string{"AI tools refresh failed. Retrying with full rebuild..."}, full.Before...)
+		retry.Before = append([]string{"tools refresh failed. Retrying with full rebuild..."}, full.Before...)
 		return []rebuildAttempt{tools, retry}, true
 	case rebuildFull:
 		return []rebuildAttempt{full}, true

@@ -56,11 +56,7 @@ The launcher's `--help` output is authoritative for the installed version.
 - The project directory and every extra mount appear at their original absolute host paths.
 - `-m` only mounts; it injects nothing into the container command by default. The launcher does not know program names or their flags -- but a project-declared [`commands.json`](#mount-flag-injection-claude-containedcommandsjson) can make `-m` append a flag for a matching command.
 - Append `:ro` or `:rw` to an extra mount to override its access. The project directory cannot be read-only.
-- Claude uses `~/.claude-contained/claude` as its contained profile by default. The host's `~/.claude/settings.json` is not mounted or copied there.
-- Claude account state remains shared through `~/.claude-contained/.claude.json`.
-- Host Claude extension resources are shared from `~/.claude/{skills,agents,commands,plugins}` into the contained profile.
-- `--share-host-claude` or `CLAUDE_CONTAINED_SHARE_HOST_CLAUDE=1` restores the legacy behavior of mounting host `~/.claude` directly.
-- Other tool configs (`~/.codex`, `~/.copilot`, `~/.gemini`, and `~/.vibe`) and shared launcher state under `~/.claude-contained` are bind-mounted for persistence.
+- Coding-agent profiles and other tool configs persist across sessions; see [Coding Agents](#coding-agents) for what each tool gets and how to change it.
 - SSH agent forwarding is disabled by default. Enable it with `-S` or `--ssh`.
 - Git worktrees are detected and the main repository's Git metadata is included for full Git access.
 - `container exec`/`docker exec` bypass the image's `ENTRYPOINT`/`CMD`, so `-a NAME` with no command has no image default to fall through to and instead starts a debug shell. This is a behavior change from earlier versions, which started Claude by default; the replacement is `claude-contained -a NAME -- claude`. A command given with `-a` must be introduced by `--` (`-a NAME -- CMD`), because a bare token after `-a` is always read as the container name, never as the start of a command.
@@ -79,7 +75,7 @@ By default, enabled diagnostics use stderr. `--log-file PATH` instead creates or
 
 Attach and Zellij attach normally replace the launcher process. With `--log-only`, the launcher instead proxies that command as a child so its later stdout and stderr can continue through the diagnostic stream; the child exit status is preserved.
 
-Launcher-generated records use `kind=diagnostic` and exactly one component from `cli`, `host`, `env`, `plan`, `runtime`, `worktree`, `zellij`, `attach`, `rebuild`, or `layer`. They never include environment assignment values or the value of `AI_GH_TOKEN`; rendered runtime arguments replace every `-e` operand with a redacted form at every level. Paths, mount information, and non-`-e` tool arguments can remain visible, and the redacted argv is not a pasteable reproduction of the real command.
+Launcher-generated records use `kind=diagnostic` and exactly one component from `cli`, `host`, `env`, `plan`, `runtime`, `worktree`, `zellij`, `attach`, `rebuild`, or `layer`. They never include environment assignment values or the value of `CLAUDE_CONTAINED_GH_TOKEN`; rendered runtime arguments replace every `-e` operand with a redacted form at every level. Paths, mount information, and non-`-e` tool arguments can remain visible, and the redacted argv is not a pasteable reproduction of the real command.
 
 Relocated output has a different security boundary: it is existing launcher, runtime, or child-process output carried verbatim and can contain arbitrary sensitive text. Mode `0600` limits file access but does not make a diagnostic file safe to share. If writing or flushing the stream fails, process replacement is blocked and a successful launcher result becomes a failure; an already nonzero primary result remains primary.
 
@@ -174,13 +170,15 @@ A `git pull` alone only updates the checkout's sources; it neither rebuilds the 
 Use a launcher to refresh its image and exit:
 
 ```bash
-claude-contained --rebuild                                # Refresh AI CLI layers
+claude-contained --rebuild                                # Refresh tool layers
 claude-contained --rebuild=full                            # Pull and rebuild everything without cache
 claude-contained --container-runtime=docker --rebuild
 claude-contained --container-runtime=docker --rebuild=full
 ```
 
-The default `tools` rebuild refreshes the AI CLI portion of the image and the layers after it. If the targeted rebuild fails, the launcher automatically retries with a full rebuild.
+The default `tools` rebuild refreshes the tool layers (the coding-agent CLIs and language servers) and the layers after it; it does not touch the srt sandbox layer, which is stable base infrastructure below it. If the targeted rebuild fails, the launcher automatically retries with a full rebuild.
+
+The `tools` mode name is unchanged for now and will be revisited when the AI CLI installs move out of the base image (see #20 Follow-ups).
 
 `full` pulls the latest base image and rebuilds everything without cache.
 
@@ -459,7 +457,7 @@ Like the rest of `.claude-contained/`, this file is mounted read-only into the c
 
 ## Sandboxing
 
-The tool process runs under [`@anthropic-ai/sandbox-runtime`](https://github.com/anthropic-experimental/sandbox-runtime) (srt), which provides a deny-by-default egress allowlist. It uses HTTP and SOCKS5 proxies, so enforcement is not limited to programs that honor `HTTPS_PROXY`.
+The container command runs under [`@anthropic-ai/sandbox-runtime`](https://github.com/anthropic-experimental/sandbox-runtime) (srt), a generic deny-by-default egress allowlist installed as its own image layer, independent of the coding-agent CLIs. It uses HTTP and SOCKS5 proxies, so enforcement is not limited to programs that honor `HTTPS_PROXY`.
 
 The image includes the Linux dependencies required by srt.
 
@@ -530,7 +528,21 @@ container exec -it -u dev <container-name> srt-run claude
 
 If policy generation fails, the entrypoint refuses to start rather than silently running unsandboxed.
 
-## Claude Code Clipboard Behavior
+## Coding Agents
+
+This section collects the behavior specific to the bundled coding-agent CLIs (Claude Code, Codex, Copilot CLI, Gemini CLI, Vibe). Running one of them is one supported use of the launcher, not the only one -- the mechanism sections above describe the generic container command, mounts, environment, and sandboxing that any command gets.
+
+### Persistent Profiles
+
+- Claude uses `~/.claude-contained/claude` as its contained profile by default. The host's `~/.claude/settings.json` is not mounted or copied there.
+- Claude account state remains shared through `~/.claude-contained/.claude.json`.
+- Host Claude extension resources are shared from `~/.claude/{skills,agents,commands,plugins}` into the contained profile.
+- `--share-host-claude` or `CLAUDE_CONTAINED_SHARE_HOST_CLAUDE=1` restores the legacy behavior of mounting host `~/.claude` directly.
+- Other tool configs (`~/.codex`, `~/.copilot`, `~/.gemini`, and `~/.vibe`) and shared launcher state under `~/.claude-contained` are bind-mounted for persistence.
+
+`--share-skills DIR` (see [Behavior](#behavior) above) mounts a shared skills directory into each tool's own skills location.
+
+### Claude Code Clipboard Behavior
 
 The image sets Claude Code's managed `tui` setting to `default`, which keeps the classic inline renderer. The fullscreen renderer relies on terminal OSC 52 clipboard support and captures the mouse; in containerized terminals where OSC 52 is dropped, that can prevent both copy-on-select and normal terminal text selection.
 
@@ -582,7 +594,7 @@ For a service listening on all host interfaces, configure its client to use `hos
 
 ## VS Code Devcontainer
 
-The included template uses the plain base image with Claude available in the integrated terminal. A project can instead point it at a copied tooling layer.
+The included template uses the plain base image with path parity and shared coding-agent state in the integrated terminal (Claude Code is the example the template ships with). A project can instead point it at a copied tooling layer.
 
 1. Build the Docker image:
 

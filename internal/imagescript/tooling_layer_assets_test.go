@@ -149,8 +149,39 @@ func TestBaseDockerfileHasNoJavaStage(t *testing.T) {
 	mustNotContain(t, "Dockerfile", `INCLUDE_JAVA_LAYER|custom-packages|/opt/jbr|sdkman|JAVA_HOME|JAVA_TOOL_OPTIONS|MAVEN_OPTS`)
 }
 
+// TestSrtLayerIsIndependentOfToolsRefresh pins the #20 Follow-ups decoupling
+// (D1 in the issue #40 implementation plan): srt is generic sandbox
+// infrastructure, not an AI CLI, so it must live in its own RUN, ahead of the
+// tools-refresh ARG, so that `-R tools` cannot rebuild it. Golden case 57
+// stubs the build with `FROM scratch` and cannot see Dockerfile ordering, so
+// this structural assertion is the only automated seam for the split.
+func TestSrtLayerIsIndependentOfToolsRefresh(t *testing.T) {
+	body := readRepoFile(t, "Dockerfile")
+
+	mustMatch(t, "Dockerfile", `(?ms)^RUN set -eux; \\\n    npm install -g @anthropic-ai/sandbox-runtime \\\n  && npm cache clean --force$`)
+
+	toolsRefreshRun := regexp.MustCompile(`(?ms)^RUN set -eux; \\\n    echo "Refreshing tool layers.*?npm cache clean --force$`).FindString(body)
+	if toolsRefreshRun == "" {
+		t.Fatal("could not locate the tools-refresh RUN block in Dockerfile")
+	}
+	if strings.Contains(toolsRefreshRun, "@anthropic-ai/sandbox-runtime") {
+		t.Error("the tools-refresh RUN still installs @anthropic-ai/sandbox-runtime; srt must be its own layer")
+	}
+
+	srtIndex := strings.Index(body, "@anthropic-ai/sandbox-runtime")
+	argIndex := strings.Index(body, "ARG TOOLS_CACHE_BUST")
+	if srtIndex < 0 || argIndex < 0 {
+		t.Fatalf("could not locate srt install (%d) or ARG TOOLS_CACHE_BUST (%d)", srtIndex, argIndex)
+	}
+	if srtIndex >= argIndex {
+		t.Error("srt install must precede ARG TOOLS_CACHE_BUST so -R tools cannot rebuild it")
+	}
+
+	mustNotContain(t, "Dockerfile", "AI_TOOLS_CACHE_BUST")
+}
+
 func TestDevcontainerNeutral(t *testing.T) {
-	mustContain(t, "devcontainer/devcontainer.json", `"name": "Claude Contained"`)
+	mustContain(t, "devcontainer/devcontainer.json", `"name": "claude-contained"`)
 	mustContain(t, "devcontainer/devcontainer.json", `"image": "claude-contained:latest"`)
 	mustNotContain(t, "devcontainer/devcontainer.json", `(?i)(java|spring|vaadin|lombok|\.m2|\.vaadin|/opt/jbr|8080|5005)`)
 }

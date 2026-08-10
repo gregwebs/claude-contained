@@ -38,7 +38,7 @@ func diagnosticProject(t *testing.T) string {
 func TestDiagnosticRunWithEmitsAnchorsWithoutEnvironmentValues(t *testing.T) {
 	const sentinel = "DIAGNOSTIC-LEAK-SENTINEL"
 	project := diagnosticProject(t)
-	t.Setenv("AI_GH_TOKEN", sentinel)
+	t.Setenv("CLAUDE_CONTAINED_GH_TOKEN", sentinel)
 	if err := os.MkdirAll(filepath.Join(project, ".claude-contained"), 0o755); err != nil {
 		t.Fatal(err)
 	}

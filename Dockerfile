@@ -37,12 +37,20 @@ RUN set -eux; \
     rm -rf /tmp/bun.zip /tmp/bun-linux-${BUN_ARCH}; \
     bun --version
 
-# ---- Language Servers + AI CLIs --------------------------------------------
-ARG AI_TOOLS_CACHE_BUST=stable
+# ---- Sandbox runtime (srt) --------------------------------------------------
+# Kept in its own layer, above the tools-refresh ARG below, so `-R tools`
+# cannot rebuild it: srt is generic sandbox infrastructure, not an AI CLI, and
+# should not share a cache-bust cycle with the tool layer it does not depend
+# on (#20 Follow-ups).
 RUN set -eux; \
-    echo "Refreshing AI tool layers: ${AI_TOOLS_CACHE_BUST}" >/dev/null; \
+    npm install -g @anthropic-ai/sandbox-runtime \
+  && npm cache clean --force
+
+# ---- Language Servers + AI CLIs --------------------------------------------
+ARG TOOLS_CACHE_BUST=stable
+RUN set -eux; \
+    echo "Refreshing tool layers: ${TOOLS_CACHE_BUST}" >/dev/null; \
     npm install -g \
-    @anthropic-ai/sandbox-runtime \
     @github/copilot \
     @google/gemini-cli \
     @openai/codex \
@@ -93,20 +101,6 @@ RUN set -eux; \
     chmod +x /usr/local/bin/zellij; \
     rm -f /tmp/zellij.tar.gz; \
     zellij --version
-
-# ---- Shellcheck for verifying shell scripts  ---
-ENV SHELLCHECK_VERSION="0.11.0"
-ENV SHELLCHECK_SHA256="8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198"
-RUN set -eux; \
-	shellcheck_dir="/tmp/shellcheck" ; \
-	mkdir -p "${shellcheck_dir}" ; \
-	shellcheck_archive="${shellcheck_dir}/shellcheck.tar.xz" ; \
-	curl --fail --location --silent --show-error --output "${shellcheck_archive}" \
-		"https://github.com/koalaman/shellcheck/releases/download/v${SHELLCHECK_VERSION}/shellcheck-v${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" ; \
-	echo "${SHELLCHECK_SHA256}  ${shellcheck_archive}" | sha256sum --check - ; \
-	tar -xJf "${shellcheck_archive}" -C "${shellcheck_dir}" ; \
-	install -m 0755 "${shellcheck_dir}/shellcheck-v${SHELLCHECK_VERSION}/shellcheck" "${shellcheck_dir}/shellcheck" ; \
-	rm -r "${shellcheck_dir}"
 
 # ---- Install git-secrets ----------------------------------------------------
 ARG GIT_SECRETS_VERSION=1.3.0

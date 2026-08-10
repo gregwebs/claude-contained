@@ -1,8 +1,16 @@
-# AI Contained
+# claude-contained
 
-Seamlessly run CLI coding agents (Claude, Codex, Copilot, Gemini, and Vibe) inside an [Apple Container](https://github.com/apple/container) or [Docker](https://www.docker.com) container with persistent state.
+Run any command inside an [Apple Container](https://github.com/apple/container) or [Docker](https://www.docker.com) container with host path/UID parity, a deny-by-default network sandbox, and a non-root user — while keeping selected host state across sessions.
 
-The goal is a normal local workflow with a smaller host footprint: alias a tool to `claude-contained --yolo`, then use it as usual. Only the project directory and the extra mounts you select are shared with the container. Login state and common Claude extension resources persist across contained sessions.
+The goal is a normal local workflow with a smaller host footprint: wrap a command in an alias like `claude-contained <command>`, then use the alias as usual. Only the project directory and the extra mounts you select are shared with the container. Login state and common Claude extension resources persist across contained sessions.
+
+## Use Cases
+
+- **CLI coding agents**: run Claude, Codex, Copilot, Gemini, or Vibe with a container between them and your host — see [Supported Tools](#supported-tools).
+- **Lower-trust code**: build and run a checkout you don't fully trust behind the sandbox's deny-by-default egress.
+- **Devcontainers and pinned dev environments**: the same base image and tooling-layer mechanism work as a plain VS Code devcontainer — see the [devcontainer template](devcontainer/README.md).
+
+Running a coding agent is one supported use case among several; the rest of this document covers the generic mechanism first and calls out agent-specific behavior explicitly where it applies.
 
 ## Documentation
 
@@ -43,14 +51,16 @@ make install                        # symlinks it to ~/.local/bin/claude-contain
    container build --platform linux/arm64 -t claude-contained .
    ```
 
-2. Optionally set up aliases:
+2. Optionally set up aliases. The container command is positional — pass each
+   tool's own binary and permission flag yourself, after the command:
 
    ```bash
-   alias claude='claude-contained --yolo'
-   alias codex='claude-contained -t codex --yolo'
-   alias copilot='claude-contained -t copilot --yolo'
-   alias gemini='claude-contained -t gemini --yolo'
-   alias vibe='claude-contained -t vibe --yolo'
+   alias claude='claude-contained claude --dangerously-skip-permissions'
+   alias codex='claude-contained codex --yolo'
+   alias copilot='claude-contained copilot --yolo'
+   alias gemini='claude-contained gemini --yolo'
+   alias vibe='claude-contained vibe --auto-approve'
+   # --yolo here is codex's own flag, passed positionally -- not a launcher flag.
    ```
 
 3. Run it:
@@ -83,21 +93,23 @@ See [USAGE.md](USAGE.md) for the complete CLI reference and operational guides.
 
 ## Supported Tools
 
-| Tool | Command | Yolo flag | Persistent config |
-|------|---------|-----------|-------------------|
+The launcher runs any container command; it does not know tool names or their flags. These are the coding agents this image installs and keeps persistent state for, with each tool's own permission flag shown for reference — pass it yourself, positionally, after the command:
+
+| Tool | Command | Permission flag (you pass it) | Persistent config |
+|------|---------|--------------------------------|-------------------|
 | [Claude Code](https://claude.ai/code) | `claude` | `--dangerously-skip-permissions` | `~/.claude-contained/claude` mounted as `~/.claude` |
 | [OpenAI Codex](https://github.com/openai/codex) | `codex` | `--yolo` | `~/.codex` |
 | GitHub Copilot CLI | `copilot` | `--yolo` | `~/.copilot` |
 | [Google Gemini CLI](https://github.com/google-gemini/gemini-cli) | `gemini` | `--yolo` | `~/.gemini` |
 | [Mistral Vibe](https://github.com/mistralai/mistral-vibe) | `vibe` | `--auto-approve` | `~/.vibe` |
 
-The contained Claude profile and the other tools' config directories are bind-mounted regardless of which tool you run.
+The contained Claude profile and the other tools' config directories are bind-mounted regardless of which tool you run. Any other command works too; it just does not get a dedicated persistent config directory unless you add one with `-m`.
 
 ## Container Design
 
 - **Path parity**: The project directory, extra mounts, and the host HOME path appear at the same absolute paths inside the container.
 - **UID/GID parity**: The container user adopts the host user's IDs so files created in mounted directories keep useful ownership.
-- **Persistent tool state**: Tool profiles and selected caches live on the host while tool processes run inside the container.
+- **Persistent profiles**: Selected host profile/config directories and caches persist across sessions while processes run inside the container.
 - **Runtime choices**: one launcher targets either Apple Containers or Docker, chosen by `--container-runtime`, `CLAUDE_CONTAINED_RUNTIME`, or the host platform, while exposing the same CLI behavior.
 - **Defense in depth**: The container or VM is the isolation boundary. The included sandbox runtime adds a deny-by-default network guardrail around the tool process.
 - **Host services**: Containers use `host.local` for reachable host services; Docker can additionally forward localhost-bound services with `-H`.

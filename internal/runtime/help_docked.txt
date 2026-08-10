@@ -50,11 +50,12 @@ Behavior:
   - -m only mounts; it injects nothing into the container command.
   - Append :ro to an extra mount to mount it read-only (or :rw to force
     read-write). The project directory cannot be read-only.
-  - Claude uses ~/.claude-contained/claude as container ~/.claude by default.
-    Account state remains shared through ~/.claude-contained/.claude.json, and
-    host ~/.claude skills, agents, commands, and plugins are mounted into the
-    contained profile. Use --share-host-claude or
-    CLAUDE_CONTAINED_SHARE_HOST_CLAUDE=1 to mount host ~/.claude directly.
+  - Coding-agent state: Claude uses ~/.claude-contained/claude as container
+    ~/.claude by default. Account state remains shared through
+    ~/.claude-contained/.claude.json, and host ~/.claude skills, agents,
+    commands, and plugins are mounted into the contained profile. Use
+    --share-host-claude or CLAUDE_CONTAINED_SHARE_HOST_CLAUDE=1 to mount host
+    ~/.claude directly.
   - Other tool configs (~/.codex, ~/.copilot, ~/.gemini, ~/.vibe) and shared
     launcher state (~/.claude-contained) are bind-mounted.
   - --share-skills DIR mounts DIR read-only as each tool's skills directory.
@@ -115,7 +116,7 @@ Examples:
   claude-contained -- claude --model sonnet  # -- optional; "claude" isn't a flag
   claude-contained -S                  # Enable SSH agent (for git push)
   claude-contained -s                  # Debug shell in current directory
-  claude-contained --rebuild           # Refresh AI tools, then exit
+  claude-contained --rebuild           # Refresh tool layers, then exit
   claude-contained --rebuild=full      # Full fresh rebuild, then exit
   claude-contained --build-layer       # Build this project's tooling layer, no prompt
   claude-contained --no-layer          # Run the base image, ignoring the layer

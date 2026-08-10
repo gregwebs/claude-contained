@@ -189,8 +189,8 @@ func TestRenderBuildIsSharedApartFromTheBinary(t *testing.T) {
 	}{
 		{
 			name: "tools refresh",
-			spec: BuildSpec{Tag: "claude-contained:latest", Context: "/ctx", BuildArgs: []string{"AI_TOOLS_CACHE_BUST=20260729211507"}},
-			want: []string{"build", "--build-arg", "AI_TOOLS_CACHE_BUST=20260729211507", "-t", "claude-contained:latest", "/ctx"},
+			spec: BuildSpec{Tag: "claude-contained:latest", Context: "/ctx", BuildArgs: []string{"TOOLS_CACHE_BUST=20260729211507"}},
+			want: []string{"build", "--build-arg", "TOOLS_CACHE_BUST=20260729211507", "-t", "claude-contained:latest", "/ctx"},
 		},
 		{
 			name: "full rebuild",
