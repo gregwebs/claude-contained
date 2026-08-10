@@ -22,13 +22,12 @@ func probeFacts(
 	worktreeMainRepo := host.WorktreeMainRepo(mainHost)
 
 	facts := plan.Facts{
-		ProjectDir:             mainHost,
-		ExtraMounts:            extraMounts,
-		ExtraModes:             extraModes,
-		WorktreeMainRepo:       worktreeMainRepo,
-		NodeOverlayTargetEmpty: map[string]bool{},
-		SharedSkills:           scanSharedSkills(h.Home, shareSkillsDir),
-		WorktreeLocks:          worktreeLockCandidates(mainHost, "", mountedRoots),
+		ProjectDir:       mainHost,
+		ExtraMounts:      extraMounts,
+		ExtraModes:       extraModes,
+		WorktreeMainRepo: worktreeMainRepo,
+		SharedSkills:     scanSharedSkills(h.Home, shareSkillsDir),
+		WorktreeLocks:    worktreeLockCandidates(mainHost, "", mountedRoots),
 	}
 	// The two candidate sets are identical by construction when the project
 	// directory is not itself a linked worktree -- copy rather than reprobe.
@@ -39,11 +38,11 @@ func probeFacts(
 	}
 
 	home := h.Home
-	// bash's `-f`: exists, follows symlinks, and is a regular file. A bare
-	// os.Stat check is only `-e`, and a directory (or fifo) at this path would
-	// then reach copyFile, whose ReadFile fails outright (or blocks forever)
-	// where bash simply skips the copy. Same test as completeEnv's below.
-	if info, err := os.Stat(filepath.Join(home, ".gitconfig")); err == nil && info.Mode().IsRegular() {
+	// isRegularFile is bash's `-f`: a bare os.Stat check is only `-e`, and a
+	// directory (or fifo) at this path would then reach copyFile, whose
+	// ReadFile fails outright (or blocks forever) where bash simply skips the
+	// copy.
+	if isRegularFile(filepath.Join(home, ".gitconfig")) {
 		facts.GitConfigExists = true
 	}
 
@@ -74,31 +73,7 @@ func probeFacts(
 		facts.AccountState.SharedIsRegularFile = info.Mode().IsRegular()
 	}
 
-	// The overlay exists because macOS-native binaries do not run on Linux, so
-	// it is pointless when the host is already Linux.
-	if runtime.GOOS != "linux" {
-		platform := "linux-" + h.Arch
-		candidates := []string{mainHost}
-		for i, dir := range extraMounts {
-			// Read-only extras are skipped: the overlay has to write a
-			// .claude-contained directory inside the mount.
-			if extraModes[i] == "ro" {
-				continue
-			}
-			candidates = append(candidates, dir)
-		}
-		for _, dir := range candidates {
-			// `-f` again, not `-e`: a directory named package.json is not a
-			// Node project, and treating it as one creates an overlay directory
-			// and prints a notice bash never prints.
-			if info, err := os.Stat(filepath.Join(dir, "package.json")); err != nil || !info.Mode().IsRegular() {
-				continue
-			}
-			facts.NodeOverlayDirs = append(facts.NodeOverlayDirs, dir)
-			target := filepath.Join(dir, ".claude-contained", "node_modules-"+platform)
-			facts.NodeOverlayTargetEmpty[dir] = dirWillBeEmpty(target)
-		}
-	}
+	facts.NodeOverlayDirs, facts.NodeOverlayTargetEmpty = nodeOverlayCandidates(runtime.GOOS, h.Arch, mainHost, extraMounts, extraModes)
 
 	names, err := r.List(ctx)
 	if err != nil {
@@ -145,6 +120,51 @@ func dirWillBeEmpty(path string) bool {
 		return true
 	}
 	return host.DirIsEmpty(path)
+}
+
+// isRegularFile mirrors bash's `-f` test: exists, follows symlinks, and is a
+// regular file. A directory (or fifo, or symlink to either) at path reports
+// false, the same way a bash script's `[ -f "$path" ]` would skip it.
+func isRegularFile(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && info.Mode().IsRegular()
+}
+
+// nodeOverlayCandidates computes the node_modules overlay facts for a given
+// host OS without reading the compile-time GOOS, so a test can drive both the
+// darwin (overlay applies) and linux (overlay pointless) branches from either
+// host. Returns no dirs when hostGOOS == "linux".
+//
+// The overlay exists because macOS-native binaries do not run on Linux, so
+// it is pointless when the host is already Linux.
+func nodeOverlayCandidates(hostGOOS, arch, projectDir string, extraMounts, extraModes []string) (dirs []string, targetEmpty map[string]bool) {
+	targetEmpty = map[string]bool{}
+	if hostGOOS == "linux" {
+		return dirs, targetEmpty
+	}
+
+	platform := "linux-" + arch
+	candidates := []string{projectDir}
+	for i, dir := range extraMounts {
+		// Read-only extras are skipped: the overlay has to write a
+		// .claude-contained directory inside the mount.
+		if extraModes[i] == "ro" {
+			continue
+		}
+		candidates = append(candidates, dir)
+	}
+	for _, dir := range candidates {
+		// isRegularFile again, not a bare exists check: a directory named
+		// package.json is not a Node project, and treating it as one creates
+		// an overlay directory and prints a notice bash never prints.
+		if !isRegularFile(filepath.Join(dir, "package.json")) {
+			continue
+		}
+		dirs = append(dirs, dir)
+		target := filepath.Join(dir, ".claude-contained", "node_modules-"+platform)
+		targetEmpty[dir] = dirWillBeEmpty(target)
+	}
+	return dirs, targetEmpty
 }
 
 // scanSharedSkills builds the --share-skills facts, replicating

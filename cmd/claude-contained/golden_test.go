@@ -1,11 +1,12 @@
 package main
 
-// golden_test.go is the driver: for every case in goldencase_test.go,
-// across the three runtime/platform configurations, it builds an isolated fixture
-// (goldenfixture_test.go), drives runWith directly -- in-process, with `plat`
-// injected -- through an injected runner and a swapped replaceProcess,
-// and compares the normalized, five-section result against
-// testdata/golden/<tree>/<slug>.txt.
+// golden_test.go is the driver: for every case in goldencase_test.go, across
+// its own declared Configs (a curated subset of the three runtime/platform
+// configurations -- see the retention rule in CONTRIBUTING.md), it builds an
+// isolated fixture (goldenfixture_test.go), drives runWith directly --
+// in-process, with `plat` injected -- through an injected runner and a
+// swapped replaceProcess, and compares the normalized, five-section result
+// against testdata/golden/<tree>/<slug>.txt.
 //
 // Injecting the platform is the whole point: internal/runtime.Select only chooses Apple Containers
 // when plat == Darwin (runtime.go:222-223), and ValidateSelection refuses an
@@ -21,7 +22,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	goruntime "runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -52,11 +52,24 @@ var goldenTrees = []goldenTreeConfig{
 	{tree: "docker-linux", plat: runtime.Linux, dockerEnv: true, sshAgent: true},
 }
 
+// goldenTreeByName looks up a goldenTreeConfig by the name a goldenCase
+// declares in its Configs, so the driver below can iterate each case's own
+// curated subset rather than the full Cartesian goldenTrees list.
+var goldenTreeByName = func() map[string]goldenTreeConfig {
+	m := map[string]goldenTreeConfig{}
+	for _, gc := range goldenTrees {
+		m[gc.tree] = gc
+	}
+	return m
+}()
+
 func TestGolden(t *testing.T) {
 	for _, tc := range goldenCases {
-		tc := tc
-		for _, gc := range goldenTrees {
-			gc := gc
+		for _, name := range tc.Configs {
+			gc, ok := goldenTreeByName[name]
+			if !ok {
+				t.Fatalf("case %s names unknown config %q", tc.Slug, name)
+			}
 			t.Run(gc.tree+"/"+tc.Slug, func(t *testing.T) {
 				runGoldenCase(t, tc, gc)
 			})
@@ -64,15 +77,32 @@ func TestGolden(t *testing.T) {
 	}
 }
 
-func runGoldenCase(t *testing.T, tc goldenCase, gc goldenTreeConfig) {
-	// A host skip, not a tree skip: case 49's node_modules overlay
-	// gates on runtime.GOOS at compile time (probe.go:70), which does not
-	// vary with the injected plat. Skipped identically in all three trees
-	// when this test binary was not built for HostGOOS.
-	if tc.HostGOOS != "" && goruntime.GOOS != tc.HostGOOS {
-		t.Skipf("%s is %s-only by construction: probe.go:70 gates the node_modules overlay on the compile-time GOOS, which the injected plat does not change", tc.Slug, tc.HostGOOS)
+// TestGoldenMatrixIsWellFormed enforces the admission rule at the harness
+// level (CONTRIBUTING.md "Golden tests"): a new survivor cannot silently omit
+// its config set or its admission reason, and a typo in a config name cannot
+// silently write to testdata/golden//<slug>.txt (an empty tree component).
+func TestGoldenMatrixIsWellFormed(t *testing.T) {
+	for _, tc := range goldenCases {
+		if len(tc.Configs) == 0 {
+			t.Errorf("case %s: empty Configs -- every survivor must declare at least one configuration", tc.Slug)
+		}
+		seen := map[string]bool{}
+		for _, name := range tc.Configs {
+			if _, ok := goldenTreeByName[name]; !ok {
+				t.Errorf("case %s: unknown config %q", tc.Slug, name)
+			}
+			if seen[name] {
+				t.Errorf("case %s: duplicate config %q", tc.Slug, name)
+			}
+			seen[name] = true
+		}
+		if strings.TrimSpace(tc.Admit) == "" {
+			t.Errorf("case %s: empty Admit -- every survivor must record its admission reason", tc.Slug)
+		}
 	}
+}
 
+func runGoldenCase(t *testing.T, tc goldenCase, gc goldenTreeConfig) {
 	// The controlled environment: every variable the launcher reads
 	// must be explicit, nothing inherited from the developer's shell.
 	clearEnv(t, launcherEnvVars...)

@@ -1,9 +1,18 @@
 package main
 
-// goldencase_test.go is the mechanical transcription of the retired
-// tests/differential/corpus/*.case files into a Go table.
-// Each entry's Slug matches its corpus basename minus the .case extension, so
-// a reviewer can check this file against the originals case by case:
+// goldencase_test.go is the curated survivor table: each entry is a scenario
+// admitted under the retention rule in CONTRIBUTING.md ("Golden tests") and
+// docs/adr/0012-curated-golden-contract-matrix.md -- a full run that crosses
+// ownership boundaries (host -> plan -> runtime), an ordered user-visible
+// contract, or a safety-critical filesystem lifecycle a focused test cannot
+// economically prove. Everything else was ported once from the retired
+// tests/differential/corpus/*.case files and has since been pruned back to a
+// focused test; see the removal ledger in the issue #54 pull request for
+// where each removed scenario's coverage now lives.
+//
+// A surviving entry's Slug still matches its original corpus basename minus
+// the .case extension, so a reviewer can still check it against the
+// original:
 //
 //	git show 20e85cb:tests/differential/corpus/24-env-reserved-always-exact.case
 //
@@ -11,12 +20,9 @@ package main
 // few commits later, so nothing after it resolves.
 
 import (
-	"fmt"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
 	"claude-contained/internal/host"
 	"claude-contained/internal/layer"
@@ -51,7 +57,7 @@ type goldenExtras struct {
 	ImageIDs map[string]string
 }
 
-// goldenCase is one corpus entry, transcribed.
+// goldenCase is one surviving scenario.
 type goldenCase struct {
 	Slug string
 	Desc string
@@ -66,8 +72,8 @@ type goldenCase struct {
 	// "" (the default) means /dev/null-equivalent: an empty reader.
 	Stdin string
 	// NoRuntimeArgs is CASE_EXPECT_RUNTIME_ARGS=0's Go name -- the zero value
-	// must be the common case, and 48 of 59 entries expect runtime args
-	// (liveness guard 2 in golden_test.go).
+	// must be the common case: most survivors reach the run path and expect
+	// runtime args (liveness guard 2 in golden_test.go).
 	NoRuntimeArgs bool
 	// Terminal forces isTerminal to report a terminal for this case. The
 	// driver hands runWith a strings.Reader, which is never a character
@@ -75,19 +81,23 @@ type goldenCase struct {
 	// having one -- the tooling layer's build confirmation, which fails closed
 	// rather than prompting when there is no terminal.
 	Terminal bool
-	// HostGOOS restricts the case to hosts whose compile-time GOOS matches
-	// (only "darwin", for case 49 -- see its own comment). Empty means no
-	// restriction. This is a *host* skip, not a tree skip: what varies is
-	// the GOOS the test binary was built for, not the injected `plat`.
-	HostGOOS string
+	// Configs is the set of tree names this scenario runs in, a subset of
+	// {"apple-darwin","docker-darwin","docker-linux"}. A scenario runs only in
+	// the configurations that can expose a distinct assembled contract; the
+	// retention rule in CONTRIBUTING.md governs the choice.
+	Configs []string
+	// Admit is the one-line admission reason: the unique cross-boundary or
+	// config-specific assembled risk this golden protects. Enforced non-empty
+	// by TestGoldenMatrixIsWellFormed.
+	Admit string
 }
 
 // worktreeGoldenFixture builds a real main repository (fixed basename
 // "main-repo") with two linked worktrees ("wt-active", the case's -C target,
 // and "wt-hidden", the prune hazard the auto-lock offer exists to protect),
-// mirroring the six corpus entries that exercise the worktree lock/unlock
-// cycle (41, 52-56). Fixed basenames mean callers never need Setup's return
-// value to find wt-active: filepath.Join(proj, "wt-active") always works.
+// mirroring the corpus entries that exercise the worktree lock/unlock cycle.
+// Fixed basenames mean callers never need Setup's return value to find
+// wt-active: filepath.Join(proj, "wt-active") always works.
 func worktreeGoldenFixture(t *testing.T, proj string) (mainRepo, hiddenWT, hiddenLockFile string) {
 	t.Helper()
 	mainRepo = filepath.Join(proj, "main-repo")
@@ -113,37 +123,25 @@ func worktreeGoldenFixture(t *testing.T, proj string) (mainRepo, hiddenWT, hidde
 // activeWorktreePath is worktreeGoldenFixture's fixed -C target.
 func activeWorktreePath(proj string) string { return filepath.Join(proj, "wt-active") }
 
-// reliablyDeadPID spawns a throwaway process and waits for it to exit and be
-// reaped, mirroring the corpus's `( exit 0 ) & dead=$!; wait "$dead"`: a PID
-// that reliably fails a liveness check.
-func reliablyDeadPID(t *testing.T) int {
-	t.Helper()
-	cmd := exec.Command("true")
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("spawning throwaway process: %v", err)
-	}
-	return cmd.Process.Pid
-}
-
 func writeEnvFile(t *testing.T, proj, content string) {
 	t.Helper()
 	mustWriteFile(t, filepath.Join(proj, ".claude-contained", "env"), content)
 }
 
-// mkExtraDir seeds the -m/--mount fixture directory every mount-mode case
-// (10-13) shares.
+// mkExtraDir seeds the -m/--mount fixture directory used by mount-mode
+// scenarios.
 func mkExtraDir(t *testing.T, proj string) {
 	t.Helper()
 	mustMkdirAll(t, filepath.Join(proj, "extra"))
 }
 
 // goldenBaseImageID is the identifier the stub runtime reports for the base
-// image in the tooling-layer cases (60-64). A fixture constant, not a probe:
-// it is one of the three hash inputs, so it has to be as fixed as the layer
-// directory's own contents for the derived tag to be reproducible.
+// image in the tooling-layer case. A fixture constant, not a probe: it is one
+// of the three hash inputs, so it has to be as fixed as the layer directory's
+// own contents for the derived tag to be reproducible.
 const goldenBaseImageID = "sha256:base00"
 
-// goldenLayerDockerfile is the layer every tooling-layer case checks in. Its
+// goldenLayerDockerfile is the layer the tooling-layer case checks in. Its
 // bytes are a hash input, so they are a constant rather than written inline
 // per case.
 const goldenLayerDockerfile = "ARG BASE_IMAGE=claude-contained:latest\n" +
@@ -167,136 +165,27 @@ func writeGoldenLayer(t *testing.T, proj string) layer.Identity {
 
 var goldenCases = []goldenCase{
 	{
-		Slug: "01-shell-debug",
-		Desc: "debug shell (-s) launches bash instead of the tool",
-		Args: func(proj, home string) []string { return []string{"-N", "-s", "-C", proj} },
+		Slug:    "02-tool-claude-default",
+		Desc:    "default command: no positional, image CMD runs",
+		Args:    func(proj, home string) []string { return []string{"-N", "-C", proj} },
+		Configs: []string{"apple-darwin", "docker-darwin"},
+		Admit: "Full ordinary run crosses host->plan->runtime; the Apple-vs-Docker assembled " +
+			"argv contract. Linux adds only the host-gateway constant, owned by host-forward.",
 	},
 	{
-		Slug: "02-tool-claude-default",
-		Desc: "default command: no positional, image CMD runs",
-		Args: func(proj, home string) []string { return []string{"-N", "-C", proj} },
+		Slug:    "08-ssh-flag",
+		Desc:    "-S/--ssh enables SSH agent forwarding",
+		Args:    func(proj, home string) []string { return []string{"-N", "-s", "-S", "-C", proj} },
+		Configs: []string{"apple-darwin", "docker-darwin", "docker-linux"},
+		Admit:   "sshArgs() three-way runtime/platform split; the only scenario needing sshAgent.",
 	},
 	{
-		Slug: "03-tool-codex",
-		Desc: "codex as a positional command",
-		Args: func(proj, home string) []string { return []string{"-N", "-C", proj, "codex"} },
-	},
-	{
-		Slug: "04-tool-copilot",
-		Desc: "copilot as a positional command",
-		Args: func(proj, home string) []string { return []string{"-N", "-C", proj, "copilot"} },
-	},
-	{
-		Slug: "05-tool-gemini",
-		Desc: "gemini as a positional command",
-		Args: func(proj, home string) []string { return []string{"-N", "-C", proj, "gemini"} },
-	},
-	{
-		Slug: "06-tool-vibe",
-		Desc: "vibe as a positional command",
-		Args: func(proj, home string) []string { return []string{"-N", "-C", proj, "vibe"} },
-	},
-	{
-		Slug:          "07-tool-unknown-rejected",
-		Desc:          "-t is no longer accepted",
-		Args:          func(proj, home string) []string { return []string{"-N", "-C", proj, "-t", "nonexistent-tool"} },
-		NoRuntimeArgs: true,
-	},
-	{
-		Slug: "08-ssh-flag",
-		Desc: "-S/--ssh enables SSH agent forwarding",
-		Args: func(proj, home string) []string { return []string{"-N", "-s", "-S", "-C", proj} },
-	},
-	{
-		Slug:          "09-yolo-flag",
-		Desc:          "-y is no longer accepted",
-		Args:          func(proj, home string) []string { return []string{"-N", "-y", "-C", proj} },
-		NoRuntimeArgs: true,
-	},
-	{
-		Slug:  "10-mount-default-rw",
-		Desc:  "-m DIR mounts read-write by default",
-		Setup: func(t *testing.T, proj, home string) goldenExtras { mkExtraDir(t, proj); return goldenExtras{} },
-		Args: func(proj, home string) []string {
-			return []string{"-N", "-s", "-C", proj, "-m", filepath.Join(proj, "extra")}
-		},
-	},
-	{
-		Slug:  "11-mount-ro-suffix",
-		Desc:  "-m DIR:ro mounts read-only",
-		Setup: func(t *testing.T, proj, home string) goldenExtras { mkExtraDir(t, proj); return goldenExtras{} },
-		Args: func(proj, home string) []string {
-			return []string{"-N", "-s", "-C", proj, "-m", filepath.Join(proj, "extra") + ":ro"}
-		},
-	},
-	{
-		Slug:  "12-mount-rw-suffix",
-		Desc:  "-m DIR:rw forces read-write (overrides --readonly-extras)",
-		Setup: func(t *testing.T, proj, home string) goldenExtras { mkExtraDir(t, proj); return goldenExtras{} },
-		Args: func(proj, home string) []string {
-			return []string{"-N", "-s", "-C", proj, "--readonly-extras", "-m", filepath.Join(proj, "extra") + ":rw"}
-		},
-	},
-	{
-		Slug:  "13-mount-readonly-extras-default",
-		Desc:  "--readonly-extras flips the default for an unsuffixed extra mount",
-		Setup: func(t *testing.T, proj, home string) goldenExtras { mkExtraDir(t, proj); return goldenExtras{} },
-		Args: func(proj, home string) []string {
-			return []string{"-N", "-s", "-C", proj, "--readonly-extras", "-m", filepath.Join(proj, "extra")}
-		},
-	},
-	{
-		Slug: "14-port-publish",
-		Desc: "-p HOST:CONTAINER publishes a container port to the host",
-		Args: func(proj, home string) []string { return []string{"-N", "-s", "-C", proj, "-p", "8080:8080"} },
-	},
-	{
-		Slug: "15-host-forward",
-		Desc: "-H PORT forwards a host port into the container's localhost",
-		Args: func(proj, home string) []string { return []string{"-N", "-s", "-C", proj, "-H", "3845"} },
-	},
-	{
-		Slug: "16-dns-flag",
-		Desc: "--dns overrides the default resolver (repeatable)",
-		Args: func(proj, home string) []string {
-			return []string{"-N", "-s", "-C", proj, "--dns", "9.9.9.9", "--dns", "8.8.8.8"}
-		},
-	},
-	{
-		Slug: "17-dns-env-var",
-		Desc: "CLAUDE_DNS supplies a per-user resolver list when --dns is absent",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			return goldenExtras{Env: map[string]string{"CLAUDE_DNS": "9.9.9.9,8.8.8.8"}}
-		},
-		Args: func(proj, home string) []string { return []string{"-N", "-s", "-C", proj} },
-	},
-	{
-		Slug: "18-no-sandbox-flag",
-		Desc: "--no-sandbox disables the srt sandbox",
-		Args: func(proj, home string) []string { return []string{"-N", "-s", "-C", proj, "--no-sandbox"} },
-	},
-	{
-		Slug: "19-allow-host-flag",
-		Desc: "--allow-host permits one extra sandbox egress host",
-		Args: func(proj, home string) []string {
-			return []string{"-N", "-s", "-C", proj, "--allow-host", "example.com", "--allow-host", "example.org"}
-		},
-	},
-	{
-		Slug: "20-env-flag-basic",
-		Desc: "-e KEY=VALUE passes an env var to the tool process",
-		Args: func(proj, home string) []string {
-			return []string{"-N", "-s", "-C", proj, "-e", "API_URL=http://host.local:8080", "-e", "FOO=bar"}
-		},
-	},
-	{
-		Slug: "21-env-file-basic",
-		Desc: "project .claude-contained/env file supplies an env var",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			writeEnvFile(t, proj, "FOO=from-file\n")
-			return goldenExtras{}
-		},
-		Args: func(proj, home string) []string { return []string{"-N", "-s", "-C", proj} },
+		Slug:    "15-host-forward",
+		Desc:    "-H PORT forwards a host port into the container's localhost",
+		Args:    func(proj, home string) []string { return []string{"-N", "-s", "-C", proj, "-H", "3845"} },
+		Configs: []string{"apple-darwin", "docker-darwin", "docker-linux"},
+		Admit: "Apple emits the -H stderr notice (Profile.HostForwardNotice); docker-linux is " +
+			"where --add-host host-gateway is emitted; docker-darwin is the no-notice/no-gateway baseline.",
 	},
 	{
 		Slug: "22-env-flag-precedence-over-file",
@@ -308,160 +197,16 @@ var goldenCases = []goldenCase{
 		Args: func(proj, home string) []string {
 			return []string{"-N", "-s", "-C", proj, "-e", "FOO=from-flag"}
 		},
+		Configs: []string{"docker-darwin"},
+		Admit: "Ordered assembled contract: -e overrides the project env file in the container " +
+			"command. Platform-independent; parser owned by internal/env.",
 	},
 	{
-		Slug: "23-no-project-env-flag",
-		Desc: "--no-project-env ignores the project env file",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			writeEnvFile(t, proj, "FOO=from-file\n")
-			return goldenExtras{}
-		},
-		Args: func(proj, home string) []string { return []string{"-N", "-s", "-C", proj, "--no-project-env"} },
-	},
-	{
-		Slug:          "24-env-reserved-always-exact",
-		Desc:          "an always-reserved exact-name key (-e) is rejected before any runtime argument is built",
-		Args:          func(proj, home string) []string { return []string{"-N", "-s", "-C", proj, "-e", "STAY_ROOT=1"} },
-		NoRuntimeArgs: true,
-	},
-	{
-		Slug: "25-env-reserved-always-prefix",
-		Desc: "an always-reserved namespace prefix (-e HOST_*) is rejected before any runtime argument is built",
-		Args: func(proj, home string) []string {
-			return []string{"-N", "-s", "-C", proj, "-e", "HOST_ANYTHING=1"}
-		},
-		NoRuntimeArgs: true,
-	},
-	{
-		Slug: "26-env-reserved-file-only",
-		Desc: "a file-only-reserved key (LD_PRELOAD) from the project env file is rejected before any runtime argument is built; the same key via -e is fine",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			writeEnvFile(t, proj, "LD_PRELOAD=/tmp/evil.so\n")
-			return goldenExtras{}
-		},
-		Args:          func(proj, home string) []string { return []string{"-N", "-s", "-C", proj} },
-		NoRuntimeArgs: true,
-	},
-	{
-		Slug: "27-env-file-only-reserved-key-fine-via-flag",
-		Desc: "LD_PRELOAD is only reserved from the project env file; -e LD_PRELOAD=... is accepted",
-		Args: func(proj, home string) []string {
-			return []string{"-N", "-s", "-C", proj, "-e", "LD_PRELOAD=/tmp/lib.so"}
-		},
-	},
-	{
-		Slug:          "28-env-zellij-attach-refusal",
-		Desc:          "--env cannot be combined with --zellij --attach; rejected before any runtime argument is built",
-		Args:          func(proj, home string) []string { return []string{"--zellij", "--attach", "-e", "FOO=bar"} },
-		NoRuntimeArgs: true,
-	},
-	{
-		Slug: "29-share-skills",
-		Desc: "--share-skills mounts a shared skills directory read-only",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			mustWriteFile(t, filepath.Join(proj, "skills-src", "example.md"), "skill\n")
-			return goldenExtras{}
-		},
-		Args: func(proj, home string) []string {
-			return []string{"-N", "-s", "-C", proj, "--share-skills", filepath.Join(proj, "skills-src")}
-		},
-	},
-	{
-		Slug: "30-share-host-claude",
-		Desc: "--share-host-claude mounts host ~/.claude directly instead of the contained profile",
-		Args: func(proj, home string) []string { return []string{"-N", "-s", "-C", proj, "--share-host-claude"} },
-	},
-	{
-		Slug: "31-zellij-session-name-invalid",
-		Desc: "an invalid --session name is rejected before any runtime argument is built",
-		Args: func(proj, home string) []string {
-			return []string{"--zellij", "--session", "bad/name", "-N", "-s", "-C", proj}
-		},
-		NoRuntimeArgs: true,
-	},
-	{
-		Slug:          "32-readonly-project-dir-rejected",
-		Desc:          "a :ro suffix on the project directory itself is rejected before any runtime argument is built",
-		Args:          func(proj, home string) []string { return []string{"-N", "-s", "-C", proj + ":ro"} },
-		NoRuntimeArgs: true,
-	},
-	{
-		Slug: "33-zellij-fresh-start",
-		Desc: "--zellij starts a fresh named Zellij session",
-		Args: func(proj, home string) []string { return []string{"-N", "-s", "--zellij", "-C", proj} },
-	},
-	{
-		Slug: "34-zellij-session-explicit-name",
-		Desc: "--zellij --session NAME starts (or targets) a specifically named session",
-		Args: func(proj, home string) []string {
-			return []string{"-N", "-s", "--zellij", "--session", "my-review", "-C", proj}
-		},
-	},
-	{
-		Slug: "35-zellij-attach-single-session",
-		Desc: "--zellij --attach reconnects directly when exactly one Zellij session is live",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			return goldenExtras{
-				ListOutput: []string{"aic-live1"},
-				InspectEnv: map[string][]string{
-					"aic-live1": {"CLAUDE_CONTAINED_ZELLIJ=1", "CLAUDE_CONTAINED_ZELLIJ_SESSION=my-session"},
-				},
-			}
-		},
-		Args: func(proj, home string) []string { return []string{"-N", "--zellij", "--attach", "-C", proj} },
-	},
-	{
-		Slug: "36-zellij-attach-picker",
-		Desc: "--zellij --attach with multiple live sessions prompts a picker (scripted stdin choice)",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			return goldenExtras{
-				ListOutput: []string{"aic-live1", "aic-live2"},
-				InspectEnv: map[string][]string{
-					"aic-live1": {"CLAUDE_CONTAINED_ZELLIJ=1", "CLAUDE_CONTAINED_ZELLIJ_SESSION=alpha"},
-					"aic-live2": {"CLAUDE_CONTAINED_ZELLIJ=1", "CLAUDE_CONTAINED_ZELLIJ_SESSION=beta"},
-				},
-			}
-		},
-		Args:  func(proj, home string) []string { return []string{"-N", "--zellij", "--attach", "-C", proj} },
-		Stdin: "2\n",
-	},
-	{
-		Slug: "37-zellij-new-session-force",
-		Desc: "--zellij --new-session starts another session even while a different one is already live",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			return goldenExtras{
-				ListOutput: []string{"aic-other"},
-				InspectEnv: map[string][]string{
-					"aic-other": {"CLAUDE_CONTAINED_ZELLIJ=1", "CLAUDE_CONTAINED_ZELLIJ_SESSION=existing-session"},
-				},
-			}
-		},
-		Args: func(proj, home string) []string {
-			return []string{"-N", "-s", "--zellij", "--new-session", "--session", "my-new-session", "-C", proj}
-		},
-	},
-	{
-		Slug: "38-attach-by-name-hit",
-		Desc: "-a NAME attaches directly when a matching container is running",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			return goldenExtras{ListOutput: []string{"aic-myproject"}}
-		},
-		Args: func(proj, home string) []string { return []string{"-a", "myproject"} },
-	},
-	{
-		Slug:          "39-attach-by-name-miss",
-		Desc:          "-a NAME with no matching running container is refused rather than silently creating one",
-		Args:          func(proj, home string) []string { return []string{"-a", "nonexistent-project"} },
-		NoRuntimeArgs: true,
-	},
-	{
-		Slug: "40-attach-picker",
-		Desc: "bare -a with multiple running containers prompts a picker (scripted stdin choice)",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			return goldenExtras{ListOutput: []string{"aic-alpha", "aic-beta"}}
-		},
-		Args:  func(proj, home string) []string { return []string{"-a"} },
-		Stdin: "2\n",
+		Slug:    "33-zellij-fresh-start",
+		Desc:    "--zellij starts a fresh named Zellij session",
+		Args:    func(proj, home string) []string { return []string{"-N", "-s", "--zellij", "-C", proj} },
+		Configs: []string{"docker-darwin"},
+		Admit:   "Zellij session assembly wraps the container command; platform-independent.",
 	},
 	{
 		Slug: "41-worktree-lock-unlock-cycle",
@@ -473,61 +218,8 @@ var goldenCases = []goldenCase{
 		Args: func(proj, home string) []string {
 			return []string{"-N", "-s", "-w", "-W", "-C", activeWorktreePath(proj)}
 		},
-	},
-	{
-		Slug: "42-share-skills-symlinked-dir-nested",
-		Desc: "--share-skills mounts a symlinked directory target and its own nested symlink",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			mustMkdirAll(t, filepath.Join(proj, "skills-src"))
-			mustMkdirAll(t, filepath.Join(proj, "target-dir"))
-			mustWriteFile(t, filepath.Join(proj, "target-dir", "file.md"), "content\n")
-			mustMkdirAll(t, filepath.Join(proj, "nested-target"))
-			mustWriteFile(t, filepath.Join(proj, "nested-target", "file.md"), "nested\n")
-			mustSymlink(t, filepath.Join(proj, "target-dir"), filepath.Join(proj, "skills-src", "dir-link"))
-			mustSymlink(t, filepath.Join(proj, "nested-target"), filepath.Join(proj, "target-dir", "nested-link"))
-			return goldenExtras{}
-		},
-		Args: func(proj, home string) []string {
-			return []string{"-N", "-s", "-C", proj, "--share-skills", filepath.Join(proj, "skills-src")}
-		},
-	},
-	{
-		Slug: "43-share-skills-writable-mount-conflict",
-		Desc: "--share-skills conflicts with an overlapping writable extra mount",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			mustWriteFile(t, filepath.Join(proj, "skills-src", "example.md"), "skill\n")
-			return goldenExtras{}
-		},
-		Args: func(proj, home string) []string {
-			src := filepath.Join(proj, "skills-src")
-			return []string{"-N", "-s", "-C", proj, "-m", src + ":rw", "--share-skills", src}
-		},
-		NoRuntimeArgs: true,
-	},
-	{
-		Slug: "44-share-skills-readonly-mount-covers",
-		Desc: "a read-only extra mount covering an ancestor directory satisfies the shared skills self-mount",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			mustWriteFile(t, filepath.Join(proj, "skills-parent", "skills-src", "example.md"), "skill\n")
-			return goldenExtras{}
-		},
-		Args: func(proj, home string) []string {
-			parent := filepath.Join(proj, "skills-parent")
-			return []string{"-N", "-s", "-C", proj, "-m", parent + ":ro", "--share-skills", filepath.Join(parent, "skills-src")}
-		},
-	},
-	{
-		Slug: "45-share-skills-broken-symlink",
-		Desc: "a dangling symlink inside the shared skills directory is rejected",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			mustMkdirAll(t, filepath.Join(proj, "skills-src"))
-			mustSymlink(t, filepath.Join(proj, "skills-src", "does-not-exist"), filepath.Join(proj, "skills-src", "broken-link"))
-			return goldenExtras{}
-		},
-		Args: func(proj, home string) []string {
-			return []string{"-N", "-s", "-C", proj, "--share-skills", filepath.Join(proj, "skills-src")}
-		},
-		NoRuntimeArgs: true,
+		Configs: []string{"docker-darwin"},
+		Admit:   "Safety-critical filesystem lock lifecycle observed mid-run and post-run; platform-independent.",
 	},
 	{
 		Slug: "46-account-state-first-run",
@@ -537,48 +229,10 @@ var goldenCases = []goldenCase{
 			mustWriteFile(t, filepath.Join(home, ".gitconfig"), "[user]\n\tname = Golden Fixture\n")
 			return goldenExtras{}
 		},
-		Args: func(proj, home string) []string { return []string{"-N", "-s", "-C", proj} },
-	},
-	{
-		Slug: "47-account-state-already-migrated",
-		Desc: "a second run leaves an already-migrated ~/.claude.json symlink and its shared target completely alone",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			shared := filepath.Join(home, ".claude-contained", ".claude.json")
-			mustWriteFile(t, shared, `{"seeded":"account-state"}`+"\n")
-			mustSymlink(t, shared, filepath.Join(home, ".claude.json"))
-			return goldenExtras{}
-		},
-		Args: func(proj, home string) []string { return []string{"-N", "-s", "-C", proj} },
-	},
-	{
-		Slug: "48-account-state-dangling-symlink",
-		Desc: "a ~/.claude.json symlink with nothing behind it is removed and not replaced",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			mustSymlink(t, filepath.Join(home, ".claude-contained", ".claude.json"), filepath.Join(home, ".claude.json"))
-			return goldenExtras{}
-		},
-		Args: func(proj, home string) []string { return []string{"-N", "-s", "-C", proj} },
-	},
-	{
-		Slug: "49-node-modules-overlay",
-		Desc: "-N overlays container-specific node_modules for the project and read-write extra mounts, skips read-only ones, and announces only the overlays it had to create",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			platform := "linux-" + host.Probe().Arch
-			mustWriteFile(t, filepath.Join(proj, "package.json"), `{"name":"proj"}`+"\n")
-
-			overlay := filepath.Join(proj, "extra-rw", ".claude-contained", "node_modules-"+platform, "prebuilt")
-			mustMkdirAll(t, overlay)
-			mustWriteFile(t, filepath.Join(proj, "extra-rw", "package.json"), `{"name":"extra-rw"}`+"\n")
-			mustWriteFile(t, filepath.Join(overlay, "index.js"), "x\n")
-
-			mustMkdirAll(t, filepath.Join(proj, "extra-ro"))
-			mustWriteFile(t, filepath.Join(proj, "extra-ro", "package.json"), `{"name":"extra-ro"}`+"\n")
-			return goldenExtras{}
-		},
-		Args: func(proj, home string) []string {
-			return []string{"-N", "-s", "-C", proj, "-m", filepath.Join(proj, "extra-rw"), "-m", filepath.Join(proj, "extra-ro") + ":ro"}
-		},
-		HostGOOS: "darwin",
+		Args:    func(proj, home string) []string { return []string{"-N", "-s", "-C", proj} },
+		Configs: []string{"docker-darwin"},
+		Admit: "Safety-critical account-state migration (regular file -> shared dir behind symlink " +
+			"+ gitconfig copy); platform-independent.",
 	},
 	{
 		Slug: "50-placeholder-cleanup-mounted-roots",
@@ -606,106 +260,10 @@ var goldenCases = []goldenCase{
 				"-m", filepath.Join(proj, "tracked-repo"),
 			}
 		},
+		Configs: []string{"docker-darwin"},
+		Admit: "Safety-critical placeholder sweep across project + every extra mount, sparing " +
+			"tracked/non-empty files; platform-independent.",
 	},
-	{
-		Slug: "51-stat-semantics-regular-file-guards",
-		Desc: "a directory named ~/.gitconfig or package.json is not a regular file, so neither the git-config copy nor the node_modules overlay fires",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			mustMkdirAll(t, filepath.Join(home, ".gitconfig"))
-			mustMkdirAll(t, filepath.Join(proj, "package.json"))
-			return goldenExtras{}
-		},
-		Args: func(proj, home string) []string { return []string{"-N", "-s", "-C", proj} },
-	},
-	{
-		Slug: "52-worktree-lock-offer-accepted",
-		Desc: "the interactive worktree auto-lock offer, accepted: the prune-risk line and the Auto-locked count appear on stdout, and the hidden worktree is locked while the container runs",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			_, _, lockFile := worktreeGoldenFixture(t, proj)
-			return goldenExtras{Snapshot: []string{lockFile}}
-		},
-		Args:  func(proj, home string) []string { return []string{"-N", "-s", "-w", "-C", activeWorktreePath(proj)} },
-		Stdin: "Y\n",
-	},
-	{
-		Slug: "53-worktree-lock-offer-declined",
-		Desc: "the interactive worktree auto-lock offer, declined: the prune-risk line still appears on stdout, but no lock file is ever written and no Auto-locked line appears",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			_, _, lockFile := worktreeGoldenFixture(t, proj)
-			return goldenExtras{Snapshot: []string{lockFile}}
-		},
-		Args:  func(proj, home string) []string { return []string{"-N", "-s", "-w", "-C", activeWorktreePath(proj)} },
-		Stdin: "n\n",
-	},
-	{
-		Slug: "54-worktree-user-lock-untouched",
-		Desc: "a worktree the user locked by hand is left completely untouched by the auto-lock offer, which only picks up the other, truly-hidden worktree in the same repository",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			mainRepo, _, lockFile := worktreeGoldenFixture(t, proj)
-			userWT := filepath.Join(proj, "wt-user-locked")
-			runGitTest(t, mainRepo, "worktree", "add", "-q", "-b", "user-branch", userWT)
-			runGitTest(t, mainRepo, "worktree", "lock", "--reason", "mine", userWT)
-			return goldenExtras{Snapshot: []string{lockFile}}
-		},
-		Args: func(proj, home string) []string {
-			return []string{"-N", "-s", "-w", "-W", "-C", activeWorktreePath(proj)}
-		},
-	},
-	{
-		Slug: "55-worktree-existing-owner-survives",
-		Desc: "a worktree lock this run shares with another container's owner token keeps that owner after our own release -- only the last owner leaving actually unlocks",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			mainRepo, hiddenWT, lockFile := worktreeGoldenFixture(t, proj)
-			runGitTest(t, mainRepo, "worktree", "lock", "--reason", "cc-autolocked-by: aic-other-1111", hiddenWT)
-			return goldenExtras{Snapshot: []string{lockFile}}
-		},
-		Args: func(proj, home string) []string {
-			return []string{"-N", "-s", "-w", "-W", "-C", activeWorktreePath(proj)}
-		},
-	},
-	{
-		Slug: "56-worktree-stale-mutex-reclaimed",
-		Desc: "a worktree auto-lock mutex left behind by a dead launcher is reclaimed rather than timed out on: the reclaim note appears on stderr, the hidden worktree is still locked, and the mutex directory is gone afterward",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			mainRepo, _, lockFile := worktreeGoldenFixture(t, proj)
-			dead := reliablyDeadPID(t)
-			mutexDir := filepath.Join(mainRepo, ".git", "claude-contained-worktree-locks.lock")
-			mustMkdirAll(t, mutexDir)
-			mustWriteFile(t, filepath.Join(mutexDir, "owner"), fmt.Sprintf("%d %d\n", dead, time.Now().Unix()))
-			return goldenExtras{Snapshot: []string{lockFile}}
-		},
-		Args: func(proj, home string) []string {
-			return []string{"-N", "-s", "-w", "-W", "-C", activeWorktreePath(proj)}
-		},
-	},
-	{
-		Slug: "57-rebuild-tools",
-		Desc: "--rebuild refreshes the tool layers and exits without a session",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			bc := filepath.Join(proj, "buildctx")
-			mustWriteFile(t, filepath.Join(bc, "Dockerfile"), "FROM scratch\n")
-			return goldenExtras{Env: map[string]string{"CLAUDE_CONTAINED_BUILD_CONTEXT": bc}}
-		},
-		Args: func(proj, home string) []string { return []string{"-R"} },
-	},
-	{
-		Slug: "58-rebuild-full",
-		Desc: "--rebuild=full pulls the base image and rebuilds without cache, then exits without a session",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			bc := filepath.Join(proj, "buildctx")
-			mustWriteFile(t, filepath.Join(bc, "Dockerfile"), "FROM scratch\n")
-			return goldenExtras{Env: map[string]string{"CLAUDE_CONTAINED_BUILD_CONTEXT": bc}}
-		},
-		Args: func(proj, home string) []string { return []string{"--rebuild=full"} },
-	},
-	{
-		Slug:          "59-rebuild-unknown-mode",
-		Desc:          "an unknown rebuild mode is rejected before any build runs",
-		Args:          func(proj, home string) []string { return []string{"-R", "nonsense"} },
-		NoRuntimeArgs: true,
-	},
-	// 60-64 are the tooling layer. Appended rather than interleaved so no
-	// existing slug moves and no existing golden file is renamed.
 	{
 		Slug: "60-layer-build-confirmed",
 		Desc: "a checked-in tooling layer that has not been built is confirmed, built with the base image's resolved ID as BASE_IMAGE, and run in place of the base image",
@@ -718,62 +276,9 @@ var goldenCases = []goldenCase{
 		Args:     func(proj, home string) []string { return []string{"-N", "-s", "-C", proj} },
 		Stdin:    "y\n",
 		Terminal: true,
-	},
-	{
-		Slug: "61-layer-already-built",
-		Desc: "a derived image that already carries the current tag is run with no prompt and no build",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			id := writeGoldenLayer(t, proj)
-			return goldenExtras{ImageIDs: map[string]string{
-				plan.Image: goldenBaseImageID,
-				id.Tag:     "sha256:derived00",
-			}}
-		},
-		Args: func(proj, home string) []string { return []string{"-N", "-s", "-C", proj} },
-	},
-	{
-		Slug: "62-layer-no-terminal-fails-closed",
-		Desc: "with an unbuilt tooling layer and no terminal to confirm on, the launcher fails closed and names both --build-layer and --no-layer",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			writeGoldenLayer(t, proj)
-			return goldenExtras{ImageIDs: map[string]string{plan.Image: goldenBaseImageID}}
-		},
-		Args:          func(proj, home string) []string { return []string{"-N", "-s", "-C", proj} },
-		NoRuntimeArgs: true,
-	},
-	{
-		Slug: "63-layer-no-layer-flag",
-		Desc: "--no-layer runs the base image even with a tooling layer checked in, without probing the runtime for any image",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			writeGoldenLayer(t, proj)
-			return goldenExtras{}
-		},
-		Args: func(proj, home string) []string { return []string{"-N", "-s", "--no-layer", "-C", proj} },
-	},
-	{
-		Slug: "64-layer-named-dir-without-dockerfile",
-		Desc: "--layer naming a directory that holds no Dockerfile is a usage error rather than a silent fall-through to the base image",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			mustMkdirAll(t, filepath.Join(proj, "tools"))
-			return goldenExtras{}
-		},
-		Args: func(proj, home string) []string {
-			return []string{"-N", "-s", "-C", proj, "--layer", filepath.Join(proj, "tools")}
-		},
-		NoRuntimeArgs: true,
-	},
-	{
-		// The env var is the second entry point to the --share-host-claude
-		// behavior proven by case 30: with no flag, CLAUDE_CONTAINED_SHARE_HOST_CLAUDE=1
-		// must produce the same direct host ~/.claude mount (skipping the
-		// contained profile and its nested resource mounts). Case 30 only covers
-		// the flag arm, so this pins the env path end-to-end.
-		Slug: "65-share-host-claude-via-env",
-		Desc: "CLAUDE_CONTAINED_SHARE_HOST_CLAUDE=1 mounts host ~/.claude directly, matching --share-host-claude",
-		Setup: func(t *testing.T, proj, home string) goldenExtras {
-			return goldenExtras{Env: map[string]string{"CLAUDE_CONTAINED_SHARE_HOST_CLAUDE": "1"}}
-		},
-		Args: func(proj, home string) []string { return []string{"-N", "-s", "-C", proj} },
+		Configs:  []string{"apple-darwin", "docker-darwin"},
+		Admit: "Cross-boundary contract: host layer resolve -> runtime build with resolved " +
+			"BASE_IMAGE -> run derived image; build/tag argv differs Apple vs Docker.",
 	},
 	{
 		Slug: "66-attach-by-name-with-command",
@@ -781,7 +286,9 @@ var goldenCases = []goldenCase{
 		Setup: func(t *testing.T, proj, home string) goldenExtras {
 			return goldenExtras{ListOutput: []string{"aic-myproject"}}
 		},
-		Args: func(proj, home string) []string { return []string{"-a", "myproject", "--", "npm", "test"} },
+		Args:    func(proj, home string) []string { return []string{"-a", "myproject", "--", "npm", "test"} },
+		Configs: []string{"apple-darwin", "docker-darwin"},
+		Admit:   "Attach exec argv assembly differs Apple vs Docker; end-to-end attach + command operand.",
 	},
 	{
 		// #39: a commands.json entry matching the command's literal first
@@ -801,6 +308,9 @@ var goldenCases = []goldenCase{
 		Args: func(proj, home string) []string {
 			return []string{"-N", "-C", proj, "-m", filepath.Join(proj, "extra"), "claude", "--model", "sonnet"}
 		},
+		Configs: []string{"docker-darwin"},
+		Admit: "Assembled contract: commands.json appends mountFlag at the end of the container " +
+			"command, once per extra mount; platform-independent.",
 	},
 	{
 		Slug: "68-share-skills-external-target-root",
@@ -817,5 +327,8 @@ var goldenCases = []goldenCase{
 		Args: func(proj, home string) []string {
 			return []string{"-N", "-s", "-C", proj, "--share-skills", filepath.Join(filepath.Dir(proj), "shared-repo", "skills")}
 		},
+		Configs: []string{"docker-darwin"},
+		Admit: "Assembled contract: external absolute-symlink target yields a safe common-root " +
+			"read-only mount at path parity; platform-independent.",
 	},
 }
