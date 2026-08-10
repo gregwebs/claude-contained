@@ -296,6 +296,7 @@ func zellijMarkedEnv() []string {
 		"HOST_UID=1234",
 		"CLAUDE_CONTAINED_ZELLIJ=1",
 		"CLAUDE_CONTAINED_ZELLIJ_SESSION=cc-test",
+		"CLAUDE_CONTAINED_ZELLIJ_ROOT=/p/.claude-contained/zellij",
 	}
 }
 
@@ -320,8 +321,8 @@ func TestSrtSettingsZellijLiteralPathsWritable(t *testing.T) {
 	home := homeWithProfile(t)
 	_, out := genSRT(t, home, zellijMarkedEnv()...)
 	assertWritable(t, decodePolicy(t, out),
-		home+"/.claude-contained/zellij/data",
-		home+"/.claude-contained/zellij/cache/org/Zellij-Contributors/Zellij",
+		"/p/.claude-contained/zellij/data",
+		"/p/.claude-contained/zellij/cache/org/Zellij-Contributors/Zellij",
 		"/tmp/claude-contained-zellij-runtime",
 		"/tmp/claude-contained-zellij-runtime/zellij/contract_version_1",
 		"/tmp/claude-contained-zellij-runtime/zellij/contract_version_1/cc-test",

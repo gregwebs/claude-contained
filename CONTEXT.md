@@ -68,7 +68,7 @@ The optional `<project-dir>/.claude-contained/srt-settings.json` file that suppl
 _Avoid_: local sandbox config, project sandbox settings
 
 **Zellij session store**:
-The host-backed Zellij state reserved for contained runs, used to resurrect named terminal workspaces after their container processes exit.
+The project-local host-backed Zellij state under `<project-dir>/.claude-contained/zellij/`, used to resurrect named terminal workspaces after their container processes exit. It is generated runtime state and the writable exception beneath the otherwise read-only project `.claude-contained/` directory.
 _Avoid_: Zellij config, Zellij cache
 
 **Diagnostic record**:

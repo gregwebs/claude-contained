@@ -92,12 +92,14 @@ func Build(cfg cli.Config, h host.State, f Facts, prof runtime.Profile, ans Answ
 		MkdirAll{paths.VibeDir},
 	)
 
-	// The Zellij session store persists across container lifetimes; the runtime
+	// The project-local Zellij session store persists across container
+	// lifetimes; the runtime
 	// socket tree does not, and is pinned inside the container by zellij-run's
-	// XDG_RUNTIME_DIR (image/zellij-run.sh:61,79). Creating these on the host is
-	// what makes a session survive its container (claude-contained:1522-1524).
+	// XDG_RUNTIME_DIR. Creating these on the host is what makes a session survive
+	// its container.
+	zellijRoot := ""
 	if f.ZellijSession != "" {
-		zellijRoot := filepath.Join(paths.ClaudeContained, "zellij")
+		zellijRoot = filepath.Join(f.ProjectDir, ".claude-contained", "zellij")
 		p.Steps = append(p.Steps,
 			MkdirAll{filepath.Join(zellijRoot, "data")},
 			MkdirAll{filepath.Join(zellijRoot, "cache")},
@@ -193,6 +195,14 @@ func Build(cfg cli.Config, h host.State, f Facts, prof runtime.Profile, ans Answ
 		dir := filepath.Join(f.ProjectDir, ".claude-contained")
 		add(runtime.MountArg{Src: dir, Dst: dir, ReadOnly: true})
 	}
+	// Zellij is runtime state, not host-authored project configuration. Give its
+	// store a narrower read-write mount after the read-only .claude-contained
+	// mount so both runtimes apply the intended most-specific access mode. This
+	// mount is emitted for every Zellij launch so the exception is explicit even
+	// when .claude-contained did not exist at probe time.
+	if zellijRoot != "" {
+		add(runtime.MountArg{Src: zellijRoot, Dst: zellijRoot})
+	}
 
 	// The tool process environment, already resolved: command line, then the
 	// project env file, then the launcher's built-ins, each key exactly once.
@@ -269,6 +279,7 @@ func Build(cfg cli.Config, h host.State, f Facts, prof runtime.Profile, ans Answ
 		add(
 			runtime.EnvArg{Key: zellij.MarkerEnv, Value: "1"},
 			runtime.EnvArg{Key: zellij.SessionEnv, Value: f.ZellijSession},
+			runtime.EnvArg{Key: zellij.RootEnv, Value: zellijRoot},
 			runtime.LabelArg{Key: zellij.LabelMarker, Value: "1"},
 			runtime.LabelArg{Key: zellij.LabelSession, Value: f.ZellijSession},
 		)

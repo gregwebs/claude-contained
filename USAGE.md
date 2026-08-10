@@ -318,7 +318,9 @@ Attach behavior is strict:
 - `--zellij --attach --shell` is invalid because attach reconnects to the existing workspace as-is.
 - `--env` is invalid with `--zellij --attach`; an existing pane keeps the environment it was created with.
 
-Zellij cache and data persist under `~/.claude-contained/zellij/`. Runtime sockets stay inside the container under `/tmp`, so stale host sockets are not reused across container lifetimes. Detaching leaves the container running until that session is killed.
+Zellij cache and data persist per project under `<project-dir>/.claude-contained/zellij/`. The launcher mounts only that generated-state subtree read-write; the project env file, tooling layer, and other configuration under `.claude-contained/` remain read-only inside the container. Add `/.claude-contained/zellij/` to the project's ignore rules if the project is version-controlled. Runtime sockets stay inside the container under `/tmp`, so stale host sockets are not reused across container lifetimes. Detaching leaves the container running until that session is killed.
+
+The former user-global store at `~/.claude-contained/zellij/` is not migrated or deleted automatically. After upgrading, rebuild the base image once with `claude-contained --rebuild=full`; an older image does not know the project-local store path. If saved workspace resurrection matters, copy the old store into the applicable project before removing it from the home directory.
 
 If the launcher reports `zellij-run: command not found`, the launcher is newer than the local image. Run a full rebuild once and retry.
 

@@ -31,6 +31,8 @@ type=bind,src=<HOME>/.gemini,dst=<HOME>/.gemini
 type=bind,src=<HOME>/.vibe,dst=<HOME>/.vibe
 --mount
 type=bind,src=<PROJ>,dst=<PROJ>
+--mount
+type=bind,src=<PROJ>/.claude-contained/zellij,dst=<PROJ>/.claude-contained/zellij
 -e
 TZ=UTC
 -e
@@ -49,6 +51,8 @@ GIT_PROTECT_DIRS=<PROJ>
 CLAUDE_CONTAINED_ZELLIJ=1
 -e
 CLAUDE_CONTAINED_ZELLIJ_SESSION=cc-project-<PHASH>
+-e
+CLAUDE_CONTAINED_ZELLIJ_ROOT=<PROJ>/.claude-contained/zellij
 --label
 claude-contained.zellij=1
 --label
@@ -82,9 +86,6 @@ HOME/.claude-contained/claude/agents dir 755
 HOME/.claude-contained/claude/commands dir 755
 HOME/.claude-contained/claude/plugins dir 755
 HOME/.claude-contained/claude/skills dir 755
-HOME/.claude-contained/zellij dir 755
-HOME/.claude-contained/zellij/cache dir 755
-HOME/.claude-contained/zellij/data dir 755
 HOME/.claude/agents dir 755
 HOME/.claude/commands dir 755
 HOME/.claude/plugins dir 755
@@ -94,3 +95,7 @@ HOME/.copilot dir 755
 HOME/.gemini dir 755
 HOME/.vibe dir 755
 PROJ dir 755
+PROJ/.claude-contained dir 755
+PROJ/.claude-contained/zellij dir 755
+PROJ/.claude-contained/zellij/cache dir 755
+PROJ/.claude-contained/zellij/data dir 755

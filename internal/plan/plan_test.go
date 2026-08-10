@@ -513,6 +513,30 @@ func TestBuildOmitsProjectClaudeContainedMountWhenAbsent(t *testing.T) {
 	}
 }
 
+func TestZellijStoreRemountsReadWriteInsideProjectConfig(t *testing.T) {
+	facts := Facts{
+		ProjectDir:                   "/p",
+		ProjectClaudeContainedExists: true,
+		ZellijSession:                "review",
+	}
+
+	program, err := Build(cli.Config{}, testHost(), facts, appleProfile(), Answers{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	readonlyConfig := runtime.MountArg{Src: "/p/.claude-contained", Dst: "/p/.claude-contained", ReadOnly: true}
+	writableStore := runtime.MountArg{Src: "/p/.claude-contained/zellij", Dst: "/p/.claude-contained/zellij"}
+	configIdx := argIndex(program.Run.Args, readonlyConfig)
+	storeIdx := argIndex(program.Run.Args, writableStore)
+	if configIdx < 0 || storeIdx < 0 {
+		t.Fatalf("missing nested mounts: config=%d store=%d args=%#v", configIdx, storeIdx, program.Run.Args)
+	}
+	if storeIdx != configIdx+1 {
+		t.Errorf("writable Zellij store must immediately follow read-only project config: config=%d store=%d", configIdx, storeIdx)
+	}
+}
+
 func indexOfArg(args []runtime.Arg, want runtime.Arg) int {
 	for i, a := range args {
 		if a == want {
@@ -680,8 +704,9 @@ func TestZellijProgram(t *testing.T) {
 	// (a) the mkdirs, positioned after the generic shared-state directory and
 	// before the extension-resource mkdirs.
 	stateIdx := stepIndex(program.Steps, MkdirAll{"/home/dev/.claude-contained"})
-	dataIdx := stepIndex(program.Steps, MkdirAll{"/home/dev/.claude-contained/zellij/data"})
-	cacheIdx := stepIndex(program.Steps, MkdirAll{"/home/dev/.claude-contained/zellij/cache"})
+	zellijRoot := "/home/dev/work/app/.claude-contained/zellij"
+	dataIdx := stepIndex(program.Steps, MkdirAll{zellijRoot + "/data"})
+	cacheIdx := stepIndex(program.Steps, MkdirAll{zellijRoot + "/cache"})
 	extIdx := stepIndex(program.Steps, MkdirAll{"/home/dev/.claude/skills"})
 	if stateIdx < 0 || dataIdx < 0 || cacheIdx < 0 || extIdx < 0 {
 		t.Fatalf("missing steps: state=%d data=%d cache=%d ext=%d", stateIdx, dataIdx, cacheIdx, extIdx)
@@ -690,17 +715,23 @@ func TestZellijProgram(t *testing.T) {
 		t.Errorf("mkdir order wrong: state=%d data=%d cache=%d ext=%d", stateIdx, dataIdx, cacheIdx, extIdx)
 	}
 
-	// (b) the env markers, in order, after SRT_ALLOW_HOSTS (there is none in
+	// (b) the env markers and project-local root, in order, after SRT_ALLOW_HOSTS (there is none in
 	// this fixture, so just before SSHArg -- which is absent too, so before
 	// HostGatewayArg) and (c) the label pair.
 	markerIdx := argIndex(program.Run.Args, runtime.EnvArg{Key: zellij.MarkerEnv, Value: "1"})
 	sessionIdx := argIndex(program.Run.Args, runtime.EnvArg{Key: zellij.SessionEnv, Value: "review"})
+	rootIdx := argIndex(program.Run.Args, runtime.EnvArg{Key: zellij.RootEnv, Value: zellijRoot})
 	gatewayIdx := argIndex(program.Run.Args, runtime.HostGatewayArg{})
-	if markerIdx < 0 || sessionIdx < 0 || gatewayIdx < 0 {
-		t.Fatalf("missing args: marker=%d session=%d gateway=%d", markerIdx, sessionIdx, gatewayIdx)
+	if markerIdx < 0 || sessionIdx < 0 || rootIdx < 0 || gatewayIdx < 0 {
+		t.Fatalf("missing args: marker=%d session=%d root=%d gateway=%d", markerIdx, sessionIdx, rootIdx, gatewayIdx)
 	}
-	if markerIdx >= sessionIdx || sessionIdx >= gatewayIdx {
-		t.Errorf("env marker order wrong: marker=%d session=%d gateway=%d", markerIdx, sessionIdx, gatewayIdx)
+	if markerIdx >= sessionIdx || sessionIdx >= rootIdx || rootIdx >= gatewayIdx {
+		t.Errorf("env marker order wrong: marker=%d session=%d root=%d gateway=%d", markerIdx, sessionIdx, rootIdx, gatewayIdx)
+	}
+
+	writableStore := runtime.MountArg{Src: zellijRoot, Dst: zellijRoot}
+	if idx := argIndex(program.Run.Args, writableStore); idx < 0 {
+		t.Errorf("project-local Zellij store mount missing: %#v", program.Run.Args)
 	}
 
 	labelMarkerIdx := argIndex(program.Run.Args, runtime.LabelArg{Key: zellij.LabelMarker, Value: "1"})
@@ -708,9 +739,9 @@ func TestZellijProgram(t *testing.T) {
 	if labelMarkerIdx < 0 || labelSessionIdx < 0 {
 		t.Fatalf("missing label args: marker=%d session=%d", labelMarkerIdx, labelSessionIdx)
 	}
-	if labelMarkerIdx != sessionIdx+1 || labelSessionIdx != labelMarkerIdx+1 {
-		t.Errorf("labels not immediately after env markers: marker=%d session=%d labelMarker=%d labelSession=%d",
-			markerIdx, sessionIdx, labelMarkerIdx, labelSessionIdx)
+	if labelMarkerIdx != rootIdx+1 || labelSessionIdx != labelMarkerIdx+1 {
+		t.Errorf("labels not immediately after env markers: marker=%d session=%d root=%d labelMarker=%d labelSession=%d",
+			markerIdx, sessionIdx, rootIdx, labelMarkerIdx, labelSessionIdx)
 	}
 
 	// (d) the container command wrapper.
@@ -754,10 +785,10 @@ func TestNoZellijArgsWithoutSession(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 
-	if stepIndex(program.Steps, MkdirAll{"/home/dev/.claude-contained/zellij/data"}) >= 0 {
+	if stepIndex(program.Steps, MkdirAll{"/home/dev/work/app/.claude-contained/zellij/data"}) >= 0 {
 		t.Error("zellij data mkdir present without a session")
 	}
-	if stepIndex(program.Steps, MkdirAll{"/home/dev/.claude-contained/zellij/cache"}) >= 0 {
+	if stepIndex(program.Steps, MkdirAll{"/home/dev/work/app/.claude-contained/zellij/cache"}) >= 0 {
 		t.Error("zellij cache mkdir present without a session")
 	}
 	if envValue(program.Run.Args, zellij.MarkerEnv) != "" {
@@ -765,6 +796,9 @@ func TestNoZellijArgsWithoutSession(t *testing.T) {
 	}
 	if envValue(program.Run.Args, zellij.SessionEnv) != "" {
 		t.Error("Zellij session env present without a session")
+	}
+	if envValue(program.Run.Args, zellij.RootEnv) != "" {
+		t.Error("Zellij root env present without a session")
 	}
 	for _, a := range program.Run.Args {
 		if _, ok := a.(runtime.LabelArg); ok {

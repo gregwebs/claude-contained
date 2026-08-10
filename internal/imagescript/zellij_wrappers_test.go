@@ -93,8 +93,8 @@ func newZellijFixture(t *testing.T, liveness string) *zellijFixture {
 		home:       home,
 		session:    session,
 		launchPath: stubs.Dir + string(os.PathListSeparator) + os.Getenv("PATH"),
-		cacheDir:   filepath.Join(home, ".claude-contained", "zellij", "cache"),
-		dataDir:    filepath.Join(home, ".claude-contained", "zellij", "data"),
+		cacheDir:   filepath.Join(home, "project", ".claude-contained", "zellij", "cache"),
+		dataDir:    filepath.Join(home, "project", ".claude-contained", "zellij", "data"),
 		layoutFile: filepath.Join(zellijRuntimeDir, "layouts", session+".kdl"),
 		logDir:     filepath.Join("/tmp", "zellij-"+fakeUID, "zellij-log"),
 	}
@@ -128,9 +128,13 @@ func (f *zellijFixture) runRun(t *testing.T) scriptResult {
 	return runScript(t, scriptOpts{
 		Script: scriptPath(t, "zellij-run.sh"),
 		Args:   []string{f.session, "--", "echo", "hello world"},
-		Env:    []string{"SHELL=/bin/bash", "CLAUDE_CONTAINED_ZELLIJ_WAIT_SECONDS=0"},
-		Home:   f.home,
-		Stubs:  f.stubs,
+		Env: []string{
+			"SHELL=/bin/bash",
+			"CLAUDE_CONTAINED_ZELLIJ_WAIT_SECONDS=0",
+			"CLAUDE_CONTAINED_ZELLIJ_ROOT=" + filepath.Dir(f.cacheDir),
+		},
+		Home:  f.home,
+		Stubs: f.stubs,
 	})
 }
 
@@ -272,6 +276,7 @@ func TestZellijAttachRefusesExitedSession(t *testing.T) {
 	res := runScript(t, scriptOpts{
 		Script: scriptPath(t, "zellij-attach.sh"),
 		Args:   []string{f.session},
+		Env:    []string{"CLAUDE_CONTAINED_ZELLIJ_ROOT=" + filepath.Dir(f.cacheDir)},
 		Home:   f.home,
 		Stubs:  f.stubs,
 	})
