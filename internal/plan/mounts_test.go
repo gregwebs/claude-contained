@@ -149,3 +149,90 @@ func TestAddSharedNotCoveredWhenCoverNotAllowed(t *testing.T) {
 		t.Fatal("addShared returned nil mount, want a mount emitted since allowCover was false")
 	}
 }
+
+func TestMountRegistryPathParityCoverage(t *testing.T) {
+	tests := []struct {
+		name    string
+		project string
+		path    string
+		seed    func(*mountRegistry)
+		want    bool
+	}{
+		{name: "equal writable parity user mount", project: "/share", path: "/share", want: true},
+		{name: "descendant writable parity user mount", project: "/share", path: "/share/nested", want: true},
+		{name: "unrelated sibling", project: "/share", path: "/other", want: false},
+		{
+			name:    "non-parity user mount does not cover host path",
+			project: "/project",
+			path:    "/share/nested",
+			seed:    func(r *mountRegistry) { r.addUser("/other", "/share", "ro") },
+			want:    false,
+		},
+		{
+			name:    "readonly shared mount",
+			project: "/project",
+			path:    "/share/nested",
+			seed:    func(r *mountRegistry) { _, _, _ = r.addShared("/share", "/share", true, "shared skills source") },
+			want:    true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r := newMountRegistry(tt.project)
+			if tt.seed != nil {
+				tt.seed(r)
+			}
+			if got := r.pathParityCovers(tt.path); got != tt.want {
+				t.Errorf("pathParityCovers(%q) = %t, want %t", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReadonlyCoversRequiresReadonlyPathParity(t *testing.T) {
+	tests := []struct {
+		name   string
+		record mountRecord
+		want   bool
+	}{
+		{name: "readonly parity", record: mountRecord{src: "/share", dst: "/share", mode: "ro"}, want: true},
+		{name: "writable parity", record: mountRecord{src: "/share", dst: "/share", mode: "rw"}},
+		{name: "readonly non-parity", record: mountRecord{src: "/other", dst: "/share", mode: "ro"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := readonlyCovers([]mountRecord{tt.record}, "/share/nested"); got != tt.want {
+				t.Errorf("readonlyCovers() = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMountRegistryWouldShadowExisting(t *testing.T) {
+	r := newMountRegistry("/project")
+	r.addUser("/source", "/mount/nested", "ro")
+	if !r.wouldShadowExisting("/mount") {
+		t.Fatal("parent mount must be rejected when it would shadow a nested destination")
+	}
+	if !r.wouldShadowExisting("/mount/nested") {
+		t.Fatal("equal destination must be rejected when it would shadow an existing mount")
+	}
+	if r.wouldShadowExisting("/unrelated") {
+		t.Fatal("unrelated mount must not be treated as shadowing")
+	}
+}
+
+func TestMountRegistryDetectsReadonlyNonParityAncestor(t *testing.T) {
+	r := newMountRegistry("/project")
+	r.addUser("/elsewhere/skills", "/home/u/.agents/skills", "ro")
+	if !r.isNestedUnderReadonlyNonParityDestination("/home/u/.agents/skills/repo") {
+		t.Fatal("nested target root must be rejected beneath a read-only non-parity destination")
+	}
+	if r.isNestedUnderReadonlyNonParityDestination("/home/u/.agents/other") {
+		t.Fatal("sibling must not be treated as nested beneath the non-parity destination")
+	}
+	r.addUser("/home/u/.agents", "/home/u/.agents", "ro")
+	if r.isNestedUnderReadonlyNonParityDestination("/home/u/.agents/other") {
+		t.Fatal("path-parity mounts must not trigger the non-parity safety fallback")
+	}
+}

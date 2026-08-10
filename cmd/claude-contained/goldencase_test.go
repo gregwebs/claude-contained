@@ -802,4 +802,20 @@ var goldenCases = []goldenCase{
 			return []string{"-N", "-C", proj, "-m", filepath.Join(proj, "extra"), "claude", "--model", "sonnet"}
 		},
 	},
+	{
+		Slug: "68-share-skills-external-target-root",
+		Desc: "--share-skills mounts a safe common root for an external absolute directory symlink target",
+		Setup: func(t *testing.T, proj, home string) goldenExtras {
+			sharedRepo := filepath.Join(filepath.Dir(proj), "shared-repo")
+			target := filepath.Join(sharedRepo, ".agents", "skills", "implement")
+			mustWriteFile(t, filepath.Join(target, "SKILL.md"), "skill\n")
+			mustWriteFile(t, filepath.Join(sharedRepo, "sibling-proof.txt"), "sibling visibility proof\n")
+			mustMkdirAll(t, filepath.Join(sharedRepo, "skills"))
+			mustSymlink(t, target, filepath.Join(sharedRepo, "skills", "implement"))
+			return goldenExtras{}
+		},
+		Args: func(proj, home string) []string {
+			return []string{"-N", "-s", "-C", proj, "--share-skills", filepath.Join(filepath.Dir(proj), "shared-repo", "skills")}
+		},
+	},
 }

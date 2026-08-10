@@ -59,7 +59,11 @@ Behavior:
     launcher state (~/.claude-contained) are bind-mounted.
   - --share-skills DIR mounts DIR read-only as each tool's skills directory.
     DIR itself and symlink targets under it are also mounted read-only at
-    path-parity locations so absolute symlinks keep resolving. For Codex,
+    path-parity locations so absolute symlinks keep resolving. When needed,
+    the launcher mounts their safe common directory read-only at path parity
+    for the parent hierarchy (which can expose sibling files), never broadening
+    to the filesystem root; it retains per-target mounts when no safe common
+    root exists. For Codex,
     ~/.codex/skills/.system is mounted back read-only over DIR/.system so
     built-in skills remain visible.
   - SSH agent forwarding is disabled by default; use --ssh to enable (for git push).
@@ -93,7 +97,8 @@ Behavior:
     existing container, and --env is refused with --zellij --attach, where the
     pane keeps the environment it was created with.
   - Egress is sandboxed with srt: only allowlisted hosts are reachable. Edit
-    ~/.claude-contained/srt-settings.json for a persistent policy, --allow-host for
+    ~/.claude-contained/srt-settings.json and/or the selected project's
+    .claude-contained/srt-settings.json for a persistent policy, --allow-host for
     one run, or --no-sandbox to turn it off while debugging.
   - Git worktrees are detected; main repository's .git directory is mounted for full git access.
   - Linked worktrees hidden from the container can be auto-locked while the container runs.
