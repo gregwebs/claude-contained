@@ -4,7 +4,7 @@ package main
 // runtime stubs, the clearEnv helper, the filesystem manifest
 // walk and the textual normalizer that golden_test.go's driver
 // composes into one pipeline per case. See golden_test.go for the pipeline
-// itself and goldencase_test.go for the 59-case table.
+// itself and goldencase_test.go for the curated survivor table.
 
 import (
 	"fmt"

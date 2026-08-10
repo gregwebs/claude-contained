@@ -73,21 +73,50 @@ GitHub Actions runs `make quality` for pull requests and pushes to `main`.
 ### Golden tests
 
 `cmd/claude-contained`'s golden suite calls `runWith` in-process with the host
-platform injected -- **not** a subprocess against the built binary -- and drives
-it against a stubbed container runtime across three configurations:
-`apple-darwin`, `docker-darwin`, `docker-linux`. It asserts the full observable
+platform injected -- **not** a subprocess against the built binary -- and
+drives it against a stubbed container runtime. It asserts the full observable
 result against committed data under `cmd/claude-contained/testdata/golden/`:
 runtime argv, stdout, stderr, exit status, and a filesystem manifest.
 
-Injecting the platform is what makes all three configurations reachable from
-either host. A subprocess reads the real `GOOS`, and Apple Containers is
-unselectable off macOS, so a subprocess suite could never cover `apple-darwin`
-on CI at all. See [ADR-0004](docs/adr/0004-go-launcher-rewrite.md) before
-changing this. The compiled-binary black-box suite below is what exercises the
-shipped binary end to end.
+Injecting the platform is what makes all three configurations
+(`apple-darwin`, `docker-darwin`, `docker-linux`) reachable from either host --
+a subprocess reads the real `GOOS`, and Apple Containers is unselectable off
+macOS, so a subprocess suite could never cover `apple-darwin` on CI at all. See
+[ADR-0004](docs/adr/0004-go-launcher-rewrite.md) before changing this. The
+compiled-binary black-box suite below is what exercises the shipped binary end
+to end.
 
-- `go test ./cmd/claude-contained -run TestGolden` runs it; it is part of
-  `make test` / `make quality`.
+**Not every case runs in all three configurations.** The suite is a curated,
+sparse set of scenarios (see
+[ADR-0012](docs/adr/0012-curated-golden-contract-matrix.md)), not the full
+Cartesian product it once was. A golden survives only where a full run crosses
+an ownership boundary (host -> plan -> runtime), an ordered user-visible
+contract spans stdout/stderr/exit status together, or a safety-critical
+filesystem lifecycle is not economically proved by a focused test. Everything
+else -- narrow parsing, validation, precedence, rendering, flag-permutation
+behavior -- belongs in a focused package test instead. **A new feature or bug
+fix does not get a golden by default; a focused test does.**
+
+Each surviving `goldenCase` (`cmd/claude-contained/goldencase_test.go`)
+declares the retention decision explicitly:
+
+- `Configs []string` -- the subset of `{"apple-darwin", "docker-darwin",
+  "docker-linux"}` the scenario actually runs in. Platform-independent
+  behavior runs once, on `docker-darwin`. Runtime-sensitive behavior (the
+  Apple-vs-Docker argv or stderr shape differs) runs on `apple-darwin` and
+  `docker-darwin`. `docker-linux` is admitted only when the scenario exercises
+  one of the two Linux-only branches in `internal/runtime/docker.go`:
+  `sshArgs()`'s three-way runtime/platform split, or the
+  `--add-host host.docker.internal:host-gateway` argument.
+- `Admit string` -- a one-line admission reason: the unique cross-boundary or
+  config-specific assembled risk this golden protects, reviewed the same way
+  the scenario itself is.
+
+`TestGoldenMatrixIsWellFormed` enforces this at the harness level: it fails on
+an empty `Configs`, an unknown or duplicate config name, or an empty `Admit`.
+
+- `go test ./cmd/claude-contained -run TestGolden` runs the suite; it is part
+  of `make test` / `make quality`.
 - `go test ./cmd/claude-contained -run TestGolden -update` regenerates the
   goldens for cases whose behavior changed and prints a diff of what it
   wrote. It refuses to write a file for a case that trips either liveness
@@ -96,7 +125,9 @@ shipped binary end to end.
   unwritable by construction.
 - **A changed golden in a pull request is a behavior change**, not
   formatting. Explain it in the commit message the same way you would
-  explain a change to the code path it covers.
+  explain a change to the code path it covers. Adding or widening a
+  scenario's `Configs` is reviewed the same way: state the new admission
+  reason, not just the diff.
 - Goldens are normalized so a fixture's own temp-directory path, timestamps,
   and machine-specific values never appear literally. The tokens are
   `<PROJ>`, `<HOME>`, `<ROOT>`, `<PHASH>`, `<TIME>`, `<TOKEN>`, `<PID>`,

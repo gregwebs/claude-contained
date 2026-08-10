@@ -26,7 +26,7 @@ flowchart TD
     gt --> art["Compiled-binary black-box\ncmd/claude-contained/artifact_test.go"]
     gt --> img["Image-script suite\ninternal/imagescript"]
 
-    golden -.->|"full observable launcher matrix:\napple-darwin, docker-darwin, docker-linux"| gp[/"platform injected, runtime stubbed"/]
+    golden -.->|"curated sparse matrix:\neach scenario admitted for a named\ncross-boundary/config-specific risk"| gp[/"platform injected, runtime stubbed"/]
     art -.->|"only what in-process cannot prove:\nembedded help, argv[0], real exit, signals"| bb[/"built artifact + re-exec stub"/]
     img -.->|"shipped image/*.sh contracts:\nargv, files, perms, JSON, fail-closed"| bs[/"bash + jq; socat/script/zellij/id stubbed"/]
 
@@ -41,7 +41,13 @@ with the host platform injected, because that is the only way all three
 runtime/platform configurations (`apple-darwin`, `docker-darwin`,
 `docker-linux`) are reachable from either host — a subprocess reads the real
 `GOOS`, and Apple Containers is unselectable off macOS. It stays the canonical
-full observable matrix.
+suite for a full assembled run, but no longer runs every scenario across every
+configuration: once the Bash launchers this suite's original full Cartesian
+matrix was built to prove equivalent against were deleted, that purpose
+expired, and [ADR-0012](0012-curated-golden-contract-matrix.md) curated the
+suite down to the scenarios that cross an ownership boundary or exercise a
+safety-critical filesystem lifecycle, each declaring only the configurations
+that expose a distinct contract.
 
 Everything an in-process call *cannot* prove is what the compiled-binary
 black-box suite (`cmd/claude-contained/artifact_test.go`) covers, and only that:

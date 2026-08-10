@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -582,5 +583,37 @@ func TestPlaceholderCreatedDuringRunIsSweptAfterExit(t *testing.T) {
 	}
 	if _, err := os.Lstat(survivor); err != nil {
 		t.Errorf("a non-empty placeholder-named file must survive (err=%v)", err)
+	}
+}
+
+// A :ro suffix on the project directory itself is rejected before any
+// runtime argument is built: the overlay and the sandbox both need to write
+// into it. This is the focused replacement for the retired
+// 32-readonly-project-dir-rejected golden -- see docs/adr/0012.
+func TestSplitMountModeRejectsReadOnlyProjectDir(t *testing.T) {
+	var stderr bytes.Buffer
+	_, _, err := splitMountMode("/proj:ro", true, false, &stderr)
+
+	var exitErr *cli.ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != cli.ExitUsage {
+		t.Fatalf("err = %v, want a *cli.ExitError with code %d", err, cli.ExitUsage)
+	}
+	if got := stderr.String(); !strings.Contains(got, "project directory cannot be read-only") {
+		t.Errorf("stderr = %q, want it to name the project directory rejection", got)
+	}
+}
+
+// The :rw suffix and no suffix are both fine on the project directory --
+// only :ro is special-cased.
+func TestSplitMountModeAllowsProjectDirWithoutOrWithRWSuffix(t *testing.T) {
+	for _, spec := range []string{"/proj", "/proj:rw"} {
+		var stderr bytes.Buffer
+		path, mode, err := splitMountMode(spec, true, false, &stderr)
+		if err != nil {
+			t.Errorf("splitMountMode(%q): unexpected error %v (stderr: %s)", spec, err, stderr.String())
+		}
+		if path != "/proj" || mode != "rw" {
+			t.Errorf("splitMountMode(%q) = (%q, %q), want (\"/proj\", \"rw\")", spec, path, mode)
+		}
 	}
 }

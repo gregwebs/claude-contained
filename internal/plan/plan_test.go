@@ -1,6 +1,7 @@
 package plan
 
 import (
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -933,4 +934,79 @@ func hasEnvArg(args []runtime.Arg, key, value string) bool {
 		}
 	}
 	return false
+}
+
+// -p HOST:CONTAINER had no focused owner before this: it was only ever
+// observed end to end through the retired 14-port-publish golden. One
+// runtime.PortArg per entry, in order, is the whole contract -- rendering the
+// argv shape itself is renderCommonArg's job (internal/runtime).
+func TestPortMapsAppendPortArg(t *testing.T) {
+	cfg := cli.Config{PortMaps: []string{"8080:8080", "127.0.0.1:9000:9000"}}
+	facts := Facts{ProjectDir: "/p"}
+
+	program, err := Build(cfg, testHost(), facts, appleProfile(), Answers{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	want := []runtime.Arg{
+		runtime.PortArg{Spec: "8080:8080"},
+		runtime.PortArg{Spec: "127.0.0.1:9000:9000"},
+	}
+	for _, w := range want {
+		if indexOfArg(program.Run.Args, w) == -1 {
+			t.Errorf("missing %#v in %#v", w, program.Run.Args)
+		}
+	}
+	first := indexOfArg(program.Run.Args, want[0])
+	second := indexOfArg(program.Run.Args, want[1])
+	if first == -1 || second == -1 || first >= second {
+		t.Errorf("PortArgs must appear in flag order: first=%d second=%d", first, second)
+	}
+}
+
+// --allow-host's launcher-side assembly (SrtAllowHosts -> a single
+// comma-joined SRT_ALLOW_HOSTS env arg) had only CLI-parsing coverage before
+// this (internal/cli asserts cfg.SrtAllowHosts, not what plan.Build does with
+// it) plus the retired 19-allow-host-flag golden.
+func TestSrtAllowHostsAppendsEnvArg(t *testing.T) {
+	cfg := cli.Config{SrtAllowHosts: []string{"example.com", "example.org"}}
+	facts := Facts{ProjectDir: "/p"}
+
+	program, err := Build(cfg, testHost(), facts, appleProfile(), Answers{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if !hasEnvArg(program.Run.Args, "SRT_ALLOW_HOSTS", "example.com,example.org") {
+		t.Errorf("SRT_ALLOW_HOSTS not found joined and in flag order: %#v", program.Run.Args)
+	}
+}
+
+// --share-host-claude / CLAUDE_CONTAINED_SHARE_HOST_CLAUDE=1 had only
+// redaction coverage (internal/host/state_test.go) before this -- nothing
+// asserted the assembled mount contract the retired 30-share-host-claude and
+// 65-share-host-claude-via-env goldens protected: mount host ~/.claude
+// directly (skipping the contained profile) and skip the nested
+// extension-resource mounts entirely, since they already live under the
+// shared directory being mounted whole.
+func TestShareHostClaudeMountsHostProfileDirectly(t *testing.T) {
+	cfg := cli.Config{ShareHostClaude: true}
+	facts := Facts{ProjectDir: "/p"}
+	h := testHost()
+	claudeDir := filepath.Join(h.Home, ".claude")
+
+	program, err := Build(cfg, h, facts, appleProfile(), Answers{})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	want := runtime.MountArg{Src: claudeDir, Dst: claudeDir}
+	if indexOfArg(program.Run.Args, want) == -1 {
+		t.Errorf("missing direct host ~/.claude mount %#v in %#v", want, program.Run.Args)
+	}
+	for _, resource := range claudeExtensionResources {
+		if hasMount(program.Run.Args, filepath.Join(claudeDir, resource)) {
+			t.Errorf("--share-host-claude must not also mount the nested %q resource: %#v", resource, program.Run.Args)
+		}
+	}
 }
