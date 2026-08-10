@@ -62,3 +62,26 @@ func TestParseAppleImageID(t *testing.T) {
 		})
 	}
 }
+
+func TestAppleImageMatchesCurrentRef(t *testing.T) {
+	cases := []struct {
+		name string
+		raw  string
+		ref  string
+		want bool
+	}{
+		{"exact current name", `[{"configuration":{"name":"claude-contained:latest"}}]`, "claude-contained:latest", true},
+		{"default registry prefix", `[{"configuration":{"name":"docker.io/library/claude-contained-layer:final"}}]`, "claude-contained-layer:final", true},
+		{"stale build annotation", `[{"configuration":{"name":"docker.io/library/claude-contained-layer:final","descriptor":{"annotations":{"com.apple.containerization.image.name":"claude-contained-layer:stage"}}}}]`, "claude-contained-layer:stage", false},
+		{"capitalized shape", `[{"Configuration":{"Name":"claude-contained:latest"}}]`, "claude-contained:latest", true},
+		{"legacy shape without name", `[{"descriptor":{"digest":"sha256:aaaa"}}]`, "claude-contained:latest", true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := appleImageMatchesCurrentRef([]byte(tc.raw), tc.ref); got != tc.want {
+				t.Errorf("appleImageMatchesCurrentRef(%s, %q) = %v, want %v", tc.raw, tc.ref, got, tc.want)
+			}
+		})
+	}
+}

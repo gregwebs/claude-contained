@@ -136,7 +136,7 @@ func (d *Docker) RenderBuild(spec BuildSpec) []string {
 func (d *Docker) DescribeImage(ctx context.Context, ref string) (ImageDescriptor, bool, error) {
 	id, ok, err := probeImageID(ctx, d.Bin(), ref,
 		[]string{"--format", "{{.Id}}"},
-		func(raw []byte) string { return strings.TrimSpace(string(raw)) })
+		func(raw []byte) string { return strings.TrimSpace(string(raw)) }, nil)
 	if err != nil || !ok {
 		return ImageDescriptor{}, ok, err
 	}
