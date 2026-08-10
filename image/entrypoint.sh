@@ -89,17 +89,18 @@ fi
 
 if [ "${CLAUDE_CONTAINED_ZELLIJ:-}" = "1" ] && [ -n "${CLAUDE_CONTAINED_ZELLIJ_SESSION:-}" ]; then
   _zellij_uid="${HOST_UID:-$(id -u dev)}"
+  _zellij_root="${CLAUDE_CONTAINED_ZELLIJ_ROOT:-${HOST_HOME}/.claude-contained/zellij}"
   _zellij_tmp="/tmp/zellij-${_zellij_uid}"
   _zellij_runtime="/tmp/claude-contained-zellij-runtime"
   mkdir -p \
-    "${HOST_HOME}/.claude-contained/zellij/data" \
-    "${HOST_HOME}/.claude-contained/zellij/cache/org/Zellij-Contributors/Zellij" \
+    "${_zellij_root}/data" \
+    "${_zellij_root}/cache/org/Zellij-Contributors/Zellij" \
     "${_zellij_tmp}/zellij-log" \
     "${_zellij_runtime}/zellij/contract_version_1" \
     "${_zellij_runtime}/layouts" 2>/dev/null || true
   touch "${_zellij_tmp}/zellij-log/zellij.log" 2>/dev/null || true
   chown -R dev:dev \
-    "${HOST_HOME}/.claude-contained/zellij" \
+    "${_zellij_root}" \
     "${_zellij_tmp}" \
     "${_zellij_runtime}" 2>/dev/null || true
   chmod 700 \

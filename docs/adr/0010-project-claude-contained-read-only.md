@@ -18,11 +18,13 @@ for the two files already there.
 
 When `<project-dir>/.claude-contained` exists on disk at probe time, the
 launcher adds a second bind mount for the whole directory, layered read-only on
-top of the read-write project-directory mount:
+top of the read-write project-directory mount. A Zellij run then adds its
+generated session store as a narrower read-write child mount:
 
 ```
 --mount type=bind,src=<PROJ>,dst=<PROJ>
 --mount type=bind,src=<PROJ>/.claude-contained,dst=<PROJ>/.claude-contained,readonly
+--mount type=bind,src=<PROJ>/.claude-contained/zellij,dst=<PROJ>/.claude-contained/zellij
 ```
 
 Most-specific-mount-wins is already how both runtimes resolve overlapping
@@ -37,7 +39,9 @@ env file (`internal/env`) and, when present, the tooling layer
 (`.claude-contained/layer/`, [ADR-0006](0006-tooling-layers.md)) become
 read-only from inside the container. A running container can no longer rewrite
 either -- or `commands.json` or `srt-settings.json` -- to change the *next*
-run.
+run. The Zellij child is generated runtime state rather than host-authored
+configuration, so it remains writable without weakening those sibling paths;
+see [ADR-0002](0002-zellij-session-store.md).
 
 ## Why the whole directory, not just the new file
 
@@ -46,9 +50,10 @@ on their previous trust tier. Rejected: it would leave two files in
 `.claude-contained/` writable from inside the container and one not, for no
 principled reason a project owner could explain, and it would not fix the
 staleness the env-file and layer documentation already had. Mounting the whole
-directory is one mount, one fact, one story: everything under
-`.claude-contained/` is host-authored configuration, read once before the
-container starts.
+configuration directory is one mount and one story: host-authored inputs under
+`.claude-contained/` are read once before the container starts. Generated state
+uses narrower, explicit child mounts rather than making the configuration mount
+writable.
 
 ## Scope: hardens against a running container, not a malicious checkout
 
@@ -86,10 +91,14 @@ no mount.
   (the project directory) is mounted read-write and applied first, and
   `.claude-contained/` already exists on disk as part of that mounted tree --
   the destination is not newly created under a read-only parent, so the
-  limitation does not apply. This is design-level reasoning only. **A live
-  confirmation against real Apple Containers is still outstanding** -- it has
-  not yet been run against the actual runtime and is the highest-priority
-  remaining manual-verification item for this decision.
+  limitation does not apply. Live Apple Containers verification confirmed the
+  nested behavior: a Zellij run could write its child session store while a
+  write to the sibling `.claude-contained/env` failed as read-only.
+- **Zellij session store** ([ADR-0002](0002-zellij-session-store.md)). The host
+  creates `.claude-contained/zellij/` before starting the runtime, then the
+  runtime applies its read-write child mount after the read-only parent. The
+  destination therefore already exists and most-specific-mount-wins preserves
+  the configuration boundary around its siblings.
 
 ## Existence-gated, not unconditional
 

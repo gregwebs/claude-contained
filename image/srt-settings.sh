@@ -93,13 +93,14 @@ fi
 
 if [ "${CLAUDE_CONTAINED_ZELLIJ:-}" = "1" ] && [ -n "${CLAUDE_CONTAINED_ZELLIJ_SESSION:-}" ]; then
   _zellij_uid="${HOST_UID:-$(id -u)}"
+  _zellij_root="${CLAUDE_CONTAINED_ZELLIJ_ROOT:-${_home}/.claude-contained/zellij}"
   write_paths+=(
-    "${_home}/.claude-contained/zellij"
-    "${_home}/.claude-contained/zellij/data"
-    "${_home}/.claude-contained/zellij/cache"
-    "${_home}/.claude-contained/zellij/cache/org"
-    "${_home}/.claude-contained/zellij/cache/org/Zellij-Contributors"
-    "${_home}/.claude-contained/zellij/cache/org/Zellij-Contributors/Zellij"
+    "${_zellij_root}"
+    "${_zellij_root}/data"
+    "${_zellij_root}/cache"
+    "${_zellij_root}/cache/org"
+    "${_zellij_root}/cache/org/Zellij-Contributors"
+    "${_zellij_root}/cache/org/Zellij-Contributors/Zellij"
     "/tmp/claude-contained-zellij-runtime"
     "/tmp/claude-contained-zellij-runtime/zellij"
     "/tmp/claude-contained-zellij-runtime/zellij/contract_version_1"

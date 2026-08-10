@@ -6,7 +6,8 @@
 // The other half lives in the image (image/zellij-run.sh, image/zellij-attach.sh,
 // image/srt-settings.sh) and stays shell by ADR-0004. This package's job is to
 // hand those scripts exactly the inputs they expect: a session name that
-// matches what bash produced, and both environment markers, always together.
+// matches what bash produced, the project-local session-store root, and both
+// environment markers, always together.
 //
 // No container-runtime *command* appears here: internal/runtime renders the
 // ExecSpec and decides whether labels exist at all. The one runtime-derived
@@ -32,6 +33,9 @@ const (
 	// labels would work on one runtime only (ADR-0002).
 	MarkerEnv  = "CLAUDE_CONTAINED_ZELLIJ"
 	SessionEnv = "CLAUDE_CONTAINED_ZELLIJ_SESSION"
+	// RootEnv tells the image-side wrappers where this project's session store
+	// appears at path parity.
+	RootEnv = "CLAUDE_CONTAINED_ZELLIJ_ROOT"
 
 	// LabelMarker/LabelSession are recorded by Docker (claude-docked:1805-1806)
 	// and deliberately never read. Emitted for external tooling only.

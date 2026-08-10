@@ -386,18 +386,18 @@ func lineDiff(oldText, newText string) string {
 			i++
 			j++
 		case lcs[i+1][j] >= lcs[i][j+1]:
-			fmt.Fprintf(&b, "-%s\n", oldLines[i])
+			fmt.Fprintf(&b, "%d -%s\n", i+1, oldLines[i])
 			i++
 		default:
-			fmt.Fprintf(&b, "+%s\n", newLines[j])
+			fmt.Fprintf(&b, "%d +%s\n", j+1, newLines[j])
 			j++
 		}
 	}
 	for ; i < n; i++ {
-		fmt.Fprintf(&b, "-%s\n", oldLines[i])
+		fmt.Fprintf(&b, "%d: -%s\n", i+1, oldLines[i])
 	}
 	for ; j < m; j++ {
-		fmt.Fprintf(&b, "+%s\n", newLines[j])
+		fmt.Fprintf(&b, "%d: +%s\n", j+1, newLines[j])
 	}
 	return b.String()
 }

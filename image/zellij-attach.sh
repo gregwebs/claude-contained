@@ -9,7 +9,7 @@ if [[ -z "$session" ]]; then
 fi
 
 config_file="/etc/claude-contained/zellij/config.kdl"
-zellij_root="${HOME}/.claude-contained/zellij"
+zellij_root="${CLAUDE_CONTAINED_ZELLIJ_ROOT:-${HOME}/.claude-contained/zellij}"
 data_dir="${zellij_root}/data"
 cache_dir="${zellij_root}/cache"
 runtime_dir="/tmp/claude-contained-zellij-runtime"

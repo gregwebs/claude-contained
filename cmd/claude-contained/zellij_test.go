@@ -122,8 +122,7 @@ func TestZellijLaunchRefusesWhenAnotherSessionLive(t *testing.T) {
 		t.Errorf("stderr = %q, want %q", stderr.String(), wantErr)
 	}
 
-	home := os.Getenv("HOME")
-	if _, err := os.Stat(filepath.Join(home, ".claude-contained", "zellij")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(project, ".claude-contained", "zellij")); !os.IsNotExist(err) {
 		t.Errorf("zellij session store exists (err=%v), want none: the gate must precede every mkdir", err)
 	}
 }
@@ -165,8 +164,10 @@ func TestZellijLaunchProceedsWithNewSession(t *testing.T) {
 		t.Errorf("argv missing the zellij-run wrapper: %v", gotArgv)
 	}
 
-	home := os.Getenv("HOME")
-	if _, err := os.Stat(filepath.Join(home, ".claude-contained", "zellij", "data")); err != nil {
+	if _, err := os.Stat(filepath.Join(project, ".claude-contained", "zellij", "data")); err != nil {
 		t.Errorf("zellij data dir missing (err=%v), want it created", err)
+	}
+	if _, err := os.Stat(filepath.Join(os.Getenv("HOME"), ".claude-contained", "zellij")); !os.IsNotExist(err) {
+		t.Errorf("home-global zellij store exists (err=%v), want project-local state only", err)
 	}
 }
