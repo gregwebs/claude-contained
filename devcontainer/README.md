@@ -1,8 +1,9 @@
 # Devcontainer template
 
 This template runs the plain `claude-contained:latest` base image with path
-parity, contained Claude state, shared extension resources, and Claude available
-in the integrated terminal. It deliberately supplies no project toolchain.
+parity and persistent contained tool state in the integrated terminal (Claude
+Code is the example this template ships with; shared extension resources are
+included too). It deliberately supplies no project toolchain.
 
 ## Setup
 

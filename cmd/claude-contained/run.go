@@ -522,7 +522,7 @@ func completeEnv(
 		}
 	}
 	if h.GHToken != "" {
-		if err := store.Default("GH_TOKEN="+h.GHToken, "AI_GH_TOKEN", env.Builtin); err != nil {
+		if err := store.Default("GH_TOKEN="+h.GHToken, "CLAUDE_CONTAINED_GH_TOKEN", env.Builtin); err != nil {
 			diagnostic.For(ctx, diagnostic.ComponentEnv).Warn("GitHub token environment default failed",
 				diagnostic.ErrorAttr(err))
 			_, _ = fmt.Fprintln(stderr, err.Error())

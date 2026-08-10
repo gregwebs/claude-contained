@@ -680,7 +680,7 @@ var goldenCases = []goldenCase{
 	},
 	{
 		Slug: "57-rebuild-tools",
-		Desc: "--rebuild refreshes the AI tool layers and exits without a session",
+		Desc: "--rebuild refreshes the tool layers and exits without a session",
 		Setup: func(t *testing.T, proj, home string) goldenExtras {
 			bc := filepath.Join(proj, "buildctx")
 			mustWriteFile(t, filepath.Join(bc, "Dockerfile"), "FROM scratch\n")

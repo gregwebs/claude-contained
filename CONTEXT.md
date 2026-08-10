@@ -1,6 +1,6 @@
-# AI Contained
+# claude-contained
 
-AI Contained runs local coding agents inside containers while preserving selected host state for a normal CLI workflow.
+claude-contained runs a command inside a container while preserving selected host state for a normal CLI workflow. Running local coding agents is one supported use of this mechanism.
 
 ## Language
 
@@ -51,22 +51,6 @@ An isolated, randomly suffixed derived-image tag used when a builder reference i
 A `KEY=VALUE` file a tooling layer installs into a directory the entrypoint reads, contributing runtime environment the image alone cannot express — such as a cache path under the host home directory, which is unknown at build time.
 _Avoid_: layer env file, dotenv, ENV
 
-**Host Claude profile**:
-The user's normal Claude Code profile directory at `~/.claude`, used by uncontained Claude Code.
-_Avoid_: Host Claude config
-
-**Contained Claude profile**:
-The Claude Code profile reserved for contained runs, stored at `~/.claude-contained/claude` and presented inside containers as `~/.claude`.
-_Avoid_: Container Claude config
-
-**Claude account state**:
-The shared Claude login and account file stored at `~/.claude-contained/.claude.json`.
-_Avoid_: Claude credentials
-
-**Claude extension resources**:
-Shared Claude file resources such as skills, agents, commands, and plugins.
-_Avoid_: Claude settings
-
 **Shared skills target root**:
 The smallest safe non-volume-root common ancestor of a shared skills directory and its resolved external targets, mounted read-only at path parity to preserve absolute shared-skill links. It is path-derived, not necessarily a Git or repository root.
 _Avoid_: repository root, Git root, shared skills parent
@@ -102,3 +86,25 @@ _Avoid_: log sink, log output, logger
 **Component**:
 The launcher subsystem a diagnostic record is attributed to, drawn from a closed set so records can be filtered by origin.
 _Avoid_: module, subsystem, package
+
+### AI-Specific Vocabulary
+
+The following terms describe Claude Code plumbing specifically, kept distinct
+from the generic mechanism above because running a coding agent is one use
+case among several this project supports.
+
+**Host Claude profile**:
+The user's normal Claude Code profile directory at `~/.claude`, used by uncontained Claude Code.
+_Avoid_: Host Claude config
+
+**Contained Claude profile**:
+The Claude Code profile reserved for contained runs, stored at `~/.claude-contained/claude` and presented inside containers as `~/.claude`.
+_Avoid_: Container Claude config
+
+**Claude account state**:
+The shared Claude login and account file stored at `~/.claude-contained/.claude.json`.
+_Avoid_: Claude credentials
+
+**Claude extension resources**:
+Shared Claude file resources such as skills, agents, commands, and plugins.
+_Avoid_: Claude settings

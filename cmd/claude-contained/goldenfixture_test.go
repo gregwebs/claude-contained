@@ -27,7 +27,7 @@ import (
 var launcherEnvVars = []string{
 	"CLAUDE_MEMORY",
 	"CLAUDE_DNS",
-	"AI_GH_TOKEN",
+	"CLAUDE_CONTAINED_GH_TOKEN",
 	"CLAUDE_CONTAINED_SHARE_HOST_CLAUDE",
 	"CLAUDE_CONTAINED_RUNTIME",
 	"CLAUDE_CONTAINED_LOG_LEVEL",
@@ -407,7 +407,7 @@ var (
 	// N5: the container name's `date +%H%M` minute stamp.
 	reContainerTime = regexp.MustCompile(`(?m)(aic-[A-Za-z0-9-]*)-[0-9]{4}(-[0-9]+)?$`)
 	// N6: the rebuild cache-bust token's 14-digit UTC timestamp.
-	reCacheBust = regexp.MustCompile(`AI_TOOLS_CACHE_BUST=[0-9]{14}`)
+	reCacheBust = regexp.MustCompile(`TOOLS_CACHE_BUST=[0-9]{14}`)
 	// N7: the worktree mutex owner file's "PID EPOCH" line. Defensive, not
 	// load-bearing -- see goldencase_test.go's discussion of why the owner
 	// file's bytes are never actually inlined into a golden.
@@ -443,7 +443,7 @@ func normalizeText(s string, n normContext) string {
 		s = strings.ReplaceAll(s, n.phash, "<PHASH>")
 	}
 	s = reContainerTime.ReplaceAllString(s, "${1}-<TIME>${2}")
-	s = reCacheBust.ReplaceAllString(s, "AI_TOOLS_CACHE_BUST=<TOKEN>")
+	s = reCacheBust.ReplaceAllString(s, "TOOLS_CACHE_BUST=<TOKEN>")
 	s = rePIDEpoch.ReplaceAllString(s, "<PID> <EPOCH>")
 	s = reLayerHash.ReplaceAllString(s, "${1}-<LHASH>")
 	s = reStageSuffix.ReplaceAllString(s, "-stage-<STAGE>")

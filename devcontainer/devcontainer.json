@@ -1,5 +1,5 @@
 {
-  "name": "Claude Contained",
+  "name": "claude-contained",
   "image": "claude-contained:latest",
 
   // Path parity: disable default mount, use original paths

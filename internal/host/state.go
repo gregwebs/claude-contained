@@ -21,8 +21,8 @@ type State struct {
 	Arch     string
 	Timezone string
 	Now      time.Time
-	// GHToken is AI_GH_TOKEN, which the launcher turns into GH_TOKEN for the
-	// tool process (claude-contained:1420).
+	// GHToken is CLAUDE_CONTAINED_GH_TOKEN, which the launcher turns into
+	// GH_TOKEN for the tool process (claude-contained:1420).
 	GHToken string
 	// Memory is CLAUDE_MEMORY, defaulted to 8g (claude-contained:1517).
 	Memory string
@@ -66,7 +66,7 @@ func Probe() State {
 		Arch:             containerArch(),
 		Timezone:         Timezone(),
 		Now:              time.Now(),
-		GHToken:          os.Getenv("AI_GH_TOKEN"),
+		GHToken:          os.Getenv("CLAUDE_CONTAINED_GH_TOKEN"),
 		Memory:           memory,
 		DNSEnv:           dnsEnv,
 		DNSEnvSet:        dnsSet,

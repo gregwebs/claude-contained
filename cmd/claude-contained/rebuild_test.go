@@ -52,12 +52,12 @@ func TestRebuildAttempts(t *testing.T) {
 			ok:   true,
 			want: []rebuildAttempt{
 				{
-					Before: []string{"Rebuilding claude-contained image (AI tools refresh)..."},
-					Spec:   runtime.BuildSpec{Tag: plan.Image, BuildArgs: []string{"AI_TOOLS_CACHE_BUST=" + token}},
+					Before: []string{"Rebuilding claude-contained image (tools refresh)..."},
+					Spec:   runtime.BuildSpec{Tag: plan.Image, BuildArgs: []string{"TOOLS_CACHE_BUST=" + token}},
 				},
 				{
 					Before: []string{
-						"AI tools refresh failed. Retrying with full rebuild...",
+						"tools refresh failed. Retrying with full rebuild...",
 						"Rebuilding claude-contained image (full fresh rebuild)...",
 					},
 					Spec: runtime.BuildSpec{Tag: plan.Image, Pull: true, NoCache: true},
@@ -115,7 +115,7 @@ func TestRebuildToolsSucceedsWithoutRetrying(t *testing.T) {
 	if (*calls)[0][1] != "build" {
 		t.Errorf("argv[1] = %q, want build", (*calls)[0][1])
 	}
-	wantNotice := "Rebuilding claude-contained image (AI tools refresh)...\n"
+	wantNotice := "Rebuilding claude-contained image (tools refresh)...\n"
 	if stderr.String() != wantNotice {
 		t.Errorf("stderr = %q, want %q", stderr.String(), wantNotice)
 	}
@@ -143,8 +143,8 @@ func TestRebuildToolsRetriesAsFullRebuild(t *testing.T) {
 		t.Errorf("second build should be the full rebuild: %v", (*calls)[1])
 	}
 
-	want := "Rebuilding claude-contained image (AI tools refresh)...\n" +
-		"AI tools refresh failed. Retrying with full rebuild...\n" +
+	want := "Rebuilding claude-contained image (tools refresh)...\n" +
+		"tools refresh failed. Retrying with full rebuild...\n" +
 		"Rebuilding claude-contained image (full fresh rebuild)...\n"
 	if stderr.String() != want {
 		t.Errorf("stderr = %q, want %q", stderr.String(), want)
