@@ -4,6 +4,11 @@ Run any command inside an [Apple Container](https://github.com/apple/container) 
 
 The goal is a normal local workflow with a smaller host footprint: wrap a command in an alias like `claude-contained <command>`, then use the alias as usual. Only the project directory and the extra mounts you select are shared with the container. Login state and common Claude extension resources persist across contained sessions.
 
+This project works but my focus has now moved to [agent-vm](https://github.com/gregwebs/agent-vm) which has better security properties:
+
+* libkrun VM
+* credential masking.
+
 ## Use Cases
 
 - **CLI coding agents**: run Claude, Codex, Copilot, Gemini, or Vibe with a container between them and your host — see [Supported Tools](#supported-tools).
